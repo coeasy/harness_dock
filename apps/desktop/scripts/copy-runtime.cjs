@@ -14,16 +14,29 @@ const path = require('node:path')
 
 /** @param {import('app-builder-lib').AfterPackContext} context */
 exports.default = async function afterPack(context) {
-  // Verify the embedded plugin is present in every packaged app. Without it,
-  // dsh fails while applying cordis:include and Electron later reports the
-  // misleading ERR_CONNECTION_REFUSED for the local UI.
-  const pluginEntry = path.join(context.appOutDir, 'resources', 'plugin-embedded-client', 'index.js')
+  const projectDir = context.projectDir ?? context.packager.projectDir
+  const resourceDir = path.join(context.appOutDir, 'resources')
+
+  // electron-builder's extraResources staging is not consistent across
+  // Windows, Linux, and macOS targets. Copy the embedded plugin explicitly,
+  // just like the full dsh runtime, so the packaged app always has the entry
+  // that cordis:include imports at startup.
+  const pluginSrc = path.resolve(projectDir, '..', '..', 'packages', 'plugin-embedded-client', 'lib')
+  const pluginEntrySrc = path.join(pluginSrc, 'index.js')
+  if (!fs.existsSync(pluginEntrySrc)) {
+    throw new Error('[afterPack] embedded-client source bundle missing: ' + pluginEntrySrc)
+  }
+  const pluginDst = path.join(resourceDir, 'plugin-embedded-client')
+  fs.rmSync(pluginDst, { recursive: true, force: true })
+  fs.mkdirSync(resourceDir, { recursive: true })
+  fs.cpSync(pluginSrc, pluginDst, { recursive: true })
+  const pluginEntry = path.join(pluginDst, 'index.js')
   if (!fs.existsSync(pluginEntry)) {
-    throw new Error('[afterPack] embedded-client plugin missing: ' + pluginEntry)
+    throw new Error('[afterPack] embedded-client plugin copy failed: ' + pluginEntry)
   }
 
   // Only needed for the "full" scenario; the thin config has no dsh-runtime dir.
-  const dst = path.join(context.appOutDir, 'resources', 'dsh-runtime')
+  const dst = path.join(resourceDir, 'dsh-runtime')
   if (!fs.existsSync(dst)) return
 
   const projectDir = context.projectDir ?? context.packager.projectDir
