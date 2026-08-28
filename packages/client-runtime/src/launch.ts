@@ -26,7 +26,7 @@ export function renderEmbeddedPatch(pluginAbsolutePath: string): string {
 
 function toFileUrl(filePath: string): string {
   if (/^[A-Za-z]:[\\/]/.test(filePath)) {
-    const normalized = filePath.replaceAll('\\\\', '/')
+    const normalized = filePath.replaceAll('\\', '/')
     const segments = normalized.split('/')
     const encoded = segments
       .map((segment, index) =>
