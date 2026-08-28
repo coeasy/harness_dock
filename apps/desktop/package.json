@@ -2,6 +2,7 @@
   "name": "@dsh/desktop",
   "version": "0.1.0",
   "private": true,
+  "desktopName": "com.dsh.client",
   "description": "Electron shell that embeds the official DeepSeek Harness Web UI",
   "author": "HarnessDock contributors",
   "type": "module",
