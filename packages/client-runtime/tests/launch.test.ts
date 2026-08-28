@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildLaunchArgs, renderEmbeddedPatch } from '../src/launch.ts'
 
@@ -31,6 +32,6 @@ describe('renderEmbeddedPatch', () => {
 
   it('keeps ordinary POSIX paths importable', () => {
     const yaml = renderEmbeddedPatch('/opt/harnessdock/plugin-embedded-client/index.js')
-    expect(yaml).toContain('file:///opt/harnessdock/plugin-embedded-client/index.js')
+    expect(yaml).toContain(pathToFileURL('/opt/harnessdock/plugin-embedded-client/index.js').href)
   })
 })
