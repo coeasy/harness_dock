@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm test
 
   pack:
@@ -64,7 +64,7 @@ jobs:
         with:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm ${{ matrix.script }}
         env:
           GH_OWNER: ${{ github.repository_owner }}
@@ -96,7 +96,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm sync:dsh
       - uses: peter-evans/create-pull-request@v7
         with:
