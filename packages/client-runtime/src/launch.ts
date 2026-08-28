@@ -20,6 +20,20 @@ export function renderEmbeddedPatch(pluginAbsolutePath: string): string {
   // The include loader imports the entry as a URL. Windows paths must be
   // percent-encoded (especially spaces in the default Program Files install
   // directory), otherwise Node parses the URL but cannot import the module.
-  const pluginUrl = pathToFileURL(pluginAbsolutePath).href.replaceAll("'", "''")
+  const pluginUrl = toFileUrl(pluginAbsolutePath).replaceAll("'", "''")
   return `- insert:\n    - id: embedded-client\n      name: '${pluginUrl}'\n`
+}
+
+function toFileUrl(filePath: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) {
+    const normalized = filePath.replaceAll('\\\\', '/')
+    const segments = normalized.split('/')
+    const encoded = segments
+      .map((segment, index) =>
+        index === 0 && /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment),
+      )
+      .join('/')
+    return `file:///${encoded}`
+  }
+  return pathToFileURL(filePath).href
 }
