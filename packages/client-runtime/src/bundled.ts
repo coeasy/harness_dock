@@ -11,7 +11,7 @@ export const NODE_DIST_MIRRORS = [
 
 export interface NodeDist {
   url: string
-  kind: 'file' | 'tar.gz' | 'tar.xz'
+  kind: 'file' | 'zip' | 'tar.gz' | 'tar.xz'
   nodeRel: string
 }
 
@@ -38,8 +38,8 @@ export function nodeOfficialUrl(
   if (platform === 'win32') {
     const npmArch = arch === 'ia32' ? 'x86' : arch
     return {
-      url: `${base}/v${nodeVersion}/win-${npmArch}/node.exe`,
-      kind: 'file',
+      url: `${base}/v${nodeVersion}/node-v${nodeVersion}-win-${npmArch}.zip`,
+      kind: 'zip',
       nodeRel: 'node.exe',
     }
   }
