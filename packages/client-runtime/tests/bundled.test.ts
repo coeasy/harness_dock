@@ -22,10 +22,10 @@ afterEach(async () => {
 })
 
 describe('nodeOfficialUrl', () => {
-  it('points at an official node.exe for Windows x64', () => {
+  it('points at an official Node ZIP for Windows x64', () => {
     expect(nodeOfficialUrl(NODE_BUNDLE_VERSION, 'win32', 'x64')).toEqual({
-      url: `https://nodejs.org/dist/v${NODE_BUNDLE_VERSION}/win-x64/node.exe`,
-      kind: 'file',
+      url: `https://nodejs.org/dist/v${NODE_BUNDLE_VERSION}/node-v${NODE_BUNDLE_VERSION}-win-x64.zip`,
+      kind: 'zip',
       nodeRel: 'node.exe',
     })
   })
@@ -34,7 +34,7 @@ describe('nodeOfficialUrl', () => {
     expect(
       nodeOfficialUrl(NODE_BUNDLE_VERSION, 'win32', 'x64', 'https://npmmirror.com/mirrors/node')
         .url,
-    ).toBe(`https://npmmirror.com/mirrors/node/v${NODE_BUNDLE_VERSION}/win-x64/node.exe`)
+    ).toBe(`https://npmmirror.com/mirrors/node/v${NODE_BUNDLE_VERSION}/node-v${NODE_BUNDLE_VERSION}-win-x64.zip`)
   })
 
   it('points at official tarballs for macOS and Linux', () => {

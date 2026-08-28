@@ -93,12 +93,13 @@ if (process.env.DSH_PACK_OUTPUT) {
   console.log(`[pack] output overridden to ${process.env.DSH_PACK_OUTPUT}`)
 }
 
-function run(command, args, cwd) {
+function run(command, args, cwd, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     console.log(`[pack] ${command} ${args.join(' ')} (cwd: ${cwd})`)
     const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
+      env: { ...process.env, ...extraEnv },
       shell: process.platform === 'win32',
     })
     child.on('error', reject)
@@ -113,19 +114,13 @@ async function prepareMacFullRuntimes() {
   for (const arch of ['x64', 'arm64']) {
     await run(
       'pnpm',
-      [
-        '--filter',
-        '@dsh/client-runtime',
-        'bundle-runtime',
-        '--',
-        '--platform',
-        'darwin',
-        '--arch',
-        arch,
-        '--runtime-dir',
-        path.join('runtimes', 'pack-' + arch),
-      ],
+      ['--filter', '@dsh/client-runtime', 'bundle-runtime'],
       repoRoot,
+      {
+        DSH_RUNTIME_PLATFORM: 'darwin',
+        DSH_RUNTIME_ARCH: arch,
+        DSH_RUNTIME_DIR: path.join('runtimes', 'pack-' + arch),
+      },
     )
   }
 }

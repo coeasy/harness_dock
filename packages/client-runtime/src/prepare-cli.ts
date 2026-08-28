@@ -32,10 +32,11 @@ const { values } = parseArgs({
   },
 })
 
-const platform = (values.platform ?? process.platform) as NodeJS.Platform
-const arch = values.arch ?? process.arch
-const dest = values['runtime-dir']
-  ? path.resolve(repoRoot, values['runtime-dir'] as string)
+const platform = (values.platform ?? process.env.DSH_RUNTIME_PLATFORM ?? process.platform) as NodeJS.Platform
+const arch = values.arch ?? process.env.DSH_RUNTIME_ARCH ?? process.arch
+const runtimeDir = values['runtime-dir'] ?? process.env.DSH_RUNTIME_DIR
+const dest = runtimeDir
+  ? path.resolve(repoRoot, runtimeDir as string)
   : runtimeCacheDir(repoRoot)
 
 // --prune-only: apply the size pruning to an existing bundled runtime without
