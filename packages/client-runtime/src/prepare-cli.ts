@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createWriteStream } from 'node:fs'
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -97,6 +97,30 @@ for (const mirror of mirrors) {
     await pipeline(response.body, createWriteStream(tmp))
     if (dist.kind === 'file') {
       await copyFile(tmp, path.join(dest, dist.nodeRel))
+      await rm(tmp, { force: true })
+    } else if (dist.kind === 'zip') {
+      const extractedRoot = path.join(dest, path.basename(tmp, '.zip'))
+      if (process.platform === 'win32') {
+        const quotePowerShell = (value: string) => `'${value.replaceAll("'", "''")}'`
+        await execFileAsync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `Expand-Archive -LiteralPath ${quotePowerShell(tmp)} -DestinationPath ${quotePowerShell(dest)} -Force`,
+          ],
+          { windowsHide: true },
+        )
+      } else {
+        await execFileAsync('unzip', ['-q', tmp, '-d', dest], {
+          windowsHide: true,
+        })
+      }
+      for (const entry of await readdir(extractedRoot)) {
+        await rename(path.join(extractedRoot, entry), path.join(dest, entry))
+      }
+      await rm(extractedRoot, { recursive: true, force: true })
       await rm(tmp, { force: true })
     } else {
       await execFileAsync('tar', ['-xf', tmp, '-C', dest, '--strip-components=1'], {
