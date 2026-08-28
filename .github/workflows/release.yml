@@ -87,32 +87,32 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${{ GITHUB_REF_NAME }}" >> "${{ GITHUB_OUTPUT }}"
-            echo "draft=false" >> "${{ GITHUB_OUTPUT }}"
+            echo "tag=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+            echo "draft=false" >> "${GITHUB_OUTPUT}"
           elif [ -n "${{ inputs.release_tag }}" ]; then
-            echo "tag=${{ inputs.release_tag }}" >> "${{ GITHUB_OUTPUT }}"
-            echo "draft=false" >> "${{ GITHUB_OUTPUT }}"
+            echo "tag=${{ inputs.release_tag }}" >> "${GITHUB_OUTPUT}"
+            echo "draft=false" >> "${GITHUB_OUTPUT}"
           else
-            echo "tag=unreleased-${{ date +%Y%m%d-%H%M%S }}" >> "${{ GITHUB_OUTPUT }}"
-            echo "draft=true" >> "${{ GITHUB_OUTPUT }}"
+            echo "tag=unreleased-$(date +%Y%m%d-%H%M%S)" >> "${GITHUB_OUTPUT}"
+            echo "draft=true" >> "${GITHUB_OUTPUT}"
           fi
       - name: Generate release notes
         shell: bash
         run: |
-          VERSION=${{ node -p "require('./package.json').version" }}
+          VERSION=$(node -p "require('./package.json').version")
           cat > notes.md <<EOF
-          # HarnessDock ${{ VERSION }}
+          # HarnessDock ${VERSION}
 
           | Package | OS | Scenario | Install |
           |---|---|---|---|
-          | \`*-win-*-Portable-*.exe\` | Windows | thin/full | Standalone executable |
-          | \`*-win-*-Setup-*.exe\` | Windows | thin/full | NSIS installer |
-          | \`*-win-*.zip\` | Windows | thin/full | Unpacked zip |
-          | \`*.dmg\` | macOS | thin/full | Disk image |
-          | \`*.AppImage\` | Linux | thin/full | Standalone AppImage |
-          | \`*.deb\` | Linux | thin/full | Debian package |
+          | *-win-*-Portable-*.exe | Windows | thin/full | Standalone executable |
+          | *-win-*-Setup-*.exe | Windows | thin/full | NSIS installer |
+          | *-win-*.zip | Windows | thin/full | Unpacked zip |
+          | *.dmg | macOS | thin/full | Disk image |
+          | *.AppImage | Linux | thin/full | Standalone AppImage |
+          | *.deb | Linux | thin/full | Debian package |
 
-          \`.blockmap\` files support differential downloads and are not installers.
+          .blockmap files support differential downloads and are not installers.
           EOF
       - uses: softprops/action-gh-release@v2
         with:
