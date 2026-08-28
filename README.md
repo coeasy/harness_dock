@@ -54,8 +54,8 @@ HarnessDock 拉起官方 `dsh web` 并加载官方 Web UI，**Web 端全部操�
 一键脚本可在**第三方电脑**上直接运行，无需预装 Node / pnpm / dsh：
 
 - 检测到无 Node 或版本低于 `^22.19.0` 时，自动下载便携版 Node 22.19 到 `.rundata/toolchain/`（不改系统环境）；
-- 自动经 corepack（或 npm 回退）激活 pnpm 10；
-- `node_modules` 缺失时自动 `pnpm install --frozen-lockfile`；
+- 自动经 corepack 激活 pnpm 10；若 corepack 不可用，仅使用 npm 安装 pnpm 作为兜底；
+- `node_modules` 缺失时自动 `pnpm install --frozen-lockfile --prefer-offline`，优先复用本机缓存；
 - 全程只需系统具备网络与解压能力（Windows 用内置 `curl.exe` + PowerShell，macOS / Linux 用 `curl` + `tar`）。
 
 ```sh
@@ -71,6 +71,8 @@ scripts\build.bat win both           # thin + full 一次全出
 ```
 
 等价的直接调用：`node scripts/bootstrap.mjs && node scripts/build.mjs --os win --scenario both`，或 `pnpm setup` + `pnpm build:desktop`。
+
+> 安装方式说明：下载并安装 `HarnessDock-Setup-*.exe` 的终端用户不需要 Node、pnpm 或 npm。pnpm/npm 只影响源码构建：本仓库使用 `pnpm-workspace.yaml`、`workspace:*` 和 `pnpm-lock.yaml`，依赖安装应使用 pnpm；npm 仅作为自动安装 pnpm 的备用工具，不能直接替代 `pnpm install`。
 
 ## 独立运行 exe（Portable）
 
