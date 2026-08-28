@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
@@ -12,7 +12,7 @@ import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
 import { resolveRuntimeMode } from './process.ts'
 import { buildSpawnRequest } from './shell.ts'
-import type { ReadyInfo, RuntimeMode } from './types.ts'
+import type { ParsedUrl, ReadyInfo, RuntimeMode } from './types.ts'
 
 export interface DshRuntimeOptions {
   origin: { dshVersion: string }
@@ -81,6 +81,9 @@ export class DshRuntime {
 
   async start(): Promise<ReadyInfo> {
     const env = { ...process.env, ...this.options.env }
+    if (this.options.packaged) {
+      await verifyPackagedPlugin(this.options.pluginPath, this.options.log)
+    }
     const bundledAvailable = this.options.bundledRoot
       ? inspectBundledRuntime(this.options.bundledRoot, process.platform) !== null
       : false
@@ -283,6 +286,8 @@ async function waitForReady(
   return new Promise((resolve, reject) => {
     let settled = false
     let buffer = ''
+    let stdoutReady: ParsedUrl | undefined
+    let probingStdout = false
     const appendOutput = (chunk: Buffer | string) => {
       buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
       // Keep diagnostics useful without retaining unbounded child output.
@@ -311,7 +316,16 @@ async function waitForReady(
     const onData = (chunk: Buffer | string) => {
       appendOutput(chunk)
       const parsed = parseWebUrl(buffer)
-      if (parsed) {
+      if (parsed) stdoutReady = parsed
+      void probeStdoutUrl()
+    }
+    const probeStdoutUrl = async (): Promise<void> => {
+      if (settled || probingStdout || !stdoutReady) return
+      probingStdout = true
+      const parsed = stdoutReady
+      const ready = await probeHttpReady(parsed.url)
+      probingStdout = false
+      if (ready && !settled) {
         succeed({
           ...parsed,
           pid: child.pid ?? 0,
@@ -320,6 +334,7 @@ async function waitForReady(
       }
     }
     const poll = setInterval(() => {
+      void probeStdoutUrl()
       void readFile(readyFile, 'utf8')
         .then((raw) => {
           const info = parseReadyFile(raw)
@@ -349,6 +364,39 @@ async function waitForReady(
     child.once('error', onError)
     child.once('exit', onExit)
   })
+}
+
+async function probeHttpReady(url: string): Promise<boolean> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 1_000)
+  try {
+    const response = await fetch(url, { signal: controller.signal, redirect: 'manual' })
+    if (!response.ok) return false
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+    if (contentType !== '' && !contentType.includes('text/html')) return false
+    const body = await response.text()
+    return body.trim().length > 0
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function verifyPackagedPlugin(
+  pluginPath: string,
+  log?: (message: string) => void,
+): Promise<void> {
+  try {
+    const details = await stat(pluginPath)
+    if (!details.isFile()) throw new Error('path is not a file')
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `packaged embedded-client plugin is unavailable: ${pluginPath} (${detail}). Reinstall HarnessDock or use the thin package to redownload the runtime.`,
+    )
+  }
+  log?.(`runtime: embedded plugin verified at ${pluginPath}`)
 }
 
 export async function ensureDir(dir: string): Promise<void> {
