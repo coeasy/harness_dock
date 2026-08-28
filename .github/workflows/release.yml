@@ -185,7 +185,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          find apps/desktop/release -type f \
+          release_dir="apps/desktop/release/\${{ matrix.scenario }}"
+          find "$release_dir" -maxdepth 1 -type f \
             \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) \
             -exec cp {} dist/ \;
@@ -195,6 +196,8 @@ jobs:
           name: desktop-${{ matrix.artifact_os }}-${{ matrix.scenario }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
+          # Packages are already compressed; avoid compressing them again in the artifact.
+          compression-level: 0
 
   publish:
     needs: build
@@ -204,6 +207,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: desktop-*
           merge-multiple: true
       - name: Resolve release tag
         id: tag
