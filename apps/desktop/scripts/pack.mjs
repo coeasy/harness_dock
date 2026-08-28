@@ -145,7 +145,7 @@ function findResourceDirs(root, depth = 0, result = []) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const fullPath = path.join(root, entry.name)
-    if (entry.name === 'resources') {
+    if (entry.name.toLowerCase() === 'resources') {
       result.push(fullPath)
       continue
     }
