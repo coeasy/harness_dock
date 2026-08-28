@@ -1,7 +1,7 @@
 /**
  * electron-builder afterPack hook.
  *
- * electron-builder forcibly excludes any directory named `node_modules` from
+ * electron-builder forcibly excludes any directory named node_modules from
  * copied resources (extraResources filters cannot override this). The bundled
  * dsh runtime however needs its full node_modules tree, so we copy it ourselves
  * after packing.
@@ -19,17 +19,32 @@ exports.default = async function afterPack(context) {
   if (!fs.existsSync(dst)) return
 
   const projectDir = context.projectDir ?? context.packager.projectDir
-  const src = path.resolve(projectDir, '..', '..', 'runtimes', 'pack')
-  if (!fs.existsSync(path.join(src, 'node.exe'))) {
-    throw new Error(`[afterPack] bundled runtime missing at ${src}; run \`pnpm prepare:runtime\` first`)
+  const targetArch = String(context.arch) === 'arm64' ? 'arm64' : 'x64'
+  const archSpecificSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack-' + targetArch)
+  const fallbackSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack')
+  const isWindows = context.electronPlatformName === 'win32' || process.platform === 'win32'
+  const runtimeNode = isWindows ? 'node.exe' : path.join('bin', 'node')
+  const src = fs.existsSync(path.join(archSpecificSrc, runtimeNode))
+    ? archSpecificSrc
+    : fallbackSrc
+  const nodeBin = path.join(src, runtimeNode)
+
+  if (!fs.existsSync(nodeBin)) {
+    throw new Error(
+      '[afterPack] bundled runtime missing at ' +
+        src +
+        '; expected ' +
+        runtimeNode +
+        '; run pnpm prepare:runtime first',
+    )
   }
 
-  console.log(`  • afterPack: copying full dsh runtime ${src} -> ${dst}`)
+  console.log('  • afterPack: copying full dsh runtime ' + src + ' -> ' + dst)
   fs.rmSync(dst, { recursive: true, force: true })
   fs.cpSync(src, dst, { recursive: true })
 
   const binJs = path.join(dst, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   if (!fs.existsSync(binJs)) {
-    throw new Error(`[afterPack] dsh bin.js not found after copy: ${binJs}`)
+    throw new Error('[afterPack] dsh bin.js not found after copy: ' + binJs)
   }
 }

@@ -109,11 +109,38 @@ function run(command, args, cwd) {
   })
 }
 
+async function prepareMacFullRuntimes() {
+  for (const arch of ['x64', 'arm64']) {
+    await run(
+      'pnpm',
+      [
+        '--filter',
+        '@dsh/client-runtime',
+        'bundle-runtime',
+        '--',
+        '--platform',
+        'darwin',
+        '--arch',
+        arch,
+        '--runtime-dir',
+        path.join('runtimes', 'pack-' + arch),
+      ],
+      repoRoot,
+    )
+  }
+}
+
 try {
   // 1. keep the embedded client bundle current
   await run('pnpm', ['--filter', '@dsh/plugin-embedded-client', 'bundle'], repoRoot)
   // 2. bundle the Electron main/preload
   await run('pnpm', ['bundle'], desktopRoot)
+  // macOS full builds contain both Intel and Apple Silicon packages.
+  // Prepare one matching Node runtime for each architecture before electron-builder
+  // invokes afterPack for both targets.
+  if (os === 'mac' && scenario === 'full') {
+    await prepareMacFullRuntimes()
+  }
   // 3. electron-builder with scenario config + OS targets
   await run(
     'pnpm',

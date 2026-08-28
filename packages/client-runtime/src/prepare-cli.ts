@@ -28,12 +28,15 @@ const { values } = parseArgs({
     'prune-only': { type: 'boolean', default: false },
     platform: { type: 'string' },
     arch: { type: 'string' },
+    'runtime-dir': { type: 'string' },
   },
 })
 
 const platform = (values.platform ?? process.platform) as NodeJS.Platform
 const arch = values.arch ?? process.arch
-const dest = runtimeCacheDir(repoRoot)
+const dest = values['runtime-dir']
+  ? path.resolve(repoRoot, values['runtime-dir'] as string)
+  : runtimeCacheDir(repoRoot)
 
 // --prune-only: apply the size pruning to an existing bundled runtime without
 // re-downloading node or re-running npm install. Useful after the prune rules
@@ -147,13 +150,21 @@ for (const registry of registries) {
         '--omit=dev',
         '--no-fund',
         '--no-audit',
+        `--fetch-timeout=60000`,
+        `--fetch-retries=3`,
+        `--fetch-retry-mintimeout=1000`,
+        `--fetch-retry-maxtimeout=10000`,
         `--registry=${registry}`,
         `@deepseek-ai/dsh@${origin.dshVersion}`,
       ],
       {
         cwd: dest,
         windowsHide: true,
-        env: process.env,
+        env: {
+          ...process.env,
+          NODE_OPTIONS:
+            process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+        },
         shell: process.platform === 'win32',
       },
     )
