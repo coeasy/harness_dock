@@ -10,6 +10,26 @@ on:
         description: 'Release tag to publish under (e.g. v0.1.0). Empty = draft release named "unreleased".'
         type: string
         required: false
+      target:
+        description: 'Build target: all, one OS, or one OS/scenario pair'
+        type: choice
+        required: false
+        default: all
+        options:
+          - all
+          - win
+          - mac
+          - linux
+          - win-thin
+          - win-full
+          - mac-thin
+          - mac-full
+          - linux-thin
+          - linux-full
+
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
