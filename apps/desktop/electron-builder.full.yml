@@ -4,13 +4,13 @@ extends: ./electron-builder.common.yml
 artifactName: ${productName}-${version}-${os}-${arch}-full.${ext}
 directories:
   output: release/full
+# The afterPack hook copies the plugin and the complete dsh runtime after
+# electron-builder creates the unpacked app. Keeping the large runtime out of
+# extraResources avoids its node_modules filtering and prevents a redundant
+# staging pass that can make Windows packaging unnecessarily slow.
 extraResources:
-  - from: ../../packages/plugin-embedded-client/lib
-    to: plugin-embedded-client
   - from: ../../packages/docs-sync/origin.json
     to: origin.json
-  - from: ../../runtimes/pack
-    to: dsh-runtime
 afterPack: ./scripts/copy-runtime.cjs
 nsis:
   artifactName: ${productName}-Setup-${version}-${os}-${arch}-full.${ext}
