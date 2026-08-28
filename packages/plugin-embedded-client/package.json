@@ -1,0 +1,22 @@
+{
+  "name": "@dsh/plugin-embedded-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "files": ["src", "cordis.patch.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "bundle": "esbuild src/index.ts --bundle --format=esm --platform=node --outfile=lib/index.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  }
+}

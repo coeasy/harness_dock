@@ -1,0 +1,3 @@
+- insert:
+    - id: embedded-client
+      name: '@dsh/plugin-embedded-client'

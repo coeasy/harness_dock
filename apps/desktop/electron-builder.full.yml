@@ -1,0 +1,18 @@
+# Full package: bundles node.exe + dsh runtime, works offline. Extends
+# electron-builder.common.yml and only overrides the scenario-specific parts.
+extends: ./electron-builder.common.yml
+artifactName: ${productName}-${version}-${os}-${arch}-full.${ext}
+directories:
+  output: release/full
+extraResources:
+  - from: ../../packages/plugin-embedded-client/lib
+    to: plugin-embedded-client
+  - from: ../../packages/docs-sync/origin.json
+    to: origin.json
+  - from: ../../runtimes/pack
+    to: dsh-runtime
+afterPack: ./scripts/copy-runtime.cjs
+nsis:
+  artifactName: ${productName}-Setup-${version}-${os}-${arch}-full.${ext}
+portable:
+  artifactName: ${productName}-Portable-${version}-${os}-${arch}-full.${ext}

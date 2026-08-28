@@ -1,0 +1,15 @@
+{
+  "name": "@dsh/e2e-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron E2E smoke tests for the HarnessDock desktop shell (mock dsh, no real runtime)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "pretest": "pnpm --filter @dsh/desktop bundle"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.3.0"
+  }
+}

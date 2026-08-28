@@ -1,0 +1,15 @@
+# Thin package: small download, fetches the pinned dsh runtime via npx on
+# first launch. Only the fields that differ from electron-builder.common.yml.
+extends: ./electron-builder.common.yml
+artifactName: ${productName}-${version}-${os}-${arch}-thin.${ext}
+directories:
+  output: release/thin
+extraResources:
+  - from: ../../packages/plugin-embedded-client/lib
+    to: plugin-embedded-client
+  - from: ../../packages/docs-sync/origin.json
+    to: origin.json
+nsis:
+  artifactName: ${productName}-Setup-${version}-${os}-${arch}-thin.${ext}
+portable:
+  artifactName: ${productName}-Portable-${version}-${os}-${arch}-thin.${ext}

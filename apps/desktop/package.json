@@ -1,0 +1,32 @@
+{
+  "name": "@dsh/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell that embeds the official DeepSeek Harness Web UI",
+  "author": "HarnessDock contributors",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "bundle": "node scripts/bundle.mjs",
+    "start": "pnpm bundle && electron dist/main.js",
+    "pack:current": "node scripts/pack.mjs --os current --scenario thin",
+    "pack:current:full": "node scripts/pack.mjs --os current --scenario full",
+    "pack:win": "node scripts/pack.mjs --os win --scenario thin",
+    "pack:win:full": "node scripts/pack.mjs --os win --scenario full",
+    "pack:mac": "node scripts/pack.mjs --os mac --scenario thin",
+    "pack:mac:full": "node scripts/pack.mjs --os mac --scenario full",
+    "pack:linux": "node scripts/pack.mjs --os linux --scenario thin",
+    "pack:linux:full": "node scripts/pack.mjs --os linux --scenario full"
+  },
+  "dependencies": {
+    "@dsh/bootstrap": "workspace:*",
+    "@dsh/client-runtime": "workspace:*",
+    "@dsh/docs-sync": "workspace:*",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.9"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "dsh-full-client",
+  "displayName": "HarnessDock",
+  "description": "Full HarnessDock Web UI inside VS Code / Cursor",
+  "version": "0.1.0",
+  "publisher": "harnessdock",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:dshClient.open", "onCommand:dshClient.stop"],
+  "main": "./dist/extension.cjs",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dshClient.open",
+        "title": "HarnessDock: Open Workbench"
+      },
+      {
+        "command": "dshClient.stop",
+        "title": "HarnessDock: Stop Runtime"
+      }
+    ],
+    "configuration": {
+      "title": "HarnessDock",
+      "properties": {
+        "dshClient.keepAlive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep the HarnessDock runtime alive in the background when all webview panels close. When disabled the runtime stops with the last panel; when enabled it keeps running until 'HarnessDock: Stop Runtime' or extension deactivation."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "bundle": "node ./scripts/bundle.mjs",
+    "pack:vsix": "node ./scripts/pack.mjs",
+    "test": "vitest run --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "@dsh/bootstrap": "workspace:*",
+    "@dsh/client-runtime": "workspace:*",
+    "@dsh/docs-sync": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.94.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.9"
+  }
+}

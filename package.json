@@ -1,0 +1,51 @@
+{
+  "name": "harnessdock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness full-capability client: embed official Web UI, pin docs+runtime to the same exact version.",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "packageManager": "pnpm@10.12.0",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:versions": "node scripts/check-versions.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "check:size": "node scripts/check-size.mjs",
+    "perf:report": "node scripts/perf-report.mjs",
+    "mark:released": "node scripts/mark-released.mjs",
+    "e2e": "pnpm --filter ./tests/e2e test",
+    "build": "pnpm -r --if-present run build",
+    "setup": "node scripts/bootstrap.mjs",
+    "sync:dsh": "pnpm --filter @dsh/docs-sync start",
+    "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
+    "build:desktop": "node scripts/build.mjs",
+    "pack:desktop": "pnpm --filter @dsh/desktop pack:current",
+    "pack:desktop:full": "pnpm prepare:runtime && pnpm --filter @dsh/desktop pack:current:full",
+    "pack:desktop:win": "pnpm --filter @dsh/desktop pack:win",
+    "pack:desktop:win:full": "pnpm prepare:runtime && pnpm --filter @dsh/desktop pack:win:full",
+    "pack:desktop:mac": "pnpm --filter @dsh/desktop pack:mac",
+    "pack:desktop:mac:full": "pnpm prepare:runtime && pnpm --filter @dsh/desktop pack:mac:full",
+    "pack:desktop:linux": "pnpm --filter @dsh/desktop pack:linux",
+    "pack:desktop:linux:full": "pnpm prepare:runtime && pnpm --filter @dsh/desktop pack:linux:full",
+    "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
+    "parity": "pnpm --filter @dsh/parity-tests test",
+    "dev:dsh": "node --import tsx scripts/dev-dsh.mjs",
+    "start:desktop": "pnpm --filter @dsh/desktop start"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "electron"
+    ]
+  }
+}
