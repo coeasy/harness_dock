@@ -130,13 +130,12 @@ export class DshRuntime {
     } else if (
       mode === 'bundled' &&
       this.options.bundledRoot &&
-      process.env.DSH_BUNDLED_FETCH !== '0'
+      env.DSH_BUNDLED_FETCH === '1'
     ) {
-      // Phase B: decouple the dsh runtime from the client. The bundled runtime
-      // is the offline seed; when it pins a different dsh version than the one
-      // requested, prefer the pinned version fetched into the cache (reusing the
-      // thin download pipeline: per-version cache, resume, integrity). Offline /
-      // fetch failure falls back to the seed. Opt out with DSH_BUNDLED_FETCH=0.
+      // A full package must remain fast and offline on first launch. Only opt in
+      // to replacing a mismatched bundled seed when an administrator explicitly
+      // requests it; ordinary users should receive a new full package instead
+      // of an unexpected ~300 MB network download.
       const seedVersion = bundledRuntimeVersion(this.options.bundledRoot)
       if (seedVersion && seedVersion !== version) {
         const download = this.options.downloadImpl ?? ensureDownloadedRuntime

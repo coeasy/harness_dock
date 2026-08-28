@@ -10,6 +10,7 @@ import { parseArgs } from 'node:util'
 import { ORIGIN_PATH, readOriginFile } from '@dsh/docs-sync'
 import {
   bundledNodeRel,
+  bundledRuntimeVersion,
   canCopyHostNode,
   inspectBundledRuntime,
   NODE_BUNDLE_VERSION,
@@ -60,12 +61,18 @@ if (values['prune-only']) {
   process.exit(0)
 }
 
-if (!values.force && inspectBundledRuntime(dest, platform)) {
-  console.log(`bundled runtime already present: ${dest}`)
+const origin = await readOriginFile(ORIGIN_PATH)
+const existingLayout = inspectBundledRuntime(dest, platform)
+const existingVersion = existingLayout ? bundledRuntimeVersion(dest) : null
+if (!values.force && existingLayout && existingVersion === origin.dshVersion) {
+  console.log(`bundled runtime already present and matches dsh ${origin.dshVersion}: ${dest}`)
   process.exit(0)
 }
-
-const origin = await readOriginFile(ORIGIN_PATH)
+if (!values.force && existingLayout) {
+  console.log(
+    `bundled runtime version mismatch at ${dest}: found ${existingVersion ?? 'unknown'}, expected ${origin.dshVersion}; rebuilding`,
+  )
+}
 
 await rm(dest, { recursive: true, force: true })
 await mkdir(dest, { recursive: true })

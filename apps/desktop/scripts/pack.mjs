@@ -11,6 +11,7 @@
  *   2. Bundle the Electron main/preload (pnpm bundle, at apps/desktop).
  *   3. Run electron-builder with the scenario config and OS targets.
  */
+import { readdirSync, existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -133,6 +134,60 @@ function run(command, args, cwd, extraEnv = {}) {
   })
 }
 
+function findResourceDirs(root, depth = 0, result = []) {
+  if (depth > 10 || !existsSync(root)) return result
+  let entries
+  try {
+    entries = readdirSync(root, { withFileTypes: true })
+  } catch {
+    return result
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const fullPath = path.join(root, entry.name)
+    if (entry.name.toLowerCase() === 'resources') {
+      result.push(fullPath)
+      continue
+    }
+    // Avoid walking vendored dependency trees; the app resource directory is
+    // always above them in electron-builder's unpacked output.
+    if (entry.name === 'node_modules') continue
+    findResourceDirs(fullPath, depth + 1, result)
+  }
+  return result
+}
+
+function verifyPackagedResources() {
+  const outputRoot = path.resolve(
+    desktopRoot,
+    process.env.DSH_PACK_OUTPUT || path.join('release', scenario),
+  )
+  const resourceDirs = findResourceDirs(outputRoot)
+  const pluginDirs = resourceDirs.filter((dir) =>
+    existsSync(path.join(dir, 'plugin-embedded-client', 'index.js')),
+  )
+  if (pluginDirs.length === 0) {
+    throw new Error(
+      `[pack] packaged embedded-client plugin missing under ${outputRoot}; refusing to publish a broken client`,
+    )
+  }
+  if (scenario === 'full') {
+    const runtimeDirs = resourceDirs.filter(
+      (dir) =>
+        existsSync(path.join(dir, 'dsh-runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')) &&
+        existsSync(path.join(dir, 'dsh-runtime', process.platform === 'win32' ? 'node.exe' : path.join('bin', 'node'))),
+    )
+    if (runtimeDirs.length === 0) {
+      throw new Error(
+        `[pack] packaged full runtime missing under ${outputRoot}; refusing to publish a package that downloads ~300 MB on first launch`,
+      )
+    }
+    console.log(`[pack] verified full runtime + embedded plugin in ${runtimeDirs.length} unpacked app(s)`)
+  } else {
+    console.log(`[pack] verified embedded plugin in ${pluginDirs.length} unpacked app(s)`)
+  }
+}
+
 async function prepareFullRuntimes() {
   const runtimePlatform = { win: 'win32', mac: 'darwin', linux: 'linux' }[os] ?? process.platform
   const arches = os === 'mac'
@@ -170,6 +225,7 @@ try {
     ['exec', 'electron-builder', ...targetsFor(os, arch), '--config', config, '--publish', 'never', ...extraArgs],
     desktopRoot,
   )
+  verifyPackagedResources()
   console.log(`[pack] done: os=${os} scenario=${scenario}`)
 } catch (error) {
   console.error(`[pack] FAILED: ${error instanceof Error ? error.message : String(error)}`)

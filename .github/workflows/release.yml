@@ -116,7 +116,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.runtime_dir }}
-          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
+          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-
       - name: Install workspace dependencies
         if: matrix.enabled == true
         run: pnpm install --frozen-lockfile --prefer-offline
