@@ -8,6 +8,9 @@ import { bundledDshBin, bundledNodeRel } from '../src/bundled.ts'
 
 const temps: string[] = []
 
+const READY_TIMEOUT_MS = process.platform === 'win32' ? 45_000 : 15_000
+const TEST_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 20_000
+
 afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
@@ -70,7 +73,7 @@ setInterval(() => {}, 1 << 30)
         origin: { dshVersion: '0.1.1-rc.2' },
         pluginPath: path.join(dir, 'missing-plugin.js'),
         cacheDir: dir,
-        readyTimeoutMs: 15_000,
+        readyTimeoutMs: READY_TIMEOUT_MS,
         env: { DSH_RUNTIME: 'local', DSH_BIN: process.execPath },
         spawnImpl: (command, _args, options) =>
           spawn(command, [fake], { ...options, stdio: ['ignore', 'pipe', 'pipe'] }),
@@ -86,7 +89,7 @@ setInterval(() => {}, 1 << 30)
         await runtime.stop()
       }
     },
-    20_000,
+    TEST_TIMEOUT_MS,
   )
 })
 
@@ -107,7 +110,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         pluginPath: path.join(dir, 'plugin.js'),
         cacheDir: dir,
         bundledRoot,
-        readyTimeoutMs: 15_000,
+        readyTimeoutMs: READY_TIMEOUT_MS,
         env: { DSH_RUNTIME: 'bundled' },
         downloadImpl: async (input) => {
           expect(input.origin.dshVersion).toBe('0.1.1')
@@ -129,7 +132,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       expect(spawnCommand).toBe(path.join(bundledRoot, bundledNodeRel(process.platform)))
       expect(spawnArgs[0]).toBe(downloadedBin)
     },
-    20_000,
+    TEST_TIMEOUT_MS,
   )
 
   it(
@@ -148,7 +151,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         pluginPath: path.join(dir, 'plugin.js'),
         cacheDir: dir,
         bundledRoot,
-        readyTimeoutMs: 15_000,
+        readyTimeoutMs: READY_TIMEOUT_MS,
         env: { DSH_RUNTIME: 'bundled' },
         downloadImpl: async () => {
           throw new Error('offline')
@@ -169,7 +172,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       expect(spawnCommand).toBe(path.join(bundledRoot, bundledNodeRel(process.platform)))
       expect(spawnArgs[0]).toBe(seedBin)
     },
-    20_000,
+    TEST_TIMEOUT_MS,
   )
 
   it(
@@ -187,7 +190,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         pluginPath: path.join(dir, 'plugin.js'),
         cacheDir: dir,
         bundledRoot,
-        readyTimeoutMs: 15_000,
+        readyTimeoutMs: READY_TIMEOUT_MS,
         env: { DSH_RUNTIME: 'bundled' },
         downloadImpl: async () => {
           downloadCalled = true
@@ -207,6 +210,6 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       expect(downloadCalled).toBe(false)
       expect(spawnArgs[0]).toBe(bundledDshBin(bundledRoot))
     },
-    20_000,
+    TEST_TIMEOUT_MS,
   )
 })
