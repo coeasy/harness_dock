@@ -36,13 +36,13 @@ export function apply(ctx: PluginCtx): void {
       if (!ready || written || disposed) return
       try {
         const payload = {
-          url: \`http://127.0.0.1:\${addr.port}\`,
+          url: `http://127.0.0.1:${addr.port}`,
           host: '127.0.0.1',
           port: addr.port,
           pid: process.pid,
           dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'unknown',
         }
-        writeFileSync(readyFile, \`\${JSON.stringify(payload, null, 2)}\\n\`, 'utf8')
+        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
         written = true
       } catch {
         // The runtime may be shutting down and have removed its temp folder.
@@ -74,7 +74,7 @@ async function probeWebUi(port: number): Promise<boolean> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 1_000)
   try {
-    const response = await fetch(\`http://127.0.0.1:\${port}/\`, {
+    const response = await fetch(`http://127.0.0.1:${port}/`, {
       signal: controller.signal,
       redirect: 'manual',
     })
@@ -82,7 +82,7 @@ async function probeWebUi(port: number): Promise<boolean> {
     const contentType = response.headers.get('content-type') ?? ''
     if (contentType !== '' && !contentType.toLowerCase().includes('text/html')) return false
     const html = await response.text()
-    return /<!doctype\\s+html|<html(?:\\s|>)/i.test(html)
+    return /<!doctype\s+html|<html(?:\s|>)/i.test(html)
   } catch {
     return false
   } finally {
