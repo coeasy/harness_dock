@@ -90,6 +90,10 @@ export class DshRuntime {
       bundledAvailable,
     })
     const version = env.DSH_RUNTIME_VERSION ?? this.options.origin.dshVersion
+    this.options.log?.(
+      `runtime: mode=${mode} packaged=${this.options.packaged ?? false} ` +
+        `bundledAvailable=${bundledAvailable} version=${version}`,
+    )
     let command = await resolveDshCommand({
       mode,
       version,
@@ -173,6 +177,11 @@ export class DshRuntime {
     })
     const args = [...command.argsPrefix, ...buildLaunchArgs({ patchFile })]
     const spawnRequest = buildSpawnRequest(command.command, args)
+    this.options.log?.(
+      `runtime: spawning ${[spawnRequest.command, ...spawnRequest.args]
+        .map((value) => JSON.stringify(value))
+        .join(' ')}`,
+    )
     const spawnImpl = this.options.spawnImpl ?? spawn
     const child = spawnImpl(spawnRequest.command, spawnRequest.args, {
       cwd: this.options.cwd ?? process.cwd(),
@@ -183,11 +192,18 @@ export class DshRuntime {
     this.child = child
 
     const timeoutMs = this.options.readyTimeoutMs ?? 120_000
-    const ready = await waitForReady(child, readyFile, version, timeoutMs)
-    // waitForReady detaches its own 'data' listeners once ready; keep the
-    // pipes drained so dsh never blocks on a full OS pipe buffer.
-    drainOutput(child, this.options.log)
-    return ready
+    try {
+      const ready = await waitForReady(child, readyFile, version, timeoutMs)
+      // waitForReady detaches its own 'data' listeners once ready; keep the
+      // pipes drained so dsh never blocks on a full OS pipe buffer.
+      drainOutput(child, this.options.log)
+      return ready
+    } catch (error) {
+      this.options.log?.(
+        `runtime: dsh did not become ready: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      throw error
+    }
   }
 
   async stop(): Promise<void> {
@@ -267,6 +283,15 @@ async function waitForReady(
   return new Promise((resolve, reject) => {
     let settled = false
     let buffer = ''
+    const appendOutput = (chunk: Buffer | string) => {
+      buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+      // Keep diagnostics useful without retaining unbounded child output.
+      if (buffer.length > 16_000) buffer = buffer.slice(-16_000)
+    }
+    const diagnostics = () => {
+      const output = buffer.trim()
+      return output === '' ? '' : `\nLast dsh output:\n${output.slice(-4_000)}`
+    }
     const fail = (error: Error) => {
       if (settled) return
       settled = true
@@ -281,10 +306,10 @@ async function waitForReady(
     }
     const onError = (error: Error) => fail(error)
     const onExit = (code: number | null) => {
-      fail(new Error(`dsh exited before ready (code ${code})\n${buffer.slice(-4000)}`))
+      fail(new Error(`dsh exited before ready (code ${code})${diagnostics()}`))
     }
     const onData = (chunk: Buffer | string) => {
-      buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+      appendOutput(chunk)
       const parsed = parseWebUrl(buffer)
       if (parsed) {
         succeed({
@@ -303,7 +328,7 @@ async function waitForReady(
         .catch(() => undefined)
     }, 100)
     const timer = setTimeout(() => {
-      fail(new Error(`Timed out waiting for dsh web ready after ${timeoutMs}ms`))
+      fail(new Error(`Timed out waiting for dsh web ready after ${timeoutMs}ms${diagnostics()}`))
     }, timeoutMs)
     const cleanup = () => {
       clearTimeout(timer)
