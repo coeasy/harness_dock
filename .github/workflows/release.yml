@@ -185,7 +185,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          release_dir="apps/desktop/release/\${{ matrix.scenario }}"
+          release_dir="apps/desktop/release/${{ matrix.scenario }}"
           find "$release_dir" -maxdepth 1 -type f \
             \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) \
