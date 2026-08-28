@@ -26,6 +26,24 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Cache electron-builder downloads (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron-builder
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Cache electron-builder downloads (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/electron-builder/Cache
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Cache full runtime
+        if: matrix.scenario == 'full'
+        uses: actions/cache@v4
+        with:
+          path: runtimes
+          key: dsh-runtime-${{ matrix.os }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
 
