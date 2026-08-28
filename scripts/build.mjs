@@ -125,7 +125,7 @@ if (pnpmCheck.status !== 0) {
 }
 
 if (!values['skip-install']) {
-  pnpm(['install', '--frozen-lockfile'], 'pnpm install')
+  pnpm(['install', '--frozen-lockfile', '--prefer-offline'], 'pnpm install')
 }
 
 if (!values['skip-tests']) {
