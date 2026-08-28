@@ -21,11 +21,13 @@ const repoRoot = path.resolve(desktopRoot, '../..')
 
 const OS_VALUES = ['current', 'win', 'mac', 'linux']
 const SCENARIO_VALUES = ['thin', 'full']
+const ARCH_VALUES = ['all', 'x64', 'arm64']
 
 const { values } = parseArgs({
   options: {
     os: { type: 'string', default: 'current' },
     scenario: { type: 'string', default: 'thin' },
+    arch: { type: 'string', default: 'all' },
     help: { type: 'boolean', default: false },
   },
 })
@@ -35,6 +37,7 @@ function usage() {
 
   --os        target OS for electron-builder (default: current)
   --scenario  thin or full package (default: thin)
+  --arch      macOS architecture: all, x64, or arm64 (default: all)
 
   os targets:
     current  no target args, uses electron-builder.yml / electron-builder.full.yml
@@ -51,6 +54,7 @@ if (values.help) {
 
 const os = values.os
 const scenario = values.scenario
+const arch = values.arch
 if (!OS_VALUES.includes(os)) {
   console.error(`[pack] unknown --os "${os}" (expected one of: ${OS_VALUES.join(', ')})`)
   usage()
@@ -61,12 +65,23 @@ if (!SCENARIO_VALUES.includes(scenario)) {
   usage()
   process.exit(1)
 }
+if (!ARCH_VALUES.includes(arch)) {
+  console.error(`[pack] unknown --arch "${arch}" (expected one of: ${ARCH_VALUES.join(', ')})`)
+  usage()
+  process.exit(1)
+}
 
-const TARGETS = {
-  current: [],
-  win: ['--win', 'nsis', 'portable', 'zip', '--x64'],
-  mac: ['--mac', 'dmg', 'zip', '--x64', '--arm64'],
-  linux: ['--linux', 'AppImage', 'deb', '--x64'],
+function targetsFor(targetOs, targetArch) {
+  if (targetOs === 'mac') {
+    if (targetArch === 'x64') return ['--mac', 'dmg', 'zip', '--x64']
+    if (targetArch === 'arm64') return ['--mac', 'dmg', 'zip', '--arm64']
+    return ['--mac', 'dmg', 'zip', '--x64', '--arm64']
+  }
+  return {
+    current: [],
+    win: ['--win', 'nsis', 'portable', 'zip', '--x64'],
+    linux: ['--linux', 'AppImage', 'deb', '--x64'],
+  }[targetOs]
 }
 const config = scenario === 'full' ? 'electron-builder.full.yml' : 'electron-builder.yml'
 
@@ -110,16 +125,22 @@ function run(command, args, cwd, extraEnv = {}) {
   })
 }
 
-async function prepareMacFullRuntimes() {
-  for (const arch of ['x64', 'arm64']) {
+async function prepareFullRuntimes() {
+  const runtimePlatform = { win: 'win32', mac: 'darwin', linux: 'linux' }[os] ?? process.platform
+  const arches = os === 'mac'
+    ? (arch === 'all' ? ['x64', 'arm64'] : [arch])
+    : [arch === 'all' ? process.arch : arch]
+
+  for (const targetArch of arches) {
+    const runtimeDir = os === 'mac' ? path.join('runtimes', 'pack-' + targetArch) : path.join('runtimes', 'pack')
     await run(
       'pnpm',
       ['--filter', '@dsh/client-runtime', 'bundle-runtime'],
       repoRoot,
       {
-        DSH_RUNTIME_PLATFORM: 'darwin',
-        DSH_RUNTIME_ARCH: arch,
-        DSH_RUNTIME_DIR: path.join('runtimes', 'pack-' + arch),
+        DSH_RUNTIME_PLATFORM: runtimePlatform,
+        DSH_RUNTIME_ARCH: targetArch,
+        DSH_RUNTIME_DIR: runtimeDir,
       },
     )
   }
@@ -130,16 +151,15 @@ try {
   await run('pnpm', ['--filter', '@dsh/plugin-embedded-client', 'bundle'], repoRoot)
   // 2. bundle the Electron main/preload
   await run('pnpm', ['bundle'], desktopRoot)
-  // macOS full builds contain both Intel and Apple Silicon packages.
-  // Prepare one matching Node runtime for each architecture before electron-builder
-  // invokes afterPack for both targets.
-  if (os === 'mac' && scenario === 'full') {
-    await prepareMacFullRuntimes()
+  // Full builds need a matching bundled runtime for every target architecture.
+  // CI can set DSH_SKIP_RUNTIME_PREPARE after downloading prepared runtime artifacts.
+  if (scenario === 'full' && process.env.DSH_SKIP_RUNTIME_PREPARE !== '1') {
+    await prepareFullRuntimes()
   }
   // 3. electron-builder with scenario config + OS targets
   await run(
     'pnpm',
-    ['exec', 'electron-builder', ...TARGETS[os], '--config', config, '--publish', 'never', ...extraArgs],
+    ['exec', 'electron-builder', ...targetsFor(os, arch), '--config', config, '--publish', 'never', ...extraArgs],
     desktopRoot,
   )
   console.log(`[pack] done: os=${os} scenario=${scenario}`)

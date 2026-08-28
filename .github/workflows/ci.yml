@@ -7,6 +7,10 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
@@ -48,6 +52,18 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Cache electron-builder downloads (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron-builder
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Cache electron-builder downloads (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/electron-builder/Cache
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm ${{ matrix.script }}
         env:
