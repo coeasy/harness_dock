@@ -4,6 +4,7 @@
 # artifact names, output directory, and the full scenario's bundled runtime.
 appId: com.dsh.client
 productName: HarnessDock
+executableName: HarnessDock
 icon: build/icon.ico
 copyright: MIT
 compression: maximum
@@ -59,6 +60,7 @@ linux:
   icon: build/icons/
   category: Development
   maintainer: harnessdock
+  syncDesktopName: true
   target:
     - target: AppImage
       arch:

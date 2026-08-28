@@ -4,7 +4,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DshRuntime } from '../src/runtime.ts'
-import { bundledDshBin } from '../src/bundled.ts'
+import { bundledDshBin, bundledNodeRel } from '../src/bundled.ts'
 
 const temps: string[] = []
 
@@ -32,8 +32,10 @@ setInterval(() => {}, 1 << 30)
 
 async function fixtureBundledRoot(dir: string, dshVersion: string): Promise<string> {
   const root = path.join(dir, 'bundled')
+  const nodeBin = path.join(root, bundledNodeRel(process.platform))
+  await mkdir(path.dirname(nodeBin), { recursive: true })
   await mkdir(path.join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib'), { recursive: true })
-  await writeFile(path.join(root, 'node.exe'), '')
+  await writeFile(nodeBin, '')
   await writeFile(path.join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), '')
   await writeFile(
     path.join(root, 'manifest.json'),
@@ -124,7 +126,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         await runtime.stop()
       }
       // bundled node runs the *downloaded* pinned dsh bin
-      expect(spawnCommand).toBe(path.join(bundledRoot, 'node.exe'))
+      expect(spawnCommand).toBe(path.join(bundledRoot, bundledNodeRel(process.platform)))
       expect(spawnArgs[0]).toBe(downloadedBin)
     },
     20_000,
@@ -164,7 +166,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         await runtime.stop()
       }
       // fetch failed -> run the bundled seed as-is
-      expect(spawnCommand).toBe(path.join(bundledRoot, 'node.exe'))
+      expect(spawnCommand).toBe(path.join(bundledRoot, bundledNodeRel(process.platform)))
       expect(spawnArgs[0]).toBe(seedBin)
     },
     20_000,

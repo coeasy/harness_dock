@@ -1,0 +1,138 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build'
+        type: choice
+        options: [all, windows, macos, linux]
+        default: all
+      scenario:
+        description: 'Build scenario'
+        type: choice
+        options: [thin, full, both]
+        default: both
+      release_tag:
+        description: 'Release tag to publish under (e.g. v0.1.0). Empty = draft release named "unreleased".'
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-latest, platform: windows, os: win, scenario: thin, script: pack:desktop:win }
+          - { runner: windows-latest, platform: windows, os: win, scenario: full, script: pack:desktop:win:full }
+          - { runner: ubuntu-latest, platform: linux, os: linux, scenario: thin, script: pack:desktop:linux }
+          - { runner: ubuntu-latest, platform: linux, os: linux, scenario: full, script: pack:desktop:linux:full }
+          - { runner: macos-latest, platform: macos, os: mac, scenario: thin, script: pack:desktop:mac }
+          - { runner: macos-latest, platform: macos, os: mac, scenario: full, script: pack:desktop:mac:full }
+    runs-on: ${{ matrix.runner }}
+    if: >-
+      github.event_name == 'push' ||
+      (inputs.platforms == 'all' || inputs.platforms == matrix.platform) &&
+      (inputs.scenario == 'both' || inputs.scenario == matrix.scenario)
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm ${{ matrix.script }}
+        env:
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          find apps/desktop/release -type f \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
+               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) \
+            -exec cp {} dist/ \;
+          ls -la dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ matrix.scenario }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.release_tag }}" ]; then
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=unreleased-$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+            echo "draft=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate release notes
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cat > notes.md <<EOF
+          # HarnessDock ${VERSION}
+
+          | Package | OS | Scenario | Install |
+          |---|---|---|---|
+          | \`*-win-*-Portable-*.exe\` | Windows | thin/full | Standalone executable |
+          | \`*-win-*-Setup-*.exe\` | Windows | thin/full | NSIS installer |
+          | \`*-win-*.zip\` | Windows | thin/full | Unpacked zip |
+          | \`*.dmg\` | macOS | thin/full | Disk image |
+          | \`*.AppImage\` | Linux | thin/full | Standalone AppImage |
+          | \`*.deb\` | Linux | thin/full | Debian package |
+
+          \`.blockmap\` files support differential downloads and are not installers.
+          EOF
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: HarnessDock ${{ steps.tag.outputs.tag }}
+          draft: ${{ steps.tag.outputs.draft }}
+          files: artifacts/*
+          body_path: notes.md
+          generate_release_notes: true
