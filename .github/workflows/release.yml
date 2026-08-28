@@ -83,7 +83,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm test
 
   prepare-runtime:
@@ -119,7 +119,7 @@ jobs:
           key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
       - name: Install workspace dependencies
         if: matrix.enabled == true
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Prepare bundled runtime
         if: matrix.enabled == true
         run: pnpm --filter @dsh/client-runtime bundle-runtime
@@ -168,7 +168,7 @@ jobs:
         with:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Download prepared runtime
         if: matrix.scenario == 'full'
         uses: actions/download-artifact@v4

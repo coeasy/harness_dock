@@ -5,7 +5,7 @@
  *
  * Responsibilities:
  *   1. Ensure pnpm 10 (via corepack, fallback to npm -g)
- *   2. Run `pnpm install --frozen-lockfile` when node_modules is missing
+ *   2. Run `pnpm install --frozen-lockfile --prefer-offline` when node_modules is missing
  *
  * Usage: node scripts/bootstrap.mjs [--skip-install]
  */
@@ -52,7 +52,7 @@ console.log(`[bootstrap] pnpm ${pnpm}`)
 if (skipInstall) {
   console.log('[bootstrap] --skip-install: skip dependency check')
 } else if (!existsSync(path.join(repoRoot, 'node_modules'))) {
-  console.log('[bootstrap] node_modules missing, running pnpm install --frozen-lockfile ...')
+  console.log('[bootstrap] node_modules missing, running pnpm install --frozen-lockfile --prefer-offline ...')
   if (!run('pnpm', ['install', '--frozen-lockfile'])) {
     console.error('[bootstrap] ERROR: pnpm install failed.')
     process.exit(1)

@@ -19,31 +19,73 @@ export function apply(ctx: PluginCtx): void {
   if (!readyFile) return
 
   let written = false
+  let checking = false
+  let disposed = false
   const tick = () => {
-    if (written) return
+    if (written || checking || disposed) return
     const addr = findListenAddress(ctx)
     if (!addr) return
-    const payload = {
-      url: `http://127.0.0.1:${addr.port}`,
-      host: '127.0.0.1',
-      port: addr.port,
-      pid: process.pid,
-      dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'unknown',
-    }
-    writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
-    written = true
+
+    // webServer.port is assigned as soon as the socket binds, but the
+    // frontend-static fallback may still be registering its index route.
+    // Probe the loopback page before announcing readiness so Electron never
+    // races the dsh composition and loads a transient 404 as a blank screen.
+    checking = true
+    void probeWebUi(addr.port).then((ready) => {
+      checking = false
+      if (!ready || written || disposed) return
+      try {
+        const payload = {
+          url: `http://127.0.0.1:${addr.port}`,
+          host: '127.0.0.1',
+          port: addr.port,
+          pid: process.pid,
+          dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'unknown',
+        }
+        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+        written = true
+      } catch {
+        // The runtime may be shutting down and have removed its temp folder.
+      }
+    })
   }
 
   if (typeof ctx.effect === 'function') {
     ctx.effect(() => {
       const timer = setInterval(tick, 100)
       tick()
-      return () => clearInterval(timer)
+      return () => {
+        disposed = true
+        clearInterval(timer)
+      }
     })
     return
   }
 
   const timer = setInterval(tick, 100)
   tick()
-  ctx.on?.('dispose', () => clearInterval(timer))
+  ctx.on?.('dispose', () => {
+    disposed = true
+    clearInterval(timer)
+  })
+}
+
+async function probeWebUi(port: number): Promise<boolean> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 1_000)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/`, {
+      signal: controller.signal,
+      redirect: 'manual',
+    })
+    if (!response.ok) return false
+    const contentType = response.headers.get('content-type') ?? ''
+    if (contentType !== '' && !contentType.toLowerCase().includes('text/html')) return false
+    const html = await response.text()
+    return /<!doctype\s+html|<html(?:\s|>)/i.test(html)
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
 }
