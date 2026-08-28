@@ -39,7 +39,6 @@ exports.default = async function afterPack(context) {
   const dst = path.join(resourceDir, 'dsh-runtime')
   if (!fs.existsSync(dst)) return
 
-  const projectDir = context.projectDir ?? context.packager.projectDir
   const targetArch = String(context.arch) === 'arm64' ? 'arm64' : 'x64'
   const archSpecificSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack-' + targetArch)
   const fallbackSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack')
