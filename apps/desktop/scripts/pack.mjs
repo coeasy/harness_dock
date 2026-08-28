@@ -108,6 +108,14 @@ if (process.env.DSH_PACK_OUTPUT) {
   console.log(`[pack] output overridden to ${process.env.DSH_PACK_OUTPUT}`)
 }
 
+// Windows packaging spends most of its time compressing the full runtime tree.
+// Normal compression substantially reduces release build time while keeping
+// the installers fully functional; the trade-off is a modestly larger package.
+if (os === 'win') {
+  extraArgs.push('-c.compression=normal')
+  console.log('[pack] Windows compression=normal')
+}
+
 function run(command, args, cwd, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     console.log(`[pack] ${command} ${args.join(' ')} (cwd: ${cwd})`)
