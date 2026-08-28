@@ -58,7 +58,7 @@ jobs:
             {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
           ]'
           runtime_rows='[
-            {"enabled":true,"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
+            {"enabled":true,"runner":"ubuntu-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
             {"enabled":true,"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","arch":"x64","runtime_dir":"runtimes/pack"},
             {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64","runtime_dir":"runtimes/pack-x64"},
             {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
