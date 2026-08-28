@@ -22,8 +22,8 @@ exports.default = async function afterPack(context) {
   const targetArch = String(context.arch) === 'arm64' ? 'arm64' : 'x64'
   const archSpecificSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack-' + targetArch)
   const fallbackSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack')
-  const runtimeNode =
-    context.electronPlatformName === 'win32' ? 'node.exe' : path.join('bin', 'node')
+  const isWindows = context.electronPlatformName === 'win32' || process.platform === 'win32'
+  const runtimeNode = isWindows ? 'node.exe' : path.join('bin', 'node')
   const src = fs.existsSync(path.join(archSpecificSrc, runtimeNode))
     ? archSpecificSrc
     : fallbackSrc
