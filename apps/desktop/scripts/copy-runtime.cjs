@@ -12,10 +12,39 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+function resolveResourceDir(context) {
+  const appOutDir = context.appOutDir
+  if (context.electronPlatformName !== 'darwin') {
+    return path.join(appOutDir, 'resources')
+  }
+
+  // On macOS electron-builder may pass either the .app bundle or its parent
+  // architecture directory as appOutDir. Resolve the actual Contents/Resources
+  // directory so full packages work for both Intel and Apple Silicon builds.
+  const candidates = [
+    path.join(appOutDir, 'Contents', 'Resources'),
+    path.join(appOutDir, 'Resources'),
+  ]
+  try {
+    for (const entry of fs.readdirSync(appOutDir, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.endsWith('.app')) {
+        candidates.push(path.join(appOutDir, entry.name, 'Contents', 'Resources'))
+      }
+    }
+  } catch {
+    // The normal candidates below provide the actionable error.
+  }
+  const existing = candidates.find((candidate) => fs.existsSync(candidate))
+  if (!existing) {
+    throw new Error('[afterPack] macOS app Resources directory not found under ' + appOutDir)
+  }
+  return existing
+}
+
 /** @param {import('app-builder-lib').AfterPackContext} context */
 exports.default = async function afterPack(context) {
   const projectDir = context.projectDir ?? context.packager.projectDir
-  const resourceDir = path.join(context.appOutDir, 'resources')
+  const resourceDir = resolveResourceDir(context)
   fs.mkdirSync(resourceDir, { recursive: true })
 
   // Copy the embedded plugin explicitly. This is done in afterPack because
