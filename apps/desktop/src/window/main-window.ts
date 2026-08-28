@@ -97,6 +97,18 @@ export async function createWindow(url: string): Promise<void> {
       }
     })
   })
+  // Keep the first-run failure actionable: Electron can show a blank window
+  // when the local server or its renderer fails after the process has started.
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return
+    void bootLog(
+      `renderer: did-fail-load code=${errorCode} description=${errorDescription} url=${validatedURL}`,
+    )
+  })
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const detail = message.length > 2000 ? message.slice(0, 2000) + '…' : message
+    void bootLog(`renderer: console level=${level} source=${sourceId}:${line} ${detail}`)
+  })
   await mainWindow.loadURL(url)
   installRendererRecovery(mainWindow)
 }
