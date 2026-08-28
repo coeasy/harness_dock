@@ -15,8 +15,118 @@ permissions:
   contents: write
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      runtime_matrix: ${{ steps.matrix.outputs.runtime_matrix }}
+    steps:
+      - name: Select release targets
+        id: matrix
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          set -euo pipefail
+          build_rows='[
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","scenario":"thin","arch":"x64","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin"},
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","scenario":"thin","arch":"x64","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"thin","arch":"all","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
+          ]'
+          runtime_rows='[
+            {"enabled":true,"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
+            {"enabled":true,"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","arch":"x64","runtime_dir":"runtimes/pack"},
+            {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64","runtime_dir":"runtimes/pack-x64"},
+            {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
+          ]'
+          build_matrix=$(printf '%s' "$build_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-" + .scenario))]')
+          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-full"))]')
+          if [ "$(printf '%s' "$runtime_matrix" | jq 'length')" -eq 0 ]; then
+            runtime_matrix='[{"enabled":false,"runner":"ubuntu-latest","artifact_os":"none","target_os":"none","platform":"linux","arch":"x64","runtime_dir":"runtimes/unused"}]'
+          fi
+          echo "build_matrix=$(jq -cn --argjson include "$build_matrix" '{include:$include}')" >> "$GITHUB_OUTPUT"
+          echo "runtime_matrix=$(jq -cn --argjson include "$runtime_matrix" '{include:$include}')" >> "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  prepare-runtime:
+    needs: [test, plan]
+    if: needs.test.result == 'success' && needs.plan.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.runtime_matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - name: Skip runtime preparation for thin-only release
+        if: matrix.enabled != true
+        run: echo "No full runtime requested for this release target."
+      - uses: actions/checkout@v4
+        if: matrix.enabled == true
+      - uses: pnpm/action-setup@v4
+        if: matrix.enabled == true
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v4
+        if: matrix.enabled == true
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Cache prepared runtime
+        if: matrix.enabled == true
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.runtime_dir }}
+          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
+      - name: Install workspace dependencies
+        if: matrix.enabled == true
+        run: pnpm install --frozen-lockfile
+      - name: Prepare bundled runtime
+        if: matrix.enabled == true
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Upload prepared runtime
+        if: matrix.enabled == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
+          path: ${{ matrix.runtime_dir }}
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    needs: [test, plan, prepare-runtime]
+    if: always() && needs.test.result == 'success' && needs.plan.result == 'success' && needs.prepare-runtime.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -38,45 +148,19 @@ jobs:
         with:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-      - name: Cache full runtime
+      - run: pnpm install --frozen-lockfile
+      - name: Download prepared runtime
         if: matrix.scenario == 'full'
-        uses: actions/cache@v4
+        uses: actions/download-artifact@v4
         with:
-          path: runtimes
-          key: dsh-runtime-${{ matrix.os }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-
-  build:
-    needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: windows-latest, os: win, scenario: thin, script: pack:desktop:win }
-          - { runner: windows-latest, os: win, scenario: full, script: pack:desktop:win:full }
-          - { runner: ubuntu-latest, os: linux, scenario: thin, script: pack:desktop:linux }
-          - { runner: ubuntu-latest, os: linux, scenario: full, script: pack:desktop:linux:full }
-          - { runner: macos-latest, os: mac, scenario: thin, script: pack:desktop:mac }
-          - { runner: macos-latest, os: mac, scenario: full, script: pack:desktop:mac:full }
-    runs-on: ${{ matrix.runner }}
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: '--max-old-space-size=4096'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.12.1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm ${{ matrix.script }}
+          name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
+          path: ${{ matrix.runtime_dir }}
+      - name: Build desktop package
+        run: ${{ matrix.command }}
         env:
           GH_OWNER: ${{ github.repository_owner }}
           GH_REPO: ${{ github.event.repository.name }}
+          DSH_SKIP_RUNTIME_PREPARE: ${{ matrix.scenario == 'full' && '1' || '0' }}
       - name: Collect artifacts
         shell: bash
         run: |
@@ -88,7 +172,7 @@ jobs:
           ls -la dist/
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.os }}-${{ matrix.scenario }}
+          name: desktop-${{ matrix.artifact_os }}-${{ matrix.scenario }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
