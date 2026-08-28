@@ -130,7 +130,7 @@ export class DshRuntime {
     } else if (
       mode === 'bundled' &&
       this.options.bundledRoot &&
-      process.env.DSH_BUNDLED_FETCH === '1'
+      env.DSH_BUNDLED_FETCH === '1'
     ) {
       // A full package must remain fast and offline on first launch. Only opt in
       // to replacing a mismatched bundled seed when an administrator explicitly
