@@ -22,10 +22,15 @@ describe('buildLaunchArgs', () => {
 })
 
 describe('renderEmbeddedPatch', () => {
-  it('inserts the plugin by absolute path', () => {
-    const yaml = renderEmbeddedPatch('D:/work/plugin-embedded-client/src/index.ts')
+  it('renders an encoded file URL for Windows install paths', () => {
+    const yaml = renderEmbeddedPatch('C:\\Program Files\\HarnessDock\\resources\\plugin-embedded-client\\index.js')
     expect(yaml).toContain('id: embedded-client')
-    expect(yaml).toContain('D:/work/plugin-embedded-client/src/index.ts')
+    expect(yaml).toContain('file:///C:/Program%20Files/HarnessDock/resources/plugin-embedded-client/index.js')
     expect(yaml).toContain('- insert:')
+  })
+
+  it('keeps ordinary POSIX paths importable', () => {
+    const yaml = renderEmbeddedPatch('/opt/harnessdock/plugin-embedded-client/index.js')
+    expect(yaml).toContain('file:///opt/harnessdock/plugin-embedded-client/index.js')
   })
 })
