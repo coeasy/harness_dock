@@ -6,16 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      platforms:
-        description: 'Platforms to build'
-        type: choice
-        options: [all, windows, macos, linux]
-        default: all
-      scenario:
-        description: 'Build scenario'
-        type: choice
-        options: [thin, full, both]
-        default: both
       release_tag:
         description: 'Release tag to publish under (e.g. v0.1.0). Empty = draft release named "unreleased".'
         type: string
@@ -45,17 +35,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: windows-latest, platform: windows, os: win, scenario: thin, script: pack:desktop:win }
-          - { runner: windows-latest, platform: windows, os: win, scenario: full, script: pack:desktop:win:full }
-          - { runner: ubuntu-latest, platform: linux, os: linux, scenario: thin, script: pack:desktop:linux }
-          - { runner: ubuntu-latest, platform: linux, os: linux, scenario: full, script: pack:desktop:linux:full }
-          - { runner: macos-latest, platform: macos, os: mac, scenario: thin, script: pack:desktop:mac }
-          - { runner: macos-latest, platform: macos, os: mac, scenario: full, script: pack:desktop:mac:full }
+          - { runner: windows-latest, os: win, scenario: thin, script: pack:desktop:win }
+          - { runner: windows-latest, os: win, scenario: full, script: pack:desktop:win:full }
+          - { runner: ubuntu-latest, os: linux, scenario: thin, script: pack:desktop:linux }
+          - { runner: ubuntu-latest, os: linux, scenario: full, script: pack:desktop:linux:full }
+          - { runner: macos-latest, os: mac, scenario: thin, script: pack:desktop:mac }
+          - { runner: macos-latest, os: mac, scenario: full, script: pack:desktop:mac:full }
     runs-on: ${{ matrix.runner }}
-    if: >-
-      github.event_name == 'push' ||
-      (inputs.platforms == 'all' || inputs.platforms == matrix.platform) &&
-      (inputs.scenario == 'both' || inputs.scenario == matrix.scenario)
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
@@ -101,21 +87,21 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "draft=false" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ GITHUB_REF_NAME }}" >> "${{ GITHUB_OUTPUT }}"
+            echo "draft=false" >> "${{ GITHUB_OUTPUT }}"
           elif [ -n "${{ inputs.release_tag }}" ]; then
-            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
-            echo "draft=false" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.release_tag }}" >> "${{ GITHUB_OUTPUT }}"
+            echo "draft=false" >> "${{ GITHUB_OUTPUT }}"
           else
-            echo "tag=unreleased-$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
-            echo "draft=true" >> "$GITHUB_OUTPUT"
+            echo "tag=unreleased-${{ date +%Y%m%d-%H%M%S }}" >> "${{ GITHUB_OUTPUT }}"
+            echo "draft=true" >> "${{ GITHUB_OUTPUT }}"
           fi
       - name: Generate release notes
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=${{ node -p "require('./package.json').version" }}
           cat > notes.md <<EOF
-          # HarnessDock ${VERSION}
+          # HarnessDock ${{ VERSION }}
 
           | Package | OS | Scenario | Install |
           |---|---|---|---|
