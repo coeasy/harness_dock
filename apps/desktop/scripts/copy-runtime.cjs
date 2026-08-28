@@ -14,6 +14,14 @@ const path = require('node:path')
 
 /** @param {import('app-builder-lib').AfterPackContext} context */
 exports.default = async function afterPack(context) {
+  // Verify the embedded plugin is present in every packaged app. Without it,
+  // dsh fails while applying cordis:include and Electron later reports the
+  // misleading ERR_CONNECTION_REFUSED for the local UI.
+  const pluginEntry = path.join(context.appOutDir, 'resources', 'plugin-embedded-client', 'index.js')
+  if (!fs.existsSync(pluginEntry)) {
+    throw new Error('[afterPack] embedded-client plugin missing: ' + pluginEntry)
+  }
+
   // Only needed for the "full" scenario; the thin config has no dsh-runtime dir.
   const dst = path.join(context.appOutDir, 'resources', 'dsh-runtime')
   if (!fs.existsSync(dst)) return
