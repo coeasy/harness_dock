@@ -65,27 +65,21 @@ jobs:
             exit 1
           }
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.7.0
-      - name: Install upstream dependencies
+      - name: Install upstream dependencies with pinned pnpm
         working-directory: upstream
-        run: pnpm install --frozen-lockfile
+        run: npx --yes pnpm@11.7.0 install --frozen-lockfile
       - name: Build official upstream profile
         working-directory: upstream
-        run: pnpm build:official
+        run: npx --yes pnpm@11.7.0 build:official
       - name: Pack and verify official runtime closure
         working-directory: upstream
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
-          pnpm exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
-          pnpm exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.12.1
       - name: Prepare Linux runtime from official source packs
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
