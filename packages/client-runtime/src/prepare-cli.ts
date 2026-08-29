@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { ORIGIN_PATH, readOriginFile } from '@dsh/docs-sync'
 import {
@@ -41,13 +41,11 @@ const { values } = parseArgs({
 const platform = (values.platform ?? process.env.DSH_RUNTIME_PLATFORM ?? process.platform) as NodeJS.Platform
 const arch = values.arch ?? process.env.DSH_RUNTIME_ARCH ?? process.arch
 const runtimeDir = values['runtime-dir'] ?? process.env.DSH_RUNTIME_DIR
+const packedRuntimeDir = process.env.DSH_PACKED_RUNTIME_DIR
 const dest = runtimeDir
   ? path.resolve(repoRoot, runtimeDir as string)
   : runtimeCacheDir(repoRoot)
 
-// --prune-only: apply the size pruning to an existing bundled runtime without
-// re-downloading node or re-running npm install. Useful after the prune rules
-// change or to shrink a runtime prepared before this feature existed.
 if (values['prune-only']) {
   if (!inspectBundledRuntime(dest, platform)) {
     throw new Error(`--prune-only requires an existing bundled runtime under ${dest}`)
@@ -102,6 +100,80 @@ async function installTargetNativePackages(): Promise<void> {
   )
 }
 
+async function packedTarballIdentity(tarball: string): Promise<{ name: string; version: string }> {
+  const { stdout } = await execFileAsync('tar', ['-xOzf', tarball, 'package/package.json'], {
+    windowsHide: true,
+    maxBuffer: 4 * 1024 * 1024,
+  })
+  const pkg = JSON.parse(stdout) as { name?: string; version?: string }
+  if (!pkg.name || !pkg.version) throw new Error(`packed tarball has no package identity: ${tarball}`)
+  return { name: pkg.name, version: pkg.version }
+}
+
+async function installPackedRuntime(root: string): Promise<void> {
+  const absolute = path.resolve(repoRoot, root)
+  const entries = (await readdir(absolute, { recursive: true }))
+    .filter((entry) => typeof entry === 'string' && entry.endsWith('.tgz')) as string[]
+  if (entries.length === 0) throw new Error(`no upstream packed tarballs under ${absolute}`)
+
+  const dependencies: Record<string, string> = {}
+  for (const entry of entries.sort()) {
+    const tarball = path.join(absolute, entry)
+    const identity = await packedTarballIdentity(tarball)
+    dependencies[identity.name] = pathToFileURL(tarball).href
+  }
+  if (!dependencies['@deepseek-ai/dsh']) {
+    throw new Error(`packed runtime does not contain @deepseek-ai/dsh under ${absolute}`)
+  }
+
+  await writeFile(
+    path.join(dest, 'package.json'),
+    `${JSON.stringify({
+      name: 'harnessdock-bundled-runtime',
+      private: true,
+      version: '0.0.0',
+      dependencies,
+    }, null, 2)}\n`,
+    'utf8',
+  )
+
+  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  console.log(`installing ${entries.length} official packed upstream tarballs for dsh ${origin.dshVersion}`)
+  await execFileAsync(
+    npmBin,
+    [
+      'install',
+      '--omit=dev',
+      '--include=optional',
+      '--no-fund',
+      '--no-audit',
+      '--package-lock=false',
+      `--os=${platform}`,
+      `--cpu=${arch}`,
+      ...(platform === 'linux' ? ['--libc=glibc'] : []),
+      '--fetch-timeout=60000',
+      '--fetch-retries=3',
+    ],
+    {
+      cwd: dest,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+      },
+      shell: process.platform === 'win32',
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  )
+
+  const installedPkg = JSON.parse(
+    await readFile(path.join(dest, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'),
+  ) as { version?: string }
+  if (installedPkg.version !== origin.dshVersion) {
+    throw new Error(`packed @deepseek-ai/dsh version ${installedPkg.version ?? 'unknown'} != pinned ${origin.dshVersion}`)
+  }
+}
+
 if (!values.force && existingLayout && existingVersion === origin.dshVersion) {
   const repairedAssets = await repairKnownRuntimeAssets(dest)
   try {
@@ -128,10 +200,6 @@ if (!values.force && existingLayout) {
 await rm(dest, { recursive: true, force: true })
 await mkdir(dest, { recursive: true })
 
-// npm scopes an install to the nearest package.json; without one it walks up to
-// the workspace root and mixes the repo's devDependencies into peer resolution
-// (ERESOLVE conflicts, e.g. typescript-eslint vs rollup). Pin a minimal local
-// package.json so the bundled runtime installs in isolation.
 await writeFile(
   path.join(dest, 'package.json'),
   `${JSON.stringify({ name: 'harnessdock-bundled-runtime', private: true, version: '0.0.0' }, null, 2)}\n`,
@@ -148,9 +216,7 @@ for (const mirror of mirrors) {
   try {
     console.log(`downloading ${dist.url}`)
     const response = await fetch(dist.url, { signal: AbortSignal.timeout(15_000) })
-    if (!response.ok || !response.body) {
-      throw new Error(`HTTP ${response.status}`)
-    }
+    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
     const tmp = path.join(dest, path.basename(new URL(dist.url).pathname))
     await pipeline(response.body, createWriteStream(tmp))
     if (dist.kind === 'file') {
@@ -171,9 +237,7 @@ for (const mirror of mirrors) {
           { windowsHide: true },
         )
       } else {
-        await execFileAsync('unzip', ['-q', tmp, '-d', dest], {
-          windowsHide: true,
-        })
+        await execFileAsync('unzip', ['-q', tmp, '-d', dest], { windowsHide: true })
       }
       for (const entry of await readdir(extractedRoot)) {
         await rename(path.join(extractedRoot, entry), path.join(dest, entry))
@@ -181,9 +245,7 @@ for (const mirror of mirrors) {
       await rm(extractedRoot, { recursive: true, force: true })
       await rm(tmp, { force: true })
     } else {
-      await execFileAsync('tar', ['-xf', tmp, '-C', dest, '--strip-components=1'], {
-        windowsHide: true,
-      })
+      await execFileAsync('tar', ['-xf', tmp, '-C', dest, '--strip-components=1'], { windowsHide: true })
       await rm(tmp, { force: true })
     }
     nodeSource = dist.url
@@ -215,61 +277,63 @@ if (!nodeSource) {
   }
 }
 
-const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const registries = [
-  ...(process.env.DSH_NPM_MIRROR ? [process.env.DSH_NPM_MIRROR] : []),
-  'https://registry.npmjs.org',
-  'https://registry.npmmirror.com',
-]
-let installed = false
-let lastNpmError
-for (const registry of registries) {
-  console.log(`npm install @deepseek-ai/dsh@${origin.dshVersion} --registry ${registry}`)
-  try {
-    await execFileAsync(
-      npmBin,
-      [
-        'install',
-        '--omit=dev',
-        '--include=optional',
-        '--no-fund',
-        '--no-audit',
-        `--os=${platform}`,
-        `--cpu=${arch}`,
-        ...(platform === 'linux' ? ['--libc=glibc'] : []),
-        `--fetch-timeout=60000`,
-        `--fetch-retries=3`,
-        `--fetch-retry-mintimeout=1000`,
-        `--fetch-retry-maxtimeout=10000`,
-        `--registry=${registry}`,
-        `@deepseek-ai/dsh@${origin.dshVersion}`,
-      ],
-      {
-        cwd: dest,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          NODE_OPTIONS:
-            process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
-        },
-        shell: process.platform === 'win32',
-      },
+if (packedRuntimeDir) {
+  await installPackedRuntime(packedRuntimeDir)
+} else {
+  if (!origin.npmTarball) {
+    throw new Error(
+      `dsh ${origin.dshVersion} is not published to npm; set DSH_PACKED_RUNTIME_DIR to the official packed tarballs`,
     )
-    installed = true
-    break
-  } catch (error) {
-    lastNpmError = error
-    console.warn(`registry failed: ${registry}`)
   }
-}
-if (!installed) {
-  throw lastNpmError ?? new Error('all npm registries failed')
+  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const registries = [
+    ...(process.env.DSH_NPM_MIRROR ? [process.env.DSH_NPM_MIRROR] : []),
+    'https://registry.npmjs.org',
+    'https://registry.npmmirror.com',
+  ]
+  let installed = false
+  let lastNpmError
+  for (const registry of registries) {
+    console.log(`npm install @deepseek-ai/dsh@${origin.dshVersion} --registry ${registry}`)
+    try {
+      await execFileAsync(
+        npmBin,
+        [
+          'install',
+          '--omit=dev',
+          '--include=optional',
+          '--no-fund',
+          '--no-audit',
+          `--os=${platform}`,
+          `--cpu=${arch}`,
+          ...(platform === 'linux' ? ['--libc=glibc'] : []),
+          '--fetch-timeout=60000',
+          '--fetch-retries=3',
+          '--fetch-retry-mintimeout=1000',
+          '--fetch-retry-maxtimeout=10000',
+          `--registry=${registry}`,
+          `@deepseek-ai/dsh@${origin.dshVersion}`,
+        ],
+        {
+          cwd: dest,
+          windowsHide: true,
+          env: {
+            ...process.env,
+            NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+          },
+          shell: process.platform === 'win32',
+        },
+      )
+      installed = true
+      break
+    } catch (error) {
+      lastNpmError = error
+      console.warn(`registry failed: ${registry}`)
+    }
+  }
+  if (!installed) throw lastNpmError ?? new Error('all npm registries failed')
 }
 
-// npm filters optional packages against the runner's real platform even when
-// --os/--cpu target a different release platform. Install the three required
-// target-native packages explicitly with --force so cross-built runtimes are
-// complete on a Linux or Apple Silicon preparation runner.
 await installTargetNativePackages()
 
 if (!inspectBundledRuntime(dest, platform)) {
@@ -281,9 +345,6 @@ if (repairedAssets.length > 0) {
   console.log(`repaired known upstream runtime assets: ${repairedAssets.join(', ')}`)
 }
 
-// Size pruning: the bundled runtime only ever runs on this host, so drop
-// @img/sharp variants for other platforms, non-host node-pty prebuilds, and
-// dev/debug weight (.map / .pdb / .d.ts) — dead bytes in the full package.
 const { removedBytes: prunedBytes, removedCount: prunedCount } = await pruneBundledRuntime(
   dest,
   platform,
@@ -296,6 +357,9 @@ await writeFile(
   `${JSON.stringify(
     {
       dshVersion: origin.dshVersion,
+      gitTag: origin.gitTag,
+      gitCommit: origin.gitCommit,
+      runtimeSource: packedRuntimeDir ? 'official-source-pack' : 'npm',
       nodeVersion: NODE_BUNDLE_VERSION,
       nodeSource,
       platform,
