@@ -1,3 +1,4 @@
+# Temporary branch-only maintenance workflow. Remove before merge.
 name: maintain-v0.1.1
 
 on:
