@@ -33,6 +33,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   plan:
@@ -49,13 +50,13 @@ jobs:
         run: |
           set -euo pipefail
           build_rows='[
-            {"runner":"windows-latest","artifact_os":"win","target_os":"win","scenario":"thin","arch":"x64","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin"},
-            {"runner":"windows-latest","artifact_os":"win","target_os":"win","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full"},
-            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","scenario":"thin","arch":"x64","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
-            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"thin","arch":"all","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin"},
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/win-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/linux-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"thin","arch":"all","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","packaged_runtime_dir":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
           ]'
           runtime_rows='[
             {"enabled":true,"runner":"ubuntu-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
@@ -75,15 +76,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.12.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          pnpm check:versions
+          pnpm check:release
       - run: pnpm test
 
   prepare-runtime:
@@ -100,20 +106,20 @@ jobs:
       - name: Skip runtime preparation for thin-only release
         if: matrix.enabled != true
         run: echo "No full runtime requested for this release target."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: matrix.enabled == true
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: matrix.enabled == true
         with:
           version: 10.12.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: matrix.enabled == true
         with:
           node-version: 24
           cache: pnpm
       - name: Cache prepared runtime
         if: matrix.enabled == true
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ matrix.runtime_dir }}
           key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/integrity.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
@@ -131,12 +137,14 @@ jobs:
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
       - name: Upload prepared runtime
         if: matrix.enabled == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
+          include-hidden-files: true
 
   build:
     needs: [test, plan, prepare-runtime]
@@ -150,33 +158,40 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.12.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - name: Cache electron-builder downloads (Unix)
         if: runner.os != 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/electron-builder
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Cache electron-builder downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Download prepared runtime
         if: matrix.scenario == 'full'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
+      - name: Repair and verify downloaded runtime
+        if: matrix.scenario == 'full'
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
       - name: Build desktop package
         run: ${{ matrix.command }}
         env:
@@ -184,9 +199,11 @@ jobs:
           GH_REPO: ${{ github.event.repository.name }}
           DSH_SKIP_RUNTIME_PREPARE: ${{ matrix.scenario == 'full' && '1' || '0' }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Smoke test bundled runtime
+      - name: Smoke test packaged runtime
         if: matrix.scenario == 'full'
-        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.runtime_dir }} --plugin packages/plugin-embedded-client/lib/index.js
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.packaged_runtime_dir }} --plugin ${{ matrix.packaged_plugin }}
+      - name: Validate package size budget
+        run: pnpm check:size
       - name: Collect artifacts
         shell: bash
         run: |
@@ -196,28 +213,26 @@ jobs:
             \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
                -o -name '*.AppImage' -o -name '*.deb' \) \
             -exec cp {} dist/ \;
-          # Only full packages participate in the built-in updater. Keep their
-          # update metadata and differential maps; thin blockmaps are unused.
           if [ "${{ matrix.scenario }}" = "full" ]; then
             find "$release_dir" -maxdepth 1 -type f \
               \( -name '*.blockmap' -o -name 'latest*.yml' \) \
               -exec cp {} dist/ \;
           fi
           ls -la dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.artifact_os }}-${{ matrix.scenario }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
-          # Packages are already compressed; avoid compressing them again in the artifact.
           compression-level: 0
 
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: desktop-*
@@ -236,30 +251,127 @@ jobs:
             echo "tag=unreleased-$(date +%Y%m%d-%H%M%S)" >> "${GITHUB_OUTPUT}"
             echo "draft=true" >> "${GITHUB_OUTPUT}"
           fi
-      - name: Generate release notes
+      - name: Generate public release notes
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
           cat > notes.md <<EOF
-          # HarnessDock ${VERSION}
+          # HarnessDock v${VERSION} — 首个公开版本
 
-          | Package | OS | Scenario | Install |
-          |---|---|---|---|
-          | *-win-*-Portable-*.exe | Windows | thin/full | Standalone executable |
-          | *-win-*-Setup-*.exe | Windows | thin/full | NSIS installer |
-          | *-win-*.zip | Windows | thin/full | Unpacked zip |
-          | *.dmg | macOS | thin/full | Disk image |
-          | *.AppImage | Linux | thin/full | Standalone AppImage |
-          | *.deb | Linux | thin/full | Debian package |
+          HarnessDock v${VERSION} 是项目的首个公开发行版本。这个版本提供 Windows、macOS 和 Linux 桌面客户端，并同时提供 Full 与 Thin 两类安装包，方便普通用户、开发者以及已有 DeepSeek Harness / dsh 运行环境的用户按需选择。
 
-          latest*.yml and full-package .blockmap files support automatic and
-          differential updates; they are metadata, not installers.
+          ## 推荐怎么选
+
+          - 第一次安装、希望下载后直接使用：优先选择 Full。
+          - 已经维护自己的 dsh 运行环境、希望安装包更小：选择 Thin。
+          - Windows 普通用户：优先选择 Full Setup EXE。
+          - Windows 临时使用、U 盘运行或不希望写入系统安装信息：选择 Full Portable EXE。
+          - Apple Silicon Mac（M1/M2/M3/M4 及后续 ARM Mac）：选择 mac-arm64-full DMG。
+          - Intel Mac：选择 mac-x64-full DMG。
+          - Ubuntu / Debian：优先选择 linux-amd64-full DEB。
+          - 其他常见 x86_64 Linux 桌面发行版：优先选择 linux-x86_64-full AppImage。
+
+          ## Full 与 Thin 的区别
+
+          | 类型 | 是否内置 dsh runtime | 安装包体积 | 适合用户 | 更新能力 |
+          |---|---|---:|---|---|
+          | Full | 是 | 较大 | 普通用户、首次安装、希望开箱即用 | 发布包同时提供自动/差分更新元数据 |
+          | Thin | 否 | 较小 | 开发者、已有 dsh/runtime、需要自行管理运行环境的用户 | 不作为内置 runtime 自动更新的主要发行形态 |
+
+          Full 包在构建阶段会校验 bundled runtime、embedded plugin、目标平台原生依赖，并在最终 Electron 打包目录中直接启动 dsh Web 做 smoke test。也就是说，发布门禁验证的是最终交付包中的 runtime，而不是打包前的 staging 目录。
+
+          ## Windows 安装包
+
+          ### HarnessDock-Setup-*-win-x64-full.exe
+          推荐给绝大多数 Windows 用户。使用标准安装流程，可创建正常的应用安装记录，适合长期使用和日常升级。
+
+          ### HarnessDock-Portable-*-win-x64-full.exe
+          无需传统安装，直接运行。适合临时测试、U 盘携带、受限环境或不希望安装到系统的用户。Full Portable 同样包含 bundled dsh runtime。
+
+          ### HarnessDock-*-win-x64-full.zip
+          完整压缩包。适合手动部署、企业内部软件分发、自动化解压安装、问题排查以及需要直接检查 unpacked 文件结构的用户。
+
+          Windows 的 Thin Setup / Portable / ZIP 与上面场景相同，但不内置完整 dsh runtime，适合已经自行管理运行环境的高级用户和开发者。
+
+          ## macOS 安装包
+
+          ### HarnessDock-*-mac-arm64-full.dmg
+          Apple Silicon Mac 推荐版本，适用于 M1/M2/M3/M4 及后续 ARM64 Mac。打开 DMG 后将 HarnessDock 拖入 Applications 即可。
+
+          ### HarnessDock-*-mac-x64-full.dmg
+          Intel Mac 推荐版本。仅在 Intel 处理器 Mac 上选择该版本。
+
+          ### macOS ZIP
+          ZIP 与对应 DMG 包含相同架构的应用，适合自动化分发、手动解压、CI/CD 或不方便挂载 DMG 的环境。
+
+          macOS Thin 包适合已经自行维护 dsh runtime 的开发者。当前公开构建未配置 Apple Developer ID 签名/Notarization；首次运行时 macOS Gatekeeper 可能要求用户在“系统设置 → 隐私与安全性”中确认打开。
+
+          ## Linux 安装包
+
+          ### HarnessDock-*-linux-amd64-full.deb
+          推荐 Ubuntu、Debian 及兼容 DEB 软件包管理的 x86_64 系统。适合希望由系统包管理器安装、升级和卸载的用户。
+
+          ### HarnessDock-*-linux-x86_64-full.AppImage
+          适合不希望安装系统软件包，或使用 Fedora、Arch、openSUSE 等其他常见 x86_64 Linux 桌面发行版的用户。赋予执行权限后即可直接运行。
+
+          Linux Thin 包适合已有 dsh runtime、希望减少下载体积或自行控制 runtime 生命周期的开发/运维环境。
+
+          ## 自动更新相关文件
+
+          Release Assets 中的 latest.yml、latest-mac.yml、latest-linux.yml 和 *.blockmap 是自动更新及差分更新使用的元数据，不是用户需要手动安装的文件。普通用户只需要下载对应平台的 EXE、DMG、AppImage 或 DEB。
+
+          ## v${VERSION} 发布验证
+
+          - Windows x64：测试、Thin 打包、Full Setup/Portable/ZIP 打包、包内 dsh runtime 启动与 Web 健康检查。
+          - Linux x64：测试、Thin 打包、Full AppImage/DEB 打包、包内 dsh runtime 启动与 Web 健康检查。
+          - macOS arm64：测试、Thin 打包、Full DMG/ZIP 打包、ARM64 包内 dsh runtime 原生启动与 Web 健康检查。
+          - macOS x64：Full DMG/ZIP 构建、runtime 完整性、embedded plugin、产物清单和体积门禁验证。
+          - 所有 Full runtime artifact 均在传输后再次进行 repair + integrity validation，避免隐藏文件和 Unix executable bit 在打包链路中丢失。
+
+          ## 安装建议
+
+          不确定选哪个文件时，直接选择与你操作系统和 CPU 架构匹配的 Full 安装包。Thin 版本主要面向明确知道如何配置和维护 dsh runtime 的用户。
           EOF
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: HarnessDock ${{ steps.tag.outputs.tag }}
           draft: ${{ steps.tag.outputs.draft }}
           files: artifacts/*
           body_path: notes.md
-          generate_release_notes: true
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          make_latest: true
+
+  cleanup:
+    needs: publish
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Delete historical development branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | while IFS= read -r branch; do
+            [ "$branch" = "main" ] && continue
+            echo "Deleting branch: $branch"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/$branch" || true
+          done
+      - name: Delete historical Actions runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_run="${GITHUB_RUN_ID}"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" --jq '.workflow_runs[].id' | while IFS= read -r run_id; do
+            [ "$run_id" = "$current_run" ] && continue
+            echo "Deleting Actions run: $run_id"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/$run_id" || true
+          done

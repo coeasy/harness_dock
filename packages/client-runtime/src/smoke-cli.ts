@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { DshRuntime } from './runtime.ts'
 
+const cliArgs = process.argv.slice(2)
+if (cliArgs[0] === '--') cliArgs.shift()
+
 const { values } = parseArgs({
+  args: cliArgs,
   options: {
     'runtime-dir': { type: 'string' },
     plugin: { type: 'string' },

@@ -108,4 +108,17 @@ exports.default = async function afterPack(context) {
   if (!fs.existsSync(copiedNode) || !fs.existsSync(copiedBin)) {
     throw new Error('[afterPack] dsh runtime copy failed: ' + dst)
   }
+
+  // GitHub Actions artifacts are ZIP archives and do not reliably preserve
+  // Unix executable bits. Full packages are assembled from a downloaded
+  // runtime artifact, so explicitly restore Node's executable permission after
+  // copying it into the final app. afterPack runs before code signing, which
+  // keeps this compatible with future signed/notarized macOS releases.
+  if (!isWindows) {
+    fs.chmodSync(copiedNode, 0o755)
+    const mode = fs.statSync(copiedNode).mode & 0o777
+    if ((mode & 0o111) === 0) {
+      throw new Error('[afterPack] bundled node is not executable after copy: ' + copiedNode)
+    }
+  }
 }

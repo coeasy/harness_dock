@@ -1,26 +1,33 @@
 #!/usr/bin/env node
 /**
- * Size-budget gate for the desktop release artifacts (scheme D4).
+ * Size-budget gate for desktop release artifacts (scheme D4).
  *
- * Scans apps/desktop/release (recursively: release/thin, release/full,
- * release/full-pruned, ...) for HarnessDock-*.exe / HarnessDock-*.zip,
- * groups them by scenario (-thin / -full) and kind (Portable / Setup / zip),
- * and compares each against the release budget:
+ * Scans apps/desktop/release recursively for HarnessDock desktop packages,
+ * groups them by scenario (-thin / -full) and package kind, and compares each
+ * against the release budget.
  *
- *   thin  Portable / Setup <= 90 MB,  zip <= 125 MB
- *   full  Portable / Setup <= 165 MB, zip <= 230 MB
+ * Package kinds covered:
+ *   Windows: Portable.exe, Setup.exe, zip
+ *   macOS:   dmg, zip
+ *   Linux:   AppImage, deb
  *
- * When several files map to the same (scenario, kind) bucket — e.g. the same
- * artifact name produced in both release/full and release/full-pruned — only
- * the smallest is counted, so a pruned full build wins over the unpruned one.
+ * Compressed installer/archive budgets intentionally share the same envelope:
+ *   thin <= 125 MB
+ *   full <= 230 MB
+ * Windows self-extracting executables retain their tighter historical budgets:
+ *   thin Portable / Setup <= 90 MB
+ *   full Portable / Setup <= 165 MB
+ *
+ * When several files map to the same (scenario, kind) bucket, only the
+ * smallest is counted so a pruned build can win over an unpruned duplicate.
  *
  * Exit codes (best-effort by design):
- *   0  all budgets pass, or no artifacts were found (pure source build)
+ *   0  all discovered budgets pass, or no artifacts were found (pure source build)
  *   1  at least one artifact exceeds its budget
  *
  * Usage:
  *   node scripts/check-size.mjs
- *   DSH_RELEASE_ROOT=<dir> node scripts/check-size.mjs   # override scan dir (CI / staging)
+ *   DSH_RELEASE_ROOT=<dir> node scripts/check-size.mjs
  */
 
 import { readdir, stat } from 'node:fs/promises'
@@ -30,19 +37,21 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const releaseRoot = process.env.DSH_RELEASE_ROOT ?? path.join(repoRoot, 'apps', 'desktop', 'release')
 
-// scenario -> kind -> budget (MB)
 const BUDGETS = {
-  thin: { Portable: 90, Setup: 90, zip: 125 },
-  full: { Portable: 165, Setup: 165, zip: 230 },
+  thin: { Portable: 90, Setup: 90, zip: 125, dmg: 125, AppImage: 125, deb: 125 },
+  full: { Portable: 165, Setup: 165, zip: 230, dmg: 230, AppImage: 230, deb: 230 },
 }
 
-const ARTIFACT_RE = /^HarnessDock-.*\.(exe|zip)$/i
-const SCENARIO_RE = /-(thin|full)\.(exe|zip)$/i
+const ARTIFACT_RE = /^HarnessDock-.*\.(exe|zip|dmg|AppImage|deb)$/i
+const SCENARIO_RE = /-(thin|full)\.(exe|zip|dmg|AppImage|deb)$/i
 const MB = 1024 * 1024
 
 function kindOf(name) {
   if (/Portable/i.test(name)) return 'Portable'
   if (/Setup/i.test(name)) return 'Setup'
+  if (/\.AppImage$/i.test(name)) return 'AppImage'
+  if (/\.deb$/i.test(name)) return 'deb'
+  if (/\.dmg$/i.test(name)) return 'dmg'
   if (/\.zip$/i.test(name)) return 'zip'
   return null
 }
@@ -53,7 +62,7 @@ async function findArtifacts() {
   try {
     entries = await readdir(releaseRoot, { recursive: true, withFileTypes: true })
   } catch {
-    return found // release dir does not exist yet
+    return found
   }
   for (const entry of entries) {
     if (!entry.isFile()) continue
@@ -69,15 +78,12 @@ async function findArtifacts() {
   return found
 }
 
-// Keep the smallest file per (scenario, kind) bucket so a pruned full build
-// (release/full-pruned) is counted instead of the identically-named unpruned
-// artifact in release/full when both exist.
 function dedupe(artifacts) {
   const best = new Map()
-  for (const a of artifacts) {
-    const key = `${a.scenario}:${a.kind}`
-    const prev = best.get(key)
-    if (!prev || a.bytes < prev.bytes) best.set(key, a)
+  for (const artifact of artifacts) {
+    const key = `${artifact.scenario}:${artifact.kind}`
+    const previous = best.get(key)
+    if (!previous || artifact.bytes < previous.bytes) best.set(key, artifact)
   }
   return [...best.values()]
 }
@@ -97,18 +103,18 @@ artifacts.sort((a, b) => a.scenario.localeCompare(b.scenario) || a.kind.localeCo
 
 let failed = false
 console.log('[check:size] release artifact sizes (budget gate):')
-for (const a of artifacts) {
-  const budget = BUDGETS[a.scenario]?.[a.kind]
-  const sizeMb = a.bytes / MB
-  const label = `${a.scenario}/${a.kind}`
+for (const artifact of artifacts) {
+  const budget = BUDGETS[artifact.scenario]?.[artifact.kind]
+  const sizeMb = artifact.bytes / MB
+  const label = `${artifact.scenario}/${artifact.kind}`
   if (budget == null) {
-    console.log(`  ${label.padEnd(16)} ${a.name}  ${sizeMb.toFixed(1)} MB  (no budget rule — skipped)`)
+    console.log(`  ${label.padEnd(16)} ${artifact.name}  ${sizeMb.toFixed(1)} MB  (no budget rule - skipped)`)
     continue
   }
   const over = sizeMb > budget
   if (over) failed = true
   console.log(
-    `  ${label.padEnd(16)} ${a.name}  ${sizeMb.toFixed(1)} MB  (<= ${budget.toFixed(1)} MB) ${over ? 'OVER BUDGET' : 'ok'}`,
+    `  ${label.padEnd(16)} ${artifact.name}  ${sizeMb.toFixed(1)} MB  (<= ${budget.toFixed(1)} MB) ${over ? 'OVER BUDGET' : 'ok'}`,
   )
 }
 
