@@ -116,7 +116,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.runtime_dir }}
-          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
+          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/integrity.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
           restore-keys: |
             dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-
       - name: Install workspace dependencies
@@ -184,6 +184,9 @@ jobs:
           GH_REPO: ${{ github.event.repository.name }}
           DSH_SKIP_RUNTIME_PREPARE: ${{ matrix.scenario == 'full' && '1' || '0' }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Smoke test bundled runtime
+        if: matrix.scenario == 'full'
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.runtime_dir }} --plugin packages/plugin-embedded-client/lib/index.js
       - name: Collect artifacts
         shell: bash
         run: |
@@ -191,8 +194,15 @@ jobs:
           release_dir="apps/desktop/release/${{ matrix.scenario }}"
           find "$release_dir" -maxdepth 1 -type f \
             \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
-               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) \
+               -o -name '*.AppImage' -o -name '*.deb' \) \
             -exec cp {} dist/ \;
+          # Only full packages participate in the built-in updater. Keep their
+          # update metadata and differential maps; thin blockmaps are unused.
+          if [ "${{ matrix.scenario }}" = "full" ]; then
+            find "$release_dir" -maxdepth 1 -type f \
+              \( -name '*.blockmap' -o -name 'latest*.yml' \) \
+              -exec cp {} dist/ \;
+          fi
           ls -la dist/
       - uses: actions/upload-artifact@v4
         with:
@@ -242,7 +252,8 @@ jobs:
           | *.AppImage | Linux | thin/full | Standalone AppImage |
           | *.deb | Linux | thin/full | Debian package |
 
-          .blockmap files support differential downloads and are not installers.
+          latest*.yml and full-package .blockmap files support automatic and
+          differential updates; they are metadata, not installers.
           EOF
       - uses: softprops/action-gh-release@v2
         with:

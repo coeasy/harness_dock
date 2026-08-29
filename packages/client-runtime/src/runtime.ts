@@ -21,6 +21,8 @@ export interface DshRuntimeOptions {
   env?: NodeJS.ProcessEnv
   cwd?: string
   readyTimeoutMs?: number
+  /** require the child and web UI to stay healthy this long before returning ready */
+  readyStabilityMs?: number
   bundledRoot?: string
   spawnImpl?: typeof spawn
   cacheDir?: string
@@ -195,7 +197,14 @@ export class DshRuntime {
 
     const timeoutMs = this.options.readyTimeoutMs ?? 120_000
     try {
-      const ready = await waitForReady(child, readyFile, version, timeoutMs)
+      const ready = await waitForReady(
+        child,
+        readyFile,
+        version,
+        timeoutMs,
+        this.options.readyStabilityMs ?? 1_000,
+        this.options.log,
+      )
       // waitForReady detaches its own 'data' listeners once ready; keep the
       // pipes drained so dsh never blocks on a full OS pipe buffer.
       drainOutput(child, this.options.log)
@@ -246,8 +255,9 @@ export class DshRuntime {
   }
 }
 
-/** A single forwarded log line is capped here to keep the boot log bounded. */
+/** Split large stderr writes without hiding nested AggregateError causes. */
 const DRAIN_CHUNK_LIMIT = 2000
+const DRAIN_TOTAL_LIMIT = 256_000
 
 const drained = new WeakSet<ChildProcessWithoutNullStreams>()
 
@@ -266,14 +276,30 @@ export function drainOutput(
 ): void {
   if (drained.has(child)) return
   drained.add(child)
-  const onData = (chunk: Buffer | string) => {
-    if (!log) return
-    const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-    const text = raw.length > DRAIN_CHUNK_LIMIT ? raw.slice(0, DRAIN_CHUNK_LIMIT) : raw
-    log(`[dsh] ${text}`)
-  }
+  const onData = createOutputForwarder(log)
   child.stdout?.on('data', onData)
   child.stderr?.on('data', onData)
+}
+
+function createOutputForwarder(
+  log?: (message: string) => void,
+): (chunk: Buffer | string) => void {
+  let forwarded = 0
+  let capped = false
+  return (chunk) => {
+    if (!log || capped) return
+    const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    const remaining = DRAIN_TOTAL_LIMIT - forwarded
+    const text = raw.slice(0, Math.max(0, remaining))
+    forwarded += text.length
+    for (let offset = 0; offset < text.length; offset += DRAIN_CHUNK_LIMIT) {
+      log(`[dsh] ${text.slice(offset, offset + DRAIN_CHUNK_LIMIT)}`)
+    }
+    if (raw.length > remaining) {
+      capped = true
+      log(`[dsh] output capped after ${DRAIN_TOTAL_LIMIT} characters`)
+    }
+  }
 }
 
 async function waitForReady(
@@ -281,12 +307,16 @@ async function waitForReady(
   readyFile: string,
   dshVersion: string,
   timeoutMs: number,
+  stabilityMs: number,
+  log?: (message: string) => void,
 ): Promise<ReadyInfo> {
   return new Promise((resolve, reject) => {
     let settled = false
     let buffer = ''
-    let stdoutReady: ParsedUrl | undefined
-    let probingStdout = false
+    let candidate: ReadyInfo | undefined
+    let candidateSince = 0
+    let validating = false
+    const forwardOutput = createOutputForwarder(log)
     const appendOutput = (chunk: Buffer | string) => {
       buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
       // Keep diagnostics useful without retaining unbounded child output.
@@ -314,30 +344,44 @@ async function waitForReady(
     }
     const onData = (chunk: Buffer | string) => {
       appendOutput(chunk)
+      forwardOutput(chunk)
       const parsed = parseWebUrl(buffer)
-      if (parsed) stdoutReady = parsed
-      void probeStdoutUrl()
+      if (parsed) consider({
+        ...parsed,
+        pid: child.pid ?? 0,
+        dshVersion,
+      })
     }
-    const probeStdoutUrl = async (): Promise<void> => {
-      if (settled || probingStdout || !stdoutReady) return
-      probingStdout = true
-      const parsed = stdoutReady
-      const ready = await probeHttpReady(parsed.url)
-      probingStdout = false
-      if (ready && !settled) {
-        succeed({
-          ...parsed,
-          pid: child.pid ?? 0,
-          dshVersion,
-        })
+    const consider = (info: ReadyInfo): void => {
+      if (candidate?.url === info.url) return
+      candidate = info
+      candidateSince = Date.now()
+    }
+    const validateCandidate = async (): Promise<void> => {
+      if (
+        settled ||
+        validating ||
+        !candidate ||
+        Date.now() - candidateSince < stabilityMs
+      ) return
+      validating = true
+      const current = candidate
+      const ready = child.exitCode === null && await probeHttpReady(current.url)
+      validating = false
+      if (settled || candidate !== current) return
+      if (!ready) {
+        candidate = undefined
+        candidateSince = 0
+        return
       }
+      succeed(current)
     }
     const poll = setInterval(() => {
-      void probeStdoutUrl()
+      void validateCandidate()
       void readFile(readyFile, 'utf8')
         .then((raw) => {
           const info = parseReadyFile(raw)
-          if (info) succeed(info)
+          if (info) consider(info)
         })
         .catch(() => undefined)
     }, 100)

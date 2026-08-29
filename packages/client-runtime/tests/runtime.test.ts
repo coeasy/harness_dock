@@ -91,6 +91,44 @@ setInterval(() => {}, 1 << 30)
     },
     TEST_TIMEOUT_MS,
   )
+
+  it(
+    'rejects a transient web server that crashes during the stability window',
+    async () => {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-rt-'))
+      temps.push(dir)
+      const fake = path.join(dir, 'crashing-dsh.mjs')
+      await writeFile(
+        fake,
+        `
+import { createServer } from 'node:http'
+const server = createServer((_req, res) => { res.end('<html>temporary</html>') })
+server.listen(0, '127.0.0.1', () => {
+  const addr = server.address()
+  process.stdout.write('dsh web: http://127.0.0.1:' + addr.port + '\\n')
+  setTimeout(() => process.exit(19), 100)
+})
+`,
+        'utf8',
+      )
+      const logs: string[] = []
+      const runtime = new DshRuntime({
+        origin: { dshVersion: '0.1.1-rc.2' },
+        pluginPath: path.join(dir, 'missing-plugin.js'),
+        cacheDir: dir,
+        readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 500,
+        env: { DSH_RUNTIME: 'local', DSH_BIN: process.execPath },
+        log: (message) => logs.push(message),
+        spawnImpl: (command, _args, options) =>
+          spawn(command, [fake], { ...options, stdio: ['ignore', 'pipe', 'pipe'] }),
+      })
+
+      await expect(runtime.start()).rejects.toThrow('dsh exited before ready (code 19)')
+      expect(logs.some((line) => line.includes('dsh web: http://127.0.0.1:'))).toBe(true)
+    },
+    TEST_TIMEOUT_MS,
+  )
 })
 
 describe('DshRuntime bundled follow-pin (Phase B)', () => {

@@ -11,6 +11,7 @@ import {
   withTimeout,
 } from './npm-mirrors.ts'
 import { pruneBundledRuntime } from './prune.ts'
+import { assertBundledRuntimeIntegrity, repairKnownRuntimeAssets } from './integrity.ts'
 import type { RuntimeProgressEvent } from './runtime.ts'
 
 const execFileAsync = promisify(execFile)
@@ -448,6 +449,11 @@ export async function ensureDownloadedRuntime(input: {
     throw new Error(`dsh bin.js not found after extraction: ${dshBin}`)
   }
 
+  const repairedAssets = await repairKnownRuntimeAssets(runtimeDir)
+  if (repairedAssets.length > 0) {
+    console.log(`[fetch-runtime] repaired known upstream assets: ${repairedAssets.join(', ')}`)
+  }
+
   // Prune the vendored runtime for the host platform (same rules as the bundled
   // prepare:runtime): drop other-platform native variants (koffi/ripgrep/@img),
   // non-host prebuilds and dev/debug files. Saves ~50-100 MB on every download.
@@ -458,6 +464,7 @@ export async function ensureDownloadedRuntime(input: {
       `[fetch-runtime] pruned ${pruned.removedCount} items (${(pruned.removedBytes / 1024 / 1024).toFixed(1)} MB) for ${process.platform}/${process.arch}`,
     )
   }
+  await assertBundledRuntimeIntegrity(runtimeDir, process.platform, process.arch)
 
   await writeFile(marker, `${new Date().toISOString()}\n`, 'utf8')
   input.onProgress?.({ stage: 'done', root: runtimeDir })

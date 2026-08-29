@@ -8,5 +8,10 @@ export { bundledRuntimeVersion, inspectBundledRuntime, NODE_BUNDLE_VERSION, runt
 export { scrubElectronEnv } from './env.ts'
 export { buildSpawnRequest, isWindowsScriptCommand, quoteForCmd } from './shell.ts'
 export { DshRuntime } from './runtime.ts'
+export {
+  assertBundledRuntimeIntegrity,
+  repairKnownRuntimeAssets,
+  requiredNativePackages,
+} from './integrity.ts'
 export type { DshRuntimeOptions, RuntimeProgressEvent, StopOutcome } from './runtime.ts'
 export type { ReadyInfo, RuntimeMode } from './types.ts'

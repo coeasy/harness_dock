@@ -19,6 +19,11 @@ import {
   runtimeCacheDir,
 } from './bundled.ts'
 import { pruneBundledRuntime } from './prune.ts'
+import {
+  assertBundledRuntimeIntegrity,
+  repairKnownRuntimeAssets,
+  requiredNativePackages,
+} from './integrity.ts'
 
 const execFileAsync = promisify(execFile)
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -64,7 +69,52 @@ if (values['prune-only']) {
 const origin = await readOriginFile(ORIGIN_PATH)
 const existingLayout = inspectBundledRuntime(dest, platform)
 const existingVersion = existingLayout ? bundledRuntimeVersion(dest) : null
+
+async function installTargetNativePackages(): Promise<void> {
+  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const packages = requiredNativePackages(platform, arch)
+  console.log(`repairing target-native runtime packages: ${packages.join(', ')}`)
+  await execFileAsync(
+    npmBin,
+    [
+      'install',
+      '--no-save',
+      '--omit=dev',
+      '--include=optional',
+      '--ignore-scripts',
+      '--no-fund',
+      '--no-audit',
+      `--os=${platform}`,
+      `--cpu=${arch}`,
+      ...(platform === 'linux' ? ['--libc=glibc'] : []),
+      ...packages,
+    ],
+    {
+      cwd: dest,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+      },
+      shell: process.platform === 'win32',
+    },
+  )
+}
+
 if (!values.force && existingLayout && existingVersion === origin.dshVersion) {
+  const repairedAssets = await repairKnownRuntimeAssets(dest)
+  try {
+    await assertBundledRuntimeIntegrity(dest, platform, arch)
+  } catch (error) {
+    console.warn(
+      `cached runtime needs a native-package repair: ${error instanceof Error ? error.message : String(error)}`,
+    )
+    await installTargetNativePackages()
+    await assertBundledRuntimeIntegrity(dest, platform, arch)
+  }
+  if (repairedAssets.length > 0) {
+    console.log(`repaired known upstream runtime assets: ${repairedAssets.join(', ')}`)
+  }
   console.log(`bundled runtime already present and matches dsh ${origin.dshVersion}: ${dest}`)
   process.exit(0)
 }
@@ -180,8 +230,12 @@ for (const registry of registries) {
       [
         'install',
         '--omit=dev',
+        '--include=optional',
         '--no-fund',
         '--no-audit',
+        `--os=${platform}`,
+        `--cpu=${arch}`,
+        ...(platform === 'linux' ? ['--libc=glibc'] : []),
         `--fetch-timeout=60000`,
         `--fetch-retries=3`,
         `--fetch-retry-mintimeout=1000`,
@@ -215,6 +269,11 @@ if (!inspectBundledRuntime(dest, platform)) {
   throw new Error(`prepare-runtime finished but layout is incomplete under ${dest}`)
 }
 
+const repairedAssets = await repairKnownRuntimeAssets(dest)
+if (repairedAssets.length > 0) {
+  console.log(`repaired known upstream runtime assets: ${repairedAssets.join(', ')}`)
+}
+
 // Size pruning: the bundled runtime only ever runs on this host, so drop
 // @img/sharp variants for other platforms, non-host node-pty prebuilds, and
 // dev/debug weight (.map / .pdb / .d.ts) — dead bytes in the full package.
@@ -223,6 +282,7 @@ const { removedBytes: prunedBytes, removedCount: prunedCount } = await pruneBund
   platform,
   arch,
 )
+await assertBundledRuntimeIntegrity(dest, platform, arch)
 
 await writeFile(
   path.join(dest, 'manifest.json'),
