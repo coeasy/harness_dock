@@ -1,6 +1,6 @@
 {
   "name": "@dsh/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "desktopName": "com.dsh.client",
   "description": "Electron shell that embeds the official DeepSeek Harness Web UI",
@@ -27,7 +27,7 @@
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "electron": "^37.3.1",
+    "electron": "43.4.1",
     "electron-builder": "^26.0.12",
     "esbuild": "^0.25.9"
   }
