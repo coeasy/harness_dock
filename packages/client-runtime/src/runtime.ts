@@ -6,12 +6,13 @@ import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
 import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './ensure-runtime.ts'
 import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
-import { parseWebUrl } from './output.ts'
+import { parseWebUrl, redactWebAuthTokens } from './output.ts'
 import { shutdownLadder, isProcessAlive, type ShutdownResult } from './process.ts'
 import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
 import { resolveRuntimeMode } from './process.ts'
 import { buildSpawnRequest } from './shell.ts'
+import { openWebUiSession } from './web-auth.ts'
 import type { ParsedUrl, ReadyInfo, RuntimeMode } from './types.ts'
 
 export interface DshRuntimeOptions {
@@ -275,13 +276,14 @@ function createOutputForwarder(
   return (chunk) => {
     if (!log || capped) return
     const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    const safe = redactWebAuthTokens(raw)
     const remaining = DRAIN_TOTAL_LIMIT - forwarded
-    const text = raw.slice(0, Math.max(0, remaining))
+    const text = safe.slice(0, Math.max(0, remaining))
     forwarded += text.length
     for (let offset = 0; offset < text.length; offset += DRAIN_CHUNK_LIMIT) {
       log(`[dsh] ${text.slice(offset, offset + DRAIN_CHUNK_LIMIT)}`)
     }
-    if (raw.length > remaining) {
+    if (safe.length > remaining) {
       capped = true
       log(`[dsh] output capped after ${DRAIN_TOTAL_LIMIT} characters`)
     }
@@ -308,7 +310,7 @@ async function waitForReady(
       if (buffer.length > 16_000) buffer = buffer.slice(-16_000)
     }
     const diagnostics = () => {
-      const output = buffer.trim()
+      const output = redactWebAuthTokens(buffer.trim())
       return output === '' ? '' : `\nLast dsh output:\n${output.slice(-4_000)}`
     }
     const fail = (error: Error) => {
@@ -386,20 +388,7 @@ async function waitForReady(
 }
 
 async function probeHttpReady(url: string): Promise<boolean> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 1_000)
-  try {
-    const response = await fetch(url, { signal: controller.signal, redirect: 'manual' })
-    if (!response.ok) return false
-    const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-    if (contentType !== '' && !contentType.includes('text/html')) return false
-    const body = await response.text()
-    return body.trim().length > 0
-  } catch {
-    return false
-  } finally {
-    clearTimeout(timeout)
-  }
+  return (await openWebUiSession(url, { timeoutMs: 1_000 })) !== null
 }
 
 async function verifyPackagedPlugin(
