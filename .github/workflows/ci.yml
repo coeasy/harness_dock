@@ -48,7 +48,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Read exact upstream commit
         id: origin
-        run: echo "commit=$(node -p \"require('./packages/docs-sync/origin.json').gitCommit\")" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           repository: deepseek-ai/deepseek-harness
