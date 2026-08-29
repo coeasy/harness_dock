@@ -6,7 +6,7 @@ import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
 import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './fetch-runtime.ts'
 import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
-import { parseWebUrl } from './output.ts'
+import { parseWebUrl, redactWebLaunchToken } from './output.ts'
 import { shutdownLadder, isProcessAlive, type ShutdownResult } from './process.ts'
 import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
@@ -288,7 +288,7 @@ function createOutputForwarder(
   let capped = false
   return (chunk) => {
     if (!log || capped) return
-    const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    const raw = redactWebLaunchToken(typeof chunk === 'string' ? chunk : chunk.toString('utf8'))
     const remaining = DRAIN_TOTAL_LIMIT - forwarded
     const text = raw.slice(0, Math.max(0, remaining))
     forwarded += text.length
@@ -323,7 +323,7 @@ async function waitForReady(
       if (buffer.length > 16_000) buffer = buffer.slice(-16_000)
     }
     const diagnostics = () => {
-      const output = buffer.trim()
+      const output = redactWebLaunchToken(buffer).trim()
       return output === '' ? '' : `\nLast dsh output:\n${output.slice(-4_000)}`
     }
     const fail = (error: Error) => {
@@ -354,6 +354,11 @@ async function waitForReady(
     }
     const consider = (info: ReadyInfo): void => {
       if (candidate?.url === info.url) return
+      if (candidate && candidate.host === info.host && candidate.port === info.port) {
+        const currentHasToken = new URL(candidate.url).searchParams.has('token')
+        const nextHasToken = new URL(info.url).searchParams.has('token')
+        if (currentHasToken && !nextHasToken) return
+      }
       candidate = info
       candidateSince = Date.now()
     }
