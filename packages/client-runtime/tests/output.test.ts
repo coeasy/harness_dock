@@ -2,9 +2,27 @@ import { describe, expect, it } from 'vitest'
 import { parseWebUrl } from '../src/output.ts'
 
 describe('parseWebUrl', () => {
-  it('extracts the loopback URL printed by dsh web', () => {
+  it('extracts the legacy loopback URL printed by dsh web', () => {
     expect(parseWebUrl('dsh web: http://127.0.0.1:43123\n')).toEqual({
       url: 'http://127.0.0.1:43123',
+      host: '127.0.0.1',
+      port: 43123,
+    })
+  })
+
+  it('preserves the alpha authentication query for readiness and renderer load', () => {
+    expect(
+      parseWebUrl('dsh web: http://127.0.0.1:43123/?token=abcDEF_123-xyz\n'),
+    ).toEqual({
+      url: 'http://127.0.0.1:43123/?token=abcDEF_123-xyz',
+      host: '127.0.0.1',
+      port: 43123,
+    })
+  })
+
+  it('does not absorb terminal ANSI escapes into the URL', () => {
+    expect(parseWebUrl('dsh web: http://127.0.0.1:43123/?token=abc\u001b[0m')).toEqual({
+      url: 'http://127.0.0.1:43123/?token=abc',
       host: '127.0.0.1',
       port: 43123,
     })
