@@ -1,0 +1,114 @@
+name: perry-preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Perry package scenario'
+        type: choice
+        required: true
+        default: both
+        options:
+          - both
+          - thin
+          - full
+  pull_request:
+    paths:
+      - 'apps/perry/**'
+      - 'packages/bootstrap/**'
+      - 'packages/client-runtime/**'
+      - 'packages/docs-sync/**'
+      - 'packages/plugin-embedded-client/**'
+      - '.github/workflows/perry-preview.yml'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perry-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm test
+      - run: pnpm check:perry-host
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-latest, ubuntu-latest]
+        scenario: [thin, full]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    if: >-
+      ${{
+        github.event_name == 'pull_request' ||
+        inputs.scenario == 'both' ||
+        inputs.scenario == matrix.scenario
+      }}
+    env:
+      PERRY_VERSION: '0.5.1220'
+      PERRY_NO_TELEMETRY: '1'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Install Perry Linux WebView build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+
+      - name: Install pinned Perry compiler
+        run: npm install -g @perryts/perry@0.5.1220
+
+      - name: Verify Perry compiler
+        run: perry --version
+
+      - name: Cache prepared dsh runtime
+        if: matrix.scenario == 'full'
+        uses: actions/cache@v6
+        with:
+          path: runtimes/pack
+          key: perry-dsh-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/integrity.ts', 'packages/client-runtime/src/prune.ts') }}
+          restore-keys: |
+            perry-dsh-runtime-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build Perry Native Preview package
+        run: node apps/perry/scripts/pack.mjs --scenario ${{ matrix.scenario }}
+
+      - name: List Perry artifacts
+        shell: bash
+        run: find apps/perry/release/${{ matrix.scenario }}/artifacts -maxdepth 1 -type f -print
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: perry-${{ runner.os }}-${{ matrix.scenario }}
+          path: apps/perry/release/${{ matrix.scenario }}/artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
