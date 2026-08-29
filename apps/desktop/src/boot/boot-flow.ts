@@ -1,5 +1,5 @@
 import { app, Notification } from 'electron'
-import { bundledRuntimeVersion } from '@dsh/client-runtime'
+import { bundledRuntimeVersion, redactWebAuthTokens } from '@dsh/client-runtime'
 import { bootstrapRuntime } from '@dsh/bootstrap'
 import { readOriginFile } from '@dsh/docs-sync'
 import { bootLog, openLogDir } from '../boot-log.ts'
@@ -111,7 +111,9 @@ export async function bootFlow(): Promise<void> {
   appState.dshVersion = result.ready.dshVersion
   appState.mode = result.mode
   appState.bundledAvailable = result.bundledAvailable
-  await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
+  // dsh 0.1.2+ places a process launch token in the browser URL. Electron must
+  // receive the complete URL, but persistent diagnostic logs must never keep it.
+  await bootLog(`dsh web ready at ${redactWebAuthTokens(result.ready.url)} (pid ${result.ready.pid})`)
   showSplashProgress(progress.runtimeReady())
   updateSplash(t('splash.loadingInterface'))
   showSplashProgress(progress.loadingInterface())
