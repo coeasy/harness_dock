@@ -4,7 +4,13 @@ export { resolveRuntimeMode, shutdownLadder, isProcessAlive, collectProcessTree 
 export type { ShutdownResult } from './process.ts'
 export { parseReadyFile, writeReadyFile } from './ready.ts'
 export { npxCommand, resolveDshCommand } from './resolve.ts'
-export { bundledRuntimeVersion, inspectBundledRuntime, NODE_BUNDLE_VERSION, runtimeCacheDir } from './bundled.ts'
+export {
+  bundledRuntimeVersion,
+  inspectBundledModules,
+  inspectBundledRuntime,
+  NODE_BUNDLE_VERSION,
+  runtimeCacheDir,
+} from './bundled.ts'
 export { scrubElectronEnv } from './env.ts'
 export { buildSpawnRequest, isWindowsScriptCommand, quoteForCmd } from './shell.ts'
 export { DshRuntime } from './runtime.ts'
