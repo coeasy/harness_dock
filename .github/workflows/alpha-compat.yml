@@ -1,3 +1,4 @@
+# Temporary focused gate for the upstream alpha; remove after PR validation.
 name: alpha-compat
 
 on:
@@ -77,5 +78,5 @@ jobs:
           DSH_RUNTIME_DIR: runtimes/pack
       - name: Build embedded plugin
         run: pnpm --filter @dsh/plugin-embedded-client bundle
-      - name: Smoke exact alpha runtime
+      - name: Smoke exact alpha runtime with authenticated Web URL
         run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir runtimes/pack --plugin packages/plugin-embedded-client/lib/index.js
