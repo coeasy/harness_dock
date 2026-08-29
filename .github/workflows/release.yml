@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to publish under (e.g. v0.1.0). Empty = draft release named "unreleased".'
+        description: 'Release tag to publish under (e.g. v0.1.1). Empty = draft release named "unreleased".'
         type: string
         required: false
       target:
@@ -65,7 +65,7 @@ jobs:
             {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
           ]'
           build_matrix=$(printf '%s' "$build_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-" + .scenario))]')
-          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-full"))]')
+          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or ($target | startswith(.target_os + "-")))]')
           if [ "$(printf '%s' "$runtime_matrix" | jq 'length')" -eq 0 ]; then
             runtime_matrix='[{"enabled":false,"runner":"ubuntu-latest","artifact_os":"none","target_os":"none","platform":"linux","arch":"x64","runtime_dir":"runtimes/unused"}]'
           fi
@@ -92,20 +92,81 @@ jobs:
           pnpm check:release
       - run: pnpm test
 
+  pack-upstream:
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve pinned upstream source
+        id: origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tag=$(node -p "require('./packages/docs-sync/origin.json').gitTag")" >> "$GITHUB_OUTPUT"
+          echo "commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.tag }}
+          path: upstream
+          fetch-depth: 1
+      - name: Verify immutable upstream commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C upstream rev-parse HEAD)
+          expected='${{ steps.origin.outputs.commit }}'
+          test "$actual" = "$expected" || {
+            echo "upstream source mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install upstream dependencies
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+      - name: Build official upstream profile
+        working-directory: upstream
+        run: pnpm build:official
+      - name: Pack and verify official dsh runtime closure
+        working-directory: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
+          pnpm exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
+          pnpm exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+          test -n "$(find dist/dsh dist/vendor -type f -name '*.tgz' -print -quit)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: upstream-dsh-packed
+          path: |
+            upstream/dist/dsh/*.tgz
+            upstream/dist/vendor/*.tgz
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
   prepare-runtime:
-    needs: [test, plan]
-    if: needs.test.result == 'success' && needs.plan.result == 'success'
+    needs: [test, plan, pack-upstream]
+    if: needs.test.result == 'success' && needs.plan.result == 'success' && needs.pack-upstream.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.runtime_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
-      - name: Skip runtime preparation for thin-only release
+      - name: Skip runtime preparation when not requested
         if: matrix.enabled != true
-        run: echo "No full runtime requested for this release target."
+        run: echo "No runtime requested for this release target."
       - uses: actions/checkout@v7
         if: matrix.enabled == true
       - uses: pnpm/action-setup@v6
@@ -117,6 +178,12 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Download official upstream packed closure
+        if: matrix.enabled == true
+        uses: actions/download-artifact@v8
+        with:
+          name: upstream-dsh-packed
+          path: upstream-packed
       - name: Cache prepared runtime
         if: matrix.enabled == true
         uses: actions/cache@v6
@@ -128,13 +195,25 @@ jobs:
       - name: Install workspace dependencies
         if: matrix.enabled == true
         run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Prepare bundled runtime
+      - name: Prepare bundled runtime from official source packs
         if: matrix.enabled == true
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
+          DSH_PACKED_RUNTIME_DIR: upstream-packed
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
           DSH_RUNTIME_ARCH: ${{ matrix.arch }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Create Thin runtime bundle
+        if: matrix.enabled == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./packages/docs-sync/origin.json').dshVersion")
+          mkdir -p runtime-bundle
+          archive="runtime-bundle/HarnessDock-runtime-${version}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz"
+          tar -czf "$archive" -C "${{ matrix.runtime_dir }}" .
+          test -s "$archive"
+          echo "Created $archive"
       - name: Upload prepared runtime
         if: matrix.enabled == true
         uses: actions/upload-artifact@v7
@@ -145,6 +224,15 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           include-hidden-files: true
+      - name: Upload Thin runtime bundle
+        if: matrix.enabled == true
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-bundle-${{ matrix.artifact_os }}-${{ matrix.arch }}
+          path: runtime-bundle/*.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
 
   build:
     needs: [test, plan, prepare-runtime]
@@ -228,15 +316,21 @@ jobs:
           compression-level: 0
 
   publish:
-    needs: build
+    needs: [build, prepare-runtime]
+    if: needs.build.result == 'success' && needs.prepare-runtime.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: artifact-bundles
           pattern: desktop-*
+          merge-multiple: false
+      - uses: actions/download-artifact@v8
+        with:
+          path: runtime-bundles
+          pattern: runtime-bundle-*
           merge-multiple: false
       - name: Assemble release assets and merge macOS update metadata
         shell: bash
@@ -255,7 +349,7 @@ jobs:
               exit 1
             fi
             cp "$file" "artifacts/$name"
-          done < <(find artifact-bundles -type f -print | sort)
+          done < <(find artifact-bundles runtime-bundles -type f -print | sort)
 
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
@@ -282,7 +376,6 @@ jobs:
               const arch = match[1]
               const dmg = names.find((name) => name.endsWith(`-mac-${arch}-full.dmg`))
               if (!dmg) throw new Error(`missing macOS ${arch} full DMG for combined update metadata`)
-
               for (const name of [zip, dmg]) {
                 const data = readFileSync(path.join(dir, name))
                 files.push({
@@ -292,7 +385,6 @@ jobs:
                 })
               }
             }
-
             let yml = `version: ${version}\nfiles:\n`
             for (const file of files) {
               yml += `  - url: ${file.url}\n`
@@ -307,6 +399,14 @@ jobs:
           echo "Final release assets:"
           find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
           test -n "$(find artifacts -maxdepth 1 -type f -print -quit)"
+      - name: Validate runtime bundle assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          dsh_version=$(node -p "require('./packages/docs-sync/origin.json').dshVersion")
+          for target in win32-x64 linux-x64 darwin-x64 darwin-arm64; do
+            test -s "artifacts/HarnessDock-runtime-${dsh_version}-${target}.tar.gz"
+          done
       - name: Validate combined macOS update metadata
         shell: bash
         run: |
