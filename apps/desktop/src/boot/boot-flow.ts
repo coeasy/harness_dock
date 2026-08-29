@@ -1,6 +1,6 @@
 import { app, Notification } from 'electron'
 import { bundledRuntimeVersion } from '@dsh/client-runtime'
-import { acquireRuntimeLease, bootstrapRuntime } from '@dsh/bootstrap'
+import { acquireRuntimeLease, LocalRuntimeProvider } from '@dsh/bootstrap'
 import { startHarnessGateway } from '@dsh/bootstrap/gateway'
 import { readOriginFile } from '@dsh/docs-sync'
 import { bootLog, openLogDir } from '../boot-log.ts'
@@ -29,12 +29,12 @@ import {
 let autoUpdate: AutoUpdateHandle | undefined
 
 /**
- * Boot orchestration: splash → cross-host runtime lease → shared bootstrap
+ * Boot orchestration: splash → cross-host runtime lease → LocalRuntimeProvider
  * (origin → runtime → start, with last-known-good rollback) → optional secure
  * remote gateway → main window → auto-update → tray.
  *
- * The runtime lease prevents Electron Stable and Perry Preview from silently
- * starting two independent dsh process trees against the same ~/.dsh state.
+ * The provider boundary is shared with Perry Desktop; iOS/Android implement the
+ * same runtime contract through RemoteRuntimeProvider and never spawn dsh.
  */
 export async function bootFlow(): Promise<void> {
   await createSplash()
@@ -43,12 +43,13 @@ export async function bootFlow(): Promise<void> {
 
   const runtimeLease = await acquireRuntimeLease({ host: 'electron' })
   appState.runtimeLease = runtimeLease
+  let localProvider: LocalRuntimeProvider | undefined
 
   try {
     const userDataDir = app.getPath('userData')
     const versionOverride = await resolveVersionOverride(userDataDir)
 
-    const result = await bootstrapRuntime({
+    localProvider = new LocalRuntimeProvider({
       originPath: originPath(),
       pluginPath: pluginPath(),
       packaged: app.isPackaged,
@@ -107,6 +108,10 @@ export async function bootFlow(): Promise<void> {
       },
     })
 
+    const session = await localProvider.connect()
+    const result = localProvider.bootstrapResult
+    if (!result) throw new Error('LocalRuntimeProvider connected without a bootstrap result.')
+
     appState.runtime = result.runtime
     appState.dshPid = result.ready.pid
     appState.dshVersion = result.ready.dshVersion
@@ -116,10 +121,10 @@ export async function bootFlow(): Promise<void> {
       runtimePid: result.ready.pid,
       dshVersion: result.ready.dshVersion,
     })
-    await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
-    await startRemoteGatewayIfEnabled(result.ready.url)
+    await bootLog(`dsh web ready at ${session.appUrl} (pid ${result.ready.pid})`)
+    await startRemoteGatewayIfEnabled(session.appUrl)
     updateSplash(t('splash.loadingInterface'))
-    await createWindow(result.ready.url)
+    await createWindow(session.appUrl)
 
     try {
       autoUpdate = initAutoUpdate()
@@ -142,6 +147,12 @@ export async function bootFlow(): Promise<void> {
     appState.runtimeLease = undefined
     await appState.gateway?.stop().catch(() => undefined)
     appState.gateway = undefined
+    await localProvider?.disconnect().catch(() => undefined)
+    appState.runtime = undefined
+    appState.dshPid = undefined
+    appState.dshVersion = undefined
+    appState.mode = undefined
+    appState.bundledAvailable = undefined
     await runtimeLease.release().catch(() => undefined)
     throw error
   }
