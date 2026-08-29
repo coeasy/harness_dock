@@ -1,5 +1,5 @@
 export { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
-export { parseWebUrl } from './output.ts'
+export { parseWebUrl, redactWebAuthTokens } from './output.ts'
 export { resolveRuntimeMode, shutdownLadder, isProcessAlive, collectProcessTree } from './process.ts'
 export type { ShutdownResult } from './process.ts'
 export { parseReadyFile, writeReadyFile } from './ready.ts'

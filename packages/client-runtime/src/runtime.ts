@@ -3,19 +3,28 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
-import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './fetch-runtime.ts'
+import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './ensure-runtime.ts'
 import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
-import { parseWebUrl } from './output.ts'
+import { parseWebUrl, redactWebAuthTokens } from './output.ts'
 import { shutdownLadder, isProcessAlive, type ShutdownResult } from './process.ts'
 import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
 import { resolveRuntimeMode } from './process.ts'
 import { buildSpawnRequest } from './shell.ts'
+import { openWebUiSession } from './web-auth.ts'
 import type { ParsedUrl, ReadyInfo, RuntimeMode } from './types.ts'
 
 export interface DshRuntimeOptions {
-  origin: { dshVersion: string }
+  origin: {
+    dshVersion: string
+    gitTag?: string
+    gitCommit?: string
+    npmPackage?: string
+    npmTarball?: string
+    npmIntegrity?: string
+    runtimeBundles?: Record<string, { url: string }>
+  }
   pluginPath: string
   packaged?: boolean
   env?: NodeJS.ProcessEnv
@@ -107,8 +116,8 @@ export class DshRuntime {
     })
 
     if (mode === 'download') {
-      // Vendored runtime fetched over plain HTTPS from registry mirrors;
-      // no npm/npx needed on the target machine.
+      // Prefer a pinned HarnessDock runtime bundle when the exact upstream dsh
+      // version is GitHub-only; otherwise retain the npm closure downloader.
       const downloaded = await ensureDownloadedRuntime({
         origin: this.options.origin,
         env,
@@ -121,8 +130,6 @@ export class DshRuntime {
       if (bundledLayout) {
         command = { command: bundledLayout.nodeBin, argsPrefix: [downloaded.dshBin] }
       } else {
-        // Thin package has no vendored node: reuse the Electron binary in
-        // plain-Node mode (or the host node during development).
         command = {
           command: process.execPath,
           argsPrefix: [downloaded.dshBin],
@@ -134,10 +141,6 @@ export class DshRuntime {
       this.options.bundledRoot &&
       env.DSH_BUNDLED_FETCH === '1'
     ) {
-      // A full package must remain fast and offline on first launch. Only opt in
-      // to replacing a mismatched bundled seed when an administrator explicitly
-      // requests it; ordinary users should receive a new full package instead
-      // of an unexpected ~300 MB network download.
       const seedVersion = bundledRuntimeVersion(this.options.bundledRoot)
       if (seedVersion && seedVersion !== version) {
         const download = this.options.downloadImpl ?? ensureDownloadedRuntime
@@ -205,8 +208,6 @@ export class DshRuntime {
         this.options.readyStabilityMs ?? 1_000,
         this.options.log,
       )
-      // waitForReady detaches its own 'data' listeners once ready; keep the
-      // pipes drained so dsh never blocks on a full OS pipe buffer.
       drainOutput(child, this.options.log)
       return ready
     } catch (error) {
@@ -225,13 +226,10 @@ export class DshRuntime {
     this.child = undefined
     if (child?.pid) {
       const started = Date.now()
-      // Total budget: the app must always be able to quit, even when a
-      // descendant refuses to die or wmic hangs on a broken machine.
       const result = await Promise.race<ShutdownResult>([
         shutdownLadder(child, {
           termMs: 5_000,
           killMs: 3_000,
-          // OS-level check: exitCode can lag behind a process that kept living.
           isAlive: () => isProcessAlive(child.pid),
         }),
         new Promise<ShutdownResult>((resolve) => {
@@ -255,21 +253,10 @@ export class DshRuntime {
   }
 }
 
-/** Split large stderr writes without hiding nested AggregateError causes. */
 const DRAIN_CHUNK_LIMIT = 2000
 const DRAIN_TOTAL_LIMIT = 256_000
-
 const drained = new WeakSet<ChildProcessWithoutNullStreams>()
 
-/**
- * Attaches persistent stdout/stderr consumers so the OS pipe buffers never
- * fill up once waitForReady() detaches its own 'data' listeners. Without this,
- * a chatty dsh that outwrites the ~64 KB pipe buffer would block forever on
- * its own output. Each chunk is converted to utf8 and forwarded to `log` with
- * a `[dsh] ` prefix (truncated to DRAIN_CHUNK_LIMIT characters); when no log is
- * supplied an empty consumer is still attached so the pipes keep draining.
- * A given child is only mounted once.
- */
 export function drainOutput(
   child: ChildProcessWithoutNullStreams,
   log?: (message: string) => void,
@@ -289,13 +276,14 @@ function createOutputForwarder(
   return (chunk) => {
     if (!log || capped) return
     const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    const safe = redactWebAuthTokens(raw)
     const remaining = DRAIN_TOTAL_LIMIT - forwarded
-    const text = raw.slice(0, Math.max(0, remaining))
+    const text = safe.slice(0, Math.max(0, remaining))
     forwarded += text.length
     for (let offset = 0; offset < text.length; offset += DRAIN_CHUNK_LIMIT) {
       log(`[dsh] ${text.slice(offset, offset + DRAIN_CHUNK_LIMIT)}`)
     }
-    if (raw.length > remaining) {
+    if (safe.length > remaining) {
       capped = true
       log(`[dsh] output capped after ${DRAIN_TOTAL_LIMIT} characters`)
     }
@@ -319,11 +307,10 @@ async function waitForReady(
     const forwardOutput = createOutputForwarder(log)
     const appendOutput = (chunk: Buffer | string) => {
       buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-      // Keep diagnostics useful without retaining unbounded child output.
       if (buffer.length > 16_000) buffer = buffer.slice(-16_000)
     }
     const diagnostics = () => {
-      const output = buffer.trim()
+      const output = redactWebAuthTokens(buffer.trim())
       return output === '' ? '' : `\nLast dsh output:\n${output.slice(-4_000)}`
     }
     const fail = (error: Error) => {
@@ -346,11 +333,7 @@ async function waitForReady(
       appendOutput(chunk)
       forwardOutput(chunk)
       const parsed = parseWebUrl(buffer)
-      if (parsed) consider({
-        ...parsed,
-        pid: child.pid ?? 0,
-        dshVersion,
-      })
+      if (parsed) consider({ ...parsed, pid: child.pid ?? 0, dshVersion })
     }
     const consider = (info: ReadyInfo): void => {
       if (candidate?.url === info.url) return
@@ -358,12 +341,7 @@ async function waitForReady(
       candidateSince = Date.now()
     }
     const validateCandidate = async (): Promise<void> => {
-      if (
-        settled ||
-        validating ||
-        !candidate ||
-        Date.now() - candidateSince < stabilityMs
-      ) return
+      if (settled || validating || !candidate || Date.now() - candidateSince < stabilityMs) return
       validating = true
       const current = candidate
       const ready = child.exitCode === null && await probeHttpReady(current.url)
@@ -410,20 +388,7 @@ async function waitForReady(
 }
 
 async function probeHttpReady(url: string): Promise<boolean> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 1_000)
-  try {
-    const response = await fetch(url, { signal: controller.signal, redirect: 'manual' })
-    if (!response.ok) return false
-    const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-    if (contentType !== '' && !contentType.includes('text/html')) return false
-    const body = await response.text()
-    return body.trim().length > 0
-  } catch {
-    return false
-  } finally {
-    clearTimeout(timeout)
-  }
+  return (await openWebUiSession(url, { timeoutMs: 1_000 })) !== null
 }
 
 async function verifyPackagedPlugin(

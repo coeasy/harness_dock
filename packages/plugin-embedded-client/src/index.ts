@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { findListenAddress } from './listen.ts'
+import { browserUrlFor, probeBrowserUrl } from './web-auth.ts'
 
 export const name = 'embedded-client'
 // cordis 注入声明：等待 webServer 服务就绪后再启动监听探测，
@@ -26,23 +27,28 @@ export function apply(ctx: PluginCtx): void {
     const addr = findListenAddress(ctx)
     if (!addr) return
 
-    // webServer.port is assigned as soon as the socket binds, but the
-    // frontend-static fallback may still be registering its index route.
-    // Probe the loopback page before announcing readiness so Electron never
-    // races the dsh composition and loads a transient 404 as a blank screen.
+    // dsh 0.1.2+ protects index.html with a process launch token. Resolve the
+    // official browser URL through Connection when available, then perform the
+    // same token -> cookie -> clean-page handshake a real browser performs.
+    // Older runtimes have no authenticatedUrl() and keep using the bare URL.
+    const baseUrl = `http://127.0.0.1:${addr.port}`
+    const browserUrl = browserUrlFor(ctx, baseUrl)
     checking = true
-    void probeWebUi(addr.port).then((ready) => {
+    void probeBrowserUrl(browserUrl).then((ready) => {
       checking = false
       if (!ready || written || disposed) return
       try {
         const payload = {
-          url: `http://127.0.0.1:${addr.port}`,
+          url: browserUrl,
           host: '127.0.0.1',
           port: addr.port,
           pid: process.pid,
           dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'unknown',
         }
-        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, {
+          encoding: 'utf8',
+          mode: 0o600,
+        })
         written = true
       } catch {
         // The runtime may be shutting down and have removed its temp folder.
@@ -68,24 +74,4 @@ export function apply(ctx: PluginCtx): void {
     disposed = true
     clearInterval(timer)
   })
-}
-
-async function probeWebUi(port: number): Promise<boolean> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 1_000)
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/`, {
-      signal: controller.signal,
-      redirect: 'manual',
-    })
-    if (!response.ok) return false
-    const contentType = response.headers.get('content-type') ?? ''
-    if (contentType !== '' && !contentType.toLowerCase().includes('text/html')) return false
-    const html = await response.text()
-    return /<!doctype\s+html|<html(?:\s|>)/i.test(html)
-  } catch {
-    return false
-  } finally {
-    clearTimeout(timeout)
-  }
 }

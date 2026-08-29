@@ -5,6 +5,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { DshRuntime } from './runtime.ts'
+import { redactWebAuthTokens } from './output.ts'
+import { openWebUiSession, probeWebUiSession } from './web-auth.ts'
 
 const cliArgs = process.argv.slice(2)
 if (cliArgs[0] === '--') cliArgs.shift()
@@ -60,17 +62,17 @@ const runtime = new DshRuntime({
 
 try {
   const ready = await runtime.start()
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const response = await fetch(ready.url)
-    const body = await response.text()
-    if (!response.ok || !/<html(?:\s|>)/i.test(body)) {
-      throw new Error(
-        `web UI probe ${attempt} failed: HTTP ${response.status}, ${body.length} bytes`,
-      )
-    }
-    if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, 1_000))
+  const session = await openWebUiSession(ready.url, { timeoutMs: 3_000, requireHtml: true })
+  if (!session) {
+    throw new Error('web UI authentication/readiness handshake failed')
   }
-  console.log(`[smoke] PASS ${ready.url} remained healthy with dsh ${ready.dshVersion}`)
+  await new Promise((resolve) => setTimeout(resolve, 1_000))
+  if (!(await probeWebUiSession(session, { timeoutMs: 3_000, requireHtml: true }))) {
+    throw new Error('web UI authenticated session did not remain healthy')
+  }
+  console.log(
+    `[smoke] PASS ${redactWebAuthTokens(ready.url)} remained healthy with dsh ${ready.dshVersion}`,
+  )
 } catch (error) {
   const tail = logs.slice(-20).join('\n')
   throw new Error(
