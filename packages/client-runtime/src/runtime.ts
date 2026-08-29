@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
-import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './fetch-runtime.ts'
+import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './ensure-runtime.ts'
 import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
 import { parseWebUrl } from './output.ts'
@@ -15,7 +15,13 @@ import { buildSpawnRequest } from './shell.ts'
 import type { ParsedUrl, ReadyInfo, RuntimeMode } from './types.ts'
 
 export interface DshRuntimeOptions {
-  origin: { dshVersion: string }
+  origin: {
+    dshVersion: string
+    npmPackage?: string
+    npmTarball?: string
+    npmIntegrity?: string
+    runtimeBundles?: Record<string, { url: string }>
+  }
   pluginPath: string
   packaged?: boolean
   env?: NodeJS.ProcessEnv
@@ -107,8 +113,8 @@ export class DshRuntime {
     })
 
     if (mode === 'download') {
-      // Vendored runtime fetched over plain HTTPS from registry mirrors;
-      // no npm/npx needed on the target machine.
+      // Prefer a pinned HarnessDock runtime bundle when the exact upstream dsh
+      // version is GitHub-only; otherwise retain the npm closure downloader.
       const downloaded = await ensureDownloadedRuntime({
         origin: this.options.origin,
         env,
