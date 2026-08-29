@@ -3,10 +3,10 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { App, Text, VStack, WebView } from 'perry/ui'
 import {
+  LocalRuntimeProvider,
   PERRY_HOST,
   RuntimeLeaseConflictError,
   acquireRuntimeLease,
-  bootstrapRuntime,
 } from '../../../packages/bootstrap/src/index.ts'
 import {
   bundledRoot,
@@ -75,7 +75,7 @@ async function run(): Promise<void> {
     throw error
   }
 
-  let runtime: Awaited<ReturnType<typeof bootstrapRuntime>>['runtime'] | undefined
+  let provider: LocalRuntimeProvider | undefined
   try {
     const resources = resourceRoot()
     if (!existsSync(originPath(resources))) {
@@ -85,7 +85,7 @@ async function run(): Promise<void> {
       throw new Error(`embedded client plugin is missing from ${resources}`)
     }
 
-    const result = await bootstrapRuntime({
+    provider = new LocalRuntimeProvider({
       originPath: originPath(resources),
       pluginPath: pluginPath(resources),
       packaged: true,
@@ -102,15 +102,18 @@ async function run(): Promise<void> {
         console.warn(`[perry] rolled back dsh ${info.from} -> ${info.to}`)
       },
     })
-    runtime = result.runtime
+    const session = await provider.connect()
+    const result = provider.bootstrapResult
+    if (!result) throw new Error('LocalRuntimeProvider connected without a bootstrap result.')
+
     await lease.updateRuntime({
       runtimePid: result.ready.pid,
       dshVersion: result.ready.dshVersion,
     })
 
-    const appOrigin = new URL(result.ready.url).origin
+    const appOrigin = new URL(session.appUrl).origin
     const webview = WebView({
-      url: result.ready.url,
+      url: session.appUrl,
       ephemeral: false,
       width: 1280,
       height: 820,
@@ -147,9 +150,9 @@ async function run(): Promise<void> {
     console.error('[perry] startup failed:', error)
     showFatal(message)
   } finally {
-    if (runtime) {
+    if (provider) {
       try {
-        await runtime.stop()
+        await provider.disconnect()
       } catch (error) {
         console.error('[perry] runtime stop failed:', error)
       }
