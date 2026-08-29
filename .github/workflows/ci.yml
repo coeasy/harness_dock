@@ -36,13 +36,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm check:versions
+      - run: pnpm check:release
       - run: pnpm test
 
   source-pack:
     needs: test
     if: needs.test.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - name: Read exact upstream commit
@@ -97,7 +98,7 @@ jobs:
             arch: arm64
             runtime_dir: runtimes/pack-arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
@@ -140,24 +141,47 @@ jobs:
           - runner: windows-latest
             os: win
             platform: win32
+            scenario: thin
             arch: x64
             runtime_dir: runtimes/pack
             command: node apps/desktop/scripts/pack.mjs --os win --scenario thin --arch x64
             packaged_runtime: apps/desktop/release/thin/win-unpacked/resources/dsh-runtime
             packaged_plugin: apps/desktop/release/thin/win-unpacked/resources/plugin-embedded-client/index.js
             electron: apps/desktop/release/thin/win-unpacked/HarnessDock.exe
+          - runner: windows-latest
+            os: win
+            platform: win32
+            scenario: full
+            arch: x64
+            runtime_dir: runtimes/pack
+            command: node apps/desktop/scripts/pack.mjs --os win --scenario full --arch x64
+            packaged_runtime: apps/desktop/release/full/win-unpacked/resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js
+            electron: ''
           - runner: ubuntu-latest
             os: linux
             platform: linux
+            scenario: thin
             arch: x64
             runtime_dir: runtimes/pack
             command: node apps/desktop/scripts/pack.mjs --os linux --scenario thin --arch x64
             packaged_runtime: apps/desktop/release/thin/linux-unpacked/resources/dsh-runtime
             packaged_plugin: apps/desktop/release/thin/linux-unpacked/resources/plugin-embedded-client/index.js
             electron: apps/desktop/release/thin/linux-unpacked/HarnessDock
+          - runner: ubuntu-latest
+            os: linux
+            platform: linux
+            scenario: full
+            arch: x64
+            runtime_dir: runtimes/pack
+            command: node apps/desktop/scripts/pack.mjs --os linux --scenario full --arch x64
+            packaged_runtime: apps/desktop/release/full/linux-unpacked/resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js
+            electron: ''
           - runner: macos-latest
             os: mac
             platform: darwin
+            scenario: thin
             arch: x64
             runtime_dir: runtimes/pack-x64
             command: node apps/desktop/scripts/pack.mjs --os mac --scenario thin --arch x64
@@ -167,14 +191,35 @@ jobs:
           - runner: macos-latest
             os: mac
             platform: darwin
+            scenario: full
+            arch: x64
+            runtime_dir: runtimes/pack-x64
+            command: node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64
+            packaged_runtime: apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
+            electron: ''
+          - runner: macos-latest
+            os: mac
+            platform: darwin
+            scenario: thin
             arch: arm64
             runtime_dir: runtimes/pack-arm64
             command: node apps/desktop/scripts/pack.mjs --os mac --scenario thin --arch arm64
             packaged_runtime: apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime
             packaged_plugin: apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
             electron: apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/MacOS/HarnessDock
+          - runner: macos-latest
+            os: mac
+            platform: darwin
+            scenario: full
+            arch: arm64
+            runtime_dir: runtimes/pack-arm64
+            command: node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64
+            packaged_runtime: apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
+            electron: ''
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       NODE_OPTIONS: --max-old-space-size=4096
@@ -210,25 +255,32 @@ jobs:
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
           DSH_RUNTIME_ARCH: ${{ matrix.arch }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Build Thin desktop package
+      - name: Build desktop package
         run: ${{ matrix.command }}
         env:
           GH_OWNER: ${{ github.repository_owner }}
           GH_REPO: ${{ github.event.repository.name }}
           DSH_SKIP_RUNTIME_PREPARE: '1'
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Smoke packaged Full runtime
+        if: matrix.scenario == 'full'
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.packaged_runtime }} --plugin ${{ matrix.packaged_plugin }}
       - name: Smoke packaged Thin runtime
+        if: matrix.scenario == 'thin'
         run: pnpm --filter @dsh/client-runtime smoke-thin-runtime -- --runtime-dir ${{ matrix.packaged_runtime }} --plugin ${{ matrix.packaged_plugin }} --electron ${{ matrix.electron }}
-      - run: pnpm check:size
+      - name: Validate package size budget
+        run: pnpm check:size
       - uses: actions/upload-artifact@v7
         with:
-          name: desktop-${{ matrix.os }}-thin-${{ matrix.arch }}
+          name: desktop-${{ matrix.os }}-${{ matrix.scenario }}-${{ matrix.arch }}
           path: |
-            apps/desktop/release/thin/*.exe
-            apps/desktop/release/thin/*.dmg
-            apps/desktop/release/thin/*.zip
-            apps/desktop/release/thin/*.AppImage
-            apps/desktop/release/thin/*.deb
+            apps/desktop/release/${{ matrix.scenario }}/*.exe
+            apps/desktop/release/${{ matrix.scenario }}/*.dmg
+            apps/desktop/release/${{ matrix.scenario }}/*.zip
+            apps/desktop/release/${{ matrix.scenario }}/*.AppImage
+            apps/desktop/release/${{ matrix.scenario }}/*.deb
+            apps/desktop/release/${{ matrix.scenario }}/*.blockmap
+            apps/desktop/release/${{ matrix.scenario }}/latest*.yml
           if-no-files-found: error
           compression-level: 0
 
@@ -256,6 +308,6 @@ jobs:
           title: 'chore: sync HarnessDock dsh origin to latest exact release'
           commit-message: 'chore: sync HarnessDock dsh origin'
           body: |
-            Automated docs-sync: tracks the newest exact `dsh-v*` Git release.
+            Automated docs-sync tracks the newest exact `dsh-v*` Git release.
             npm-backed releases keep npm integrity; tag-only releases use the verified `git-pack` pipeline.
-            Review upstream changelog and CI compatibility gates before merging.
+            Full and Thin package matrices must both pass before this PR can merge.
