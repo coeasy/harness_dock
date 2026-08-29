@@ -69,16 +69,25 @@ exports.default = async function afterPack(context) {
   // guard returned in that case, producing a full installer that silently fell
   // back to the slow first-launch network download.
   const dst = path.join(resourceDir, 'dsh-runtime')
-  const targetArch = String(context.arch) === 'arm64' ? 'arm64' : 'x64'
-  const archSpecificSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack-' + targetArch)
-  const fallbackSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack')
   const isWindows = context.electronPlatformName === 'win32' || process.platform === 'win32'
   const runtimeNode = isWindows ? 'node.exe' : path.join('bin', 'node')
-  const src = fs.existsSync(path.join(archSpecificSrc, runtimeNode))
-    ? archSpecificSrc
-    : fallbackSrc
+  const runtimeBinJs = path.join('node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  // Prefer the exact directory downloaded by CI. electron-builder exposes
+  // context.arch as a numeric Arch enum on some versions (arm64 = 3), so
+  // relying on a string comparison silently selected the x64 runtime.
+  const targetArch = ['arm64', '3'].includes(String(context.arch)) ? 'arm64' : 'x64'
+  const archSpecificSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack-' + targetArch)
+  const fallbackSrc = path.resolve(projectDir, '..', '..', 'runtimes', 'pack')
+  const configuredSrc = process.env.DSH_RUNTIME_DIR
+    ? path.resolve(projectDir, '..', '..', process.env.DSH_RUNTIME_DIR)
+    : null
+  const runtimeCandidates = [configuredSrc, archSpecificSrc, fallbackSrc].filter(Boolean)
+  const src = runtimeCandidates.find((candidate) =>
+    fs.existsSync(path.join(candidate, runtimeNode)) &&
+    fs.existsSync(path.join(candidate, runtimeBinJs)),
+  ) ?? runtimeCandidates[0]
   const nodeBin = path.join(src, runtimeNode)
-  const binJs = path.join(src, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  const binJs = path.join(src, runtimeBinJs)
 
   if (!fs.existsSync(nodeBin) || !fs.existsSync(binJs)) {
     throw new Error(
