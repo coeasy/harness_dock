@@ -7,7 +7,6 @@ on:
       - feat/dsh-0.1.2-alpha1-v0.1.1
     paths:
       - .github/workflows/maintain-v0.1.1.yml
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,85 +14,48 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           ref: feat/dsh-0.1.2-alpha1-v0.1.1
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.12.1
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Keep HarnessDock workspace on v0.1.1 / Electron 43.4.1
-        shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-          import path from 'node:path'
-          const files = ['package.json']
-          for (const root of ['packages', 'apps', 'tests']) {
-            for (const entry of readdirSync(root, { withFileTypes: true })) {
-              if (!entry.isDirectory()) continue
-              const file = path.join(root, entry.name, 'package.json')
-              if (existsSync(file)) files.push(file)
-            }
-          }
-          for (const file of files) {
-            const pkg = JSON.parse(readFileSync(file, 'utf8'))
-            if (pkg.version) pkg.version = '0.1.1'
-            if (file === 'apps/desktop/package.json') pkg.devDependencies.electron = '43.4.1'
-            writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n')
-          }
-          NODE
-      - name: Refresh lockfile
-        run: pnpm install --no-frozen-lockfile
-      - name: Sync exact upstream alpha origin
-        run: pnpm sync:dsh -- --pin 0.1.2-alpha.1
-      - name: Finalize permanent workflows
+      - name: Redact launch tokens and keep authenticated readiness candidate
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs'
+          const file = 'packages/client-runtime/src/runtime.ts'
+          let text = readFileSync(file, 'utf8')
 
-          for (const file of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
-            let text = readFileSync(file, 'utf8')
-            const unsafe = '        run: echo "commit=$(node -p \\"require(\'./packages/docs-sync/origin.json\').gitCommit\\")" >> "$GITHUB_OUTPUT"'
-            const safe = '        shell: bash\n        run: |\n          commit=$(node -p "require(\'./packages/docs-sync/origin.json\').gitCommit")\n          echo "commit=$commit" >> "$GITHUB_OUTPUT"'
-            if (text.includes(unsafe)) text = text.replaceAll(unsafe, safe)
-            writeFileSync(file, text)
+          text = text.replace(
+            "import { parseWebUrl } from './output.ts'",
+            "import { parseWebUrl, redactWebLaunchToken } from './output.ts'",
+          )
+          text = text.replace(
+            "    const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')",
+            "    const raw = redactWebLaunchToken(typeof chunk === 'string' ? chunk : chunk.toString('utf8'))",
+          )
+          text = text.replace(
+            "      const output = buffer.trim()",
+            "      const output = redactWebLaunchToken(buffer).trim()",
+          )
+
+          const before = `    const consider = (info: ReadyInfo): void => {\n      if (candidate?.url === info.url) return\n      candidate = info\n      candidateSince = Date.now()\n    }`
+          const after = `    const consider = (info: ReadyInfo): void => {\n      if (candidate?.url === info.url) return\n      if (candidate && candidate.host === info.host && candidate.port === info.port) {\n        const currentHasToken = new URL(candidate.url).searchParams.has('token')\n        const nextHasToken = new URL(info.url).searchParams.has('token')\n        if (currentHasToken && !nextHasToken) return\n      }\n      candidate = info\n      candidateSince = Date.now()\n    }`
+          if (!text.includes(before) && !text.includes(after)) {
+            throw new Error('readiness candidate block not found')
           }
-
-          const releaseFile = '.github/workflows/release.yml'
-          let text = readFileSync(releaseFile, 'utf8')
-          const dollar = '$'
-          const wrongName = '          name: HarnessDock v' + dollar + "{{ github.event.repository.name && '' }}" + dollar + "{{ '' }}"
-          const goodName = '          name: HarnessDock ' + dollar + '{{ steps.tag.outputs.tag }}'
-          if (text.includes(wrongName)) text = text.replace(wrongName, goodName)
-          if (!text.includes(goodName)) throw new Error('release name line was not found/fixed')
-
-          if (!text.includes('Mark released origin baseline')) {
-            const marker = '    steps:\n      - name: Delete historical development branches'
-            const replacement = `    steps:\n      - uses: actions/checkout@v7\n        with:\n          ref: main\n      - name: Mark released origin baseline\n        shell: bash\n        run: |\n          set -euo pipefail\n          cp packages/docs-sync/origin.json packages/docs-sync/released-origin.json\n          if git diff --quiet -- packages/docs-sync/released-origin.json; then\n            echo 'released-origin baseline already current'\n          else\n            git config user.name github-actions[bot]\n            git config user.email 41898282+github-actions[bot]@users.noreply.github.com\n            git add -- packages/docs-sync/released-origin.json\n            git commit -m 'chore: mark HarnessDock v0.1.1 released origin'\n            git push origin HEAD:main\n          fi\n      - name: Delete historical development branches`
-            if (!text.includes(marker)) throw new Error('cleanup insertion point not found')
-            text = text.replace(marker, replacement)
-          }
-          writeFileSync(releaseFile, text)
+          text = text.replace(before, after)
+          if (!text.includes('redactWebLaunchToken')) throw new Error('redaction patch failed')
+          writeFileSync(file, text)
           NODE
-      - name: Validate generated metadata
-        run: |
-          pnpm check:versions
-          pnpm check:release
-          node -e "const o=require('./packages/docs-sync/origin.json'); if(o.dshVersion!=='0.1.2-alpha.1'||o.gitCommit!=='cd5ef8148158c3a752a658978873241fdf8e2bbc'||o.distribution!=='git-pack') process.exit(1)"
-      - name: Commit generated release state
+      - name: Commit runtime hardening
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -- package.json pnpm-lock.yaml packages/*/package.json apps/*/package.json tests/*/package.json packages/docs-sync/origin.json packages/docs-sync/capability-matrix.yaml packages/docs-sync/capability-summary.md .github/workflows/ci.yml .github/workflows/release.yml
+          git add -- packages/client-runtime/src/runtime.ts
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'chore: finalize HarnessDock v0.1.1 release state'
+          git commit -m 'fix: protect dsh alpha launch credentials'
           git push origin HEAD:feat/dsh-0.1.2-alpha1-v0.1.1
