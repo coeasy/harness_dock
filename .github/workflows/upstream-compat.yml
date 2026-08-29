@@ -1,0 +1,99 @@
+name: upstream-compat
+
+on:
+  pull_request:
+    paths:
+      - 'packages/docs-sync/origin.json'
+      - 'packages/client-runtime/**'
+      - 'packages/plugin-embedded-client/**'
+      - '.github/workflows/upstream-compat.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-compat-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-source-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install HarnessDock workspace
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Validate HarnessDock version and release metadata
+        run: |
+          pnpm check:versions
+          pnpm check:release
+
+      - name: Resolve pinned upstream source
+        id: origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tag=$(node -p "require('./packages/docs-sync/origin.json').gitTag")" >> "$GITHUB_OUTPUT"
+          echo "commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.tag }}
+          path: upstream
+          fetch-depth: 1
+      - name: Verify upstream commit pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C upstream rev-parse HEAD)
+          expected='${{ steps.origin.outputs.commit }}'
+          test "$actual" = "$expected" || {
+            echo "upstream source mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - name: Install upstream dependencies
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+      - name: Build official upstream profile
+        working-directory: upstream
+        run: pnpm build:official
+      - name: Pack and verify official runtime closure
+        working-directory: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
+          pnpm exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
+          pnpm exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - name: Prepare Linux runtime from official source packs
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_PACKED_RUNTIME_DIR: upstream/dist
+          DSH_RUNTIME_PLATFORM: linux
+          DSH_RUNTIME_ARCH: x64
+          DSH_RUNTIME_DIR: runtimes/compat-linux-x64
+      - name: Build embedded client plugin
+        run: pnpm --filter @dsh/plugin-embedded-client bundle
+      - name: Smoke pinned dsh runtime with embedded Web UI
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir runtimes/compat-linux-x64 --plugin packages/plugin-embedded-client/lib/index.js
