@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "bundle-runtime": "node --import tsx src/prepare-cli.ts"
+    "bundle-runtime": "node --import tsx src/prepare-cli.ts",
+    "smoke-runtime": "node --import tsx src/smoke-cli.ts"
   },
   "dependencies": {
     "@dsh/docs-sync": "workspace:*"
