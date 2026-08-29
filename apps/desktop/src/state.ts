@@ -1,6 +1,7 @@
 import type { BrowserWindow, Tray } from 'electron'
 import type { DshRuntime, RuntimeMode } from '@dsh/client-runtime'
 import type { RuntimeLeaseHandle } from '@dsh/bootstrap'
+import type { HarnessGatewayHandle } from '@dsh/bootstrap/gateway'
 
 /**
  * Mutable state shared between the boot flow, the shutdown ladder, and the
@@ -10,6 +11,7 @@ import type { RuntimeLeaseHandle } from '@dsh/bootstrap'
 export const appState: {
   runtime: DshRuntime | undefined
   runtimeLease: RuntimeLeaseHandle | undefined
+  gateway: HarnessGatewayHandle | undefined
   mainWindow: BrowserWindow | undefined
   dshPid: number | undefined
   tray: Tray | undefined
@@ -21,6 +23,7 @@ export const appState: {
 } = {
   runtime: undefined,
   runtimeLease: undefined,
+  gateway: undefined,
   mainWindow: undefined,
   dshPid: undefined,
   tray: undefined,

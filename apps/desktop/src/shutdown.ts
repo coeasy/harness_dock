@@ -42,14 +42,27 @@ async function releaseRuntimeLease(): Promise<void> {
   }
 }
 
+async function stopGateway(): Promise<void> {
+  const gateway = appState.gateway
+  appState.gateway = undefined
+  if (!gateway) return
+  try {
+    await gateway.stop()
+    await bootLog('quit: remote gateway stopped')
+  } catch (error) {
+    await bootLog(`quit: remote gateway stop failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 /**
- * Graceful-but-bounded shutdown: give the dsh process tree a chance to stop
- * cleanly, but never let a stuck descendant keep the client alive. The whole
- * sequence is capped at 15s; afterwards app.exit() runs unconditionally.
+ * Graceful-but-bounded shutdown: stop accepting remote/mobile traffic first,
+ * then give the dsh process tree a chance to stop cleanly. The whole sequence
+ * is capped at 15s; afterwards app.exit() runs unconditionally.
  */
 export function beginShutdown(event?: Electron.Event): void {
   const runtime = appState.runtime
-  if (!runtime) return
+  const gateway = appState.gateway
+  if (!runtime && !gateway) return
   if (quitting) return
   if (event) event.preventDefault()
   quitting = true
@@ -61,6 +74,7 @@ export function beginShutdown(event?: Electron.Event): void {
     if (exiting) return
     exiting = true
     void (async () => {
+      await stopGateway()
       await releaseRuntimeLease()
       await bootLog(`quit: ${reason}; calling app.exit(0)`)
       app.exit(0)
@@ -72,10 +86,17 @@ export function beginShutdown(event?: Electron.Event): void {
   }, 15_000)
   watchdog.unref()
 
-  void runtime
-    .stop()
+  void stopGateway()
+    .then(async () => {
+      if (!runtime) return
+      await runtime.stop()
+    })
     .then(async () => {
       clearTimeout(watchdog)
+      if (!runtime) {
+        hardExit('gateway-only clean exit')
+        return
+      }
       const outcome = runtime.lastStopOutcome
       if (!outcome?.clean) {
         const survivors = outcome?.ladder?.survivors?.join(', ') ?? 'unknown'

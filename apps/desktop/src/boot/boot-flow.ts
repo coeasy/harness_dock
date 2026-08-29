@@ -1,6 +1,7 @@
 import { app, Notification } from 'electron'
 import { bundledRuntimeVersion } from '@dsh/client-runtime'
 import { acquireRuntimeLease, bootstrapRuntime } from '@dsh/bootstrap'
+import { startHarnessGateway } from '@dsh/bootstrap/gateway'
 import { readOriginFile } from '@dsh/docs-sync'
 import { bootLog, openLogDir } from '../boot-log.ts'
 import { fmt, t } from '../i18n.ts'
@@ -29,8 +30,8 @@ let autoUpdate: AutoUpdateHandle | undefined
 
 /**
  * Boot orchestration: splash → cross-host runtime lease → shared bootstrap
- * (origin → runtime → start, with last-known-good rollback) → main window →
- * auto-update → tray.
+ * (origin → runtime → start, with last-known-good rollback) → optional secure
+ * remote gateway → main window → auto-update → tray.
  *
  * The runtime lease prevents Electron Stable and Perry Preview from silently
  * starting two independent dsh process trees against the same ~/.dsh state.
@@ -116,6 +117,7 @@ export async function bootFlow(): Promise<void> {
       dshVersion: result.ready.dshVersion,
     })
     await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
+    await startRemoteGatewayIfEnabled(result.ready.url)
     updateSplash(t('splash.loadingInterface'))
     await createWindow(result.ready.url)
 
@@ -138,8 +140,46 @@ export async function bootFlow(): Promise<void> {
     }
   } catch (error) {
     appState.runtimeLease = undefined
+    await appState.gateway?.stop().catch(() => undefined)
+    appState.gateway = undefined
     await runtimeLease.release().catch(() => undefined)
     throw error
+  }
+}
+
+async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
+  if (process.env.HARNESSDOCK_GATEWAY_ENABLE !== '1') return
+
+  const rawPort = process.env.HARNESSDOCK_GATEWAY_PORT?.trim()
+  const port = rawPort ? Number.parseInt(rawPort, 10) : 0
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid HARNESSDOCK_GATEWAY_PORT: ${rawPort}`)
+  }
+
+  const gateway = await startHarnessGateway({
+    upstreamUrl,
+    bindHost: process.env.HARNESSDOCK_GATEWAY_BIND?.trim() || '127.0.0.1',
+    port,
+    publicBaseUrl: process.env.HARNESSDOCK_GATEWAY_PUBLIC_URL?.trim() || undefined,
+    allowInsecurePublicUrl: process.env.HARNESSDOCK_GATEWAY_ALLOW_INSECURE === '1',
+    log: (message) => void bootLog(`gateway: ${message}`),
+  })
+  appState.gateway = gateway
+  await bootLog(`remote gateway ready: local=${gateway.localUrl} public=${gateway.publicUrl}`)
+
+  // Explicit opt-in only: pairing codes are credentials and must never be
+  // silently written to disk logs. A preview user can request one native toast
+  // at startup while the diagnostics/pairing UI is developed.
+  if (process.env.HARNESSDOCK_GATEWAY_PAIR_ON_START === '1') {
+    const ticket = gateway.createPairingTicket()
+    try {
+      new Notification({
+        title: 'HarnessDock Mobile Pairing',
+        body: `Pairing code: ${ticket.code} (expires ${new Date(ticket.expiresAt).toLocaleTimeString()})`,
+      }).show()
+    } catch {
+      // Notification support is optional. Do not log the pairing secret.
+    }
   }
 }
 
