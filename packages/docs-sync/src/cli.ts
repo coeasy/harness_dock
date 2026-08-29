@@ -2,7 +2,11 @@
 import { parseArgs } from 'node:util'
 import { syncDsh } from './sync.ts'
 
+const cliArgs = process.argv.slice(2)
+if (cliArgs[0] === '--') cliArgs.shift()
+
 const { values } = parseArgs({
+  args: cliArgs,
   options: {
     pin: { type: 'string' },
     check: { type: 'boolean', default: false },
@@ -33,6 +37,7 @@ try {
           dshVersion: result.origin.dshVersion,
           gitTag: result.origin.gitTag,
           gitCommit: result.origin.gitCommit,
+          distribution: result.origin.distribution,
           docsHash: result.origin.docsHash,
           written: result.written,
           changed: result.changed,
