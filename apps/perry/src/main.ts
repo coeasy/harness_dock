@@ -117,12 +117,15 @@ async function run(): Promise<void> {
       onError: (code, message) => console.error(`[perry] webview error ${code}: ${message}`),
     })
 
+    // Perry's UI lowering requires App() to receive a direct object literal;
+    // dynamic object spreads or a separately constructed config are rejected.
+    // The preview packer always ships icon-256.png as a fixed resource.
     App({
-      title: PERRY_HOST.productName,
+      title: 'HarnessDock Native Preview',
       width: 1280,
       height: 840,
+      icon: iconPath(resources),
       body: VStack([webview]),
-      ...(existsSync(iconPath(resources)) ? { icon: iconPath(resources) } : {}),
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
