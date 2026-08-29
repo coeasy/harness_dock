@@ -23,6 +23,8 @@ export function runtimeBundleKey(
 export async function installRuntimeBundle(input: {
   spec: RuntimeBundleSpec
   version: string
+  gitTag?: string
+  gitCommit?: string
   runtimeDir: string
   platform?: NodeJS.Platform
   arch?: string
@@ -85,6 +87,25 @@ export async function installRuntimeBundle(input: {
     if (actualVersion !== input.version) {
       throw new Error(`runtime bundle dsh version ${actualVersion ?? 'unknown'} != pinned ${input.version}`)
     }
+
+    const manifest = JSON.parse(
+      await readFile(path.join(input.runtimeDir, 'manifest.json'), 'utf8'),
+    ) as { gitTag?: string; gitCommit?: string; platform?: string; arch?: string }
+    if (input.gitTag && manifest.gitTag !== input.gitTag) {
+      throw new Error(`runtime bundle git tag ${manifest.gitTag ?? 'unknown'} != pinned ${input.gitTag}`)
+    }
+    if (input.gitCommit && manifest.gitCommit !== input.gitCommit) {
+      throw new Error(
+        `runtime bundle git commit ${manifest.gitCommit ?? 'unknown'} != pinned ${input.gitCommit}`,
+      )
+    }
+    if (manifest.platform && manifest.platform !== platform) {
+      throw new Error(`runtime bundle platform ${manifest.platform} != host ${platform}`)
+    }
+    if (manifest.arch && manifest.arch !== arch) {
+      throw new Error(`runtime bundle arch ${manifest.arch} != host ${arch}`)
+    }
+
     await assertBundledRuntimeIntegrity(input.runtimeDir, platform, arch)
     await writeFile(path.join(input.runtimeDir, '.ready'), `${new Date().toISOString()}\n`, 'utf8')
   } catch (error) {
