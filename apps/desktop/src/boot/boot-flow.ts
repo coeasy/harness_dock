@@ -24,6 +24,7 @@ import {
   readVersionOverride,
   runtimeCacheDir,
 } from '../version-override.ts'
+import { BootProgressTracker } from './progress.ts'
 
 let autoUpdate: AutoUpdateHandle | undefined
 
@@ -35,9 +36,10 @@ let autoUpdate: AutoUpdateHandle | undefined
  * this module only wires it to the desktop UX.
  */
 export async function bootFlow(): Promise<void> {
+  const progress = new BootProgressTracker()
   await createSplash()
   updateSplash(t('splash.loading'))
-  showSplashProgress(null) // virtual loading while nothing measurable yet
+  showSplashProgress(progress.start())
 
   const userDataDir = app.getPath('userData')
   const versionOverride = await resolveVersionOverride(userDataDir)
@@ -52,6 +54,7 @@ export async function bootFlow(): Promise<void> {
     stopTimeoutMs: 12_000,
     log: (message) => void bootLog(message),
     onBeforeStart: ({ bundledAvailable }) => {
+      showSplashProgress(progress.preparingRuntime(bundledAvailable))
       void bootLog(
         `runtime mode: ${bundledAvailable ? 'bundled (offline)' : 'download (first launch fetches ~300MB over HTTPS)'}`,
       )
@@ -64,7 +67,7 @@ export async function bootFlow(): Promise<void> {
     },
     onProgress: (event) => {
       if (event.stage === 'fetch') {
-        showSplashProgress(event.percent ?? null)
+        showSplashProgress(progress.fetching(event.percent))
         const pct = `${event.percent ?? 0}%`
         const bytes = event.bytes ? formatMb(event.bytes) : '—'
         updateSplash(
@@ -77,15 +80,16 @@ export async function bootFlow(): Promise<void> {
           }),
         )
       } else if (event.stage === 'resolve') {
-        // No measurable total during the metadata phase: keep the bar moving.
-        showSplashProgress(null)
+        showSplashProgress(progress.resolving(event.done ?? 0, event.total))
         updateSplash(
           event.total
             ? fmt(t('splash.resolving'), { total: event.total, done: event.done ?? 0 })
             : fmt(t('splash.resolvingUnknown'), { done: event.done ?? 0 }),
         )
       } else if (event.stage === 'done') {
-        showSplashDone()
+        // Runtime download/extraction is only one boot phase. Do not show 100%
+        // until the runtime has started and the Web UI has actually loaded.
+        showSplashProgress(progress.runtimeInstalled())
         updateSplash(t('splash.ready'))
       }
     },
@@ -108,8 +112,12 @@ export async function bootFlow(): Promise<void> {
   appState.mode = result.mode
   appState.bundledAvailable = result.bundledAvailable
   await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
+  showSplashProgress(progress.runtimeReady())
   updateSplash(t('splash.loadingInterface'))
+  showSplashProgress(progress.loadingInterface())
   await createWindow(result.ready.url)
+  showSplashProgress(progress.complete())
+  showSplashDone()
 
   try {
     autoUpdate = initAutoUpdate()
