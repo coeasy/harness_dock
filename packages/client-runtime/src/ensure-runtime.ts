@@ -13,6 +13,8 @@ export { defaultDownloadCacheDir }
 export async function ensureDownloadedRuntime(input: {
   origin: {
     dshVersion: string
+    gitTag?: string
+    gitCommit?: string
     npmPackage?: string
     npmTarball?: string
     npmIntegrity?: string
@@ -43,6 +45,8 @@ export async function ensureDownloadedRuntime(input: {
   await installRuntimeBundle({
     spec: bundle,
     version,
+    gitTag: input.origin.gitTag,
+    gitCommit: input.origin.gitCommit,
     runtimeDir,
     platform: process.platform,
     arch: process.arch,
