@@ -1,6 +1,6 @@
 import { app, Notification } from 'electron'
 import { bundledRuntimeVersion } from '@dsh/client-runtime'
-import { bootstrapRuntime } from '@dsh/bootstrap'
+import { acquireRuntimeLease, bootstrapRuntime } from '@dsh/bootstrap'
 import { readOriginFile } from '@dsh/docs-sync'
 import { bootLog, openLogDir } from '../boot-log.ts'
 import { fmt, t } from '../i18n.ts'
@@ -28,105 +28,118 @@ import {
 let autoUpdate: AutoUpdateHandle | undefined
 
 /**
- * Boot orchestration: splash → shared bootstrap (origin → runtime → start,
- * with last-known-good rollback) → main window → auto-update → tray.
+ * Boot orchestration: splash → cross-host runtime lease → shared bootstrap
+ * (origin → runtime → start, with last-known-good rollback) → main window →
+ * auto-update → tray.
  *
- * All concrete work lives in `@dsh/bootstrap` (shared with the VS Code host);
- * this module only wires it to the desktop UX.
+ * The runtime lease prevents Electron Stable and Perry Preview from silently
+ * starting two independent dsh process trees against the same ~/.dsh state.
  */
 export async function bootFlow(): Promise<void> {
   await createSplash()
   updateSplash(t('splash.loading'))
-  showSplashProgress(null) // virtual loading while nothing measurable yet
+  showSplashProgress(null)
 
-  const userDataDir = app.getPath('userData')
-  const versionOverride = await resolveVersionOverride(userDataDir)
-
-  const result = await bootstrapRuntime({
-    originPath: originPath(),
-    pluginPath: pluginPath(),
-    packaged: app.isPackaged,
-    bundledRoot: bundledRoot(),
-    userDataDir,
-    versionOverride,
-    stopTimeoutMs: 12_000,
-    log: (message) => void bootLog(message),
-    onBeforeStart: ({ bundledAvailable }) => {
-      void bootLog(
-        `runtime mode: ${bundledAvailable ? 'bundled (offline)' : 'download (first launch fetches ~300MB over HTTPS)'}`,
-      )
-      if (bundledAvailable) {
-        updateSplash(t('splash.startingRuntime'))
-      } else {
-        updateSplash(t('splash.firstLaunch'))
-        showFirstLaunchHints()
-      }
-    },
-    onProgress: (event) => {
-      if (event.stage === 'fetch') {
-        showSplashProgress(event.percent ?? null)
-        const pct = `${event.percent ?? 0}%`
-        const bytes = event.bytes ? formatMb(event.bytes) : '—'
-        updateSplash(
-          fmt(t('splash.downloading'), {
-            pct,
-            done: event.done,
-            total: event.total,
-            bytes,
-            name: event.name,
-          }),
-        )
-      } else if (event.stage === 'resolve') {
-        // No measurable total during the metadata phase: keep the bar moving.
-        showSplashProgress(null)
-        updateSplash(
-          event.total
-            ? fmt(t('splash.resolving'), { total: event.total, done: event.done ?? 0 })
-            : fmt(t('splash.resolvingUnknown'), { done: event.done ?? 0 }),
-        )
-      } else if (event.stage === 'done') {
-        showSplashDone()
-        updateSplash(t('splash.ready'))
-      }
-    },
-    onRollback: (info) => {
-      void bootLog(`boot: rolled back to last-known-good dsh ${info.to}`)
-      try {
-        new Notification({
-          title: t('common.appTitle'),
-          body: fmt(t('rollback.notification'), { from: info.from, to: info.to }),
-        }).show()
-      } catch {
-        // notifications unavailable
-      }
-    },
-  })
-
-  appState.runtime = result.runtime
-  appState.dshPid = result.ready.pid
-  appState.dshVersion = result.ready.dshVersion
-  appState.mode = result.mode
-  appState.bundledAvailable = result.bundledAvailable
-  await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
-  updateSplash(t('splash.loadingInterface'))
-  await createWindow(result.ready.url)
+  const runtimeLease = await acquireRuntimeLease({ host: 'electron' })
+  appState.runtimeLease = runtimeLease
 
   try {
-    autoUpdate = initAutoUpdate()
-  } catch (error) {
-    await bootLog(`auto-update init failed: ${error instanceof Error ? error.message : String(error)}`)
-  }
-  try {
-    appState.tray = createTray({
-      onToggle: toggleMainWindow,
-      onOpenLog: () => void openLogDir(),
-      onDiagnostics: () => openDiagnosticsWindow('info'),
-      onVersions: () => openDiagnosticsWindow('versions'),
-      onQuit: () => app.quit(),
-      onCheckUpdate: () => autoUpdate?.checkNow(),
+    const userDataDir = app.getPath('userData')
+    const versionOverride = await resolveVersionOverride(userDataDir)
+
+    const result = await bootstrapRuntime({
+      originPath: originPath(),
+      pluginPath: pluginPath(),
+      packaged: app.isPackaged,
+      bundledRoot: bundledRoot(),
+      userDataDir,
+      versionOverride,
+      stopTimeoutMs: 12_000,
+      log: (message) => void bootLog(message),
+      onBeforeStart: ({ bundledAvailable }) => {
+        void bootLog(
+          `runtime mode: ${bundledAvailable ? 'bundled (offline)' : 'download (first launch fetches ~300MB over HTTPS)'}`,
+        )
+        if (bundledAvailable) {
+          updateSplash(t('splash.startingRuntime'))
+        } else {
+          updateSplash(t('splash.firstLaunch'))
+          showFirstLaunchHints()
+        }
+      },
+      onProgress: (event) => {
+        if (event.stage === 'fetch') {
+          showSplashProgress(event.percent ?? null)
+          const pct = `${event.percent ?? 0}%`
+          const bytes = event.bytes ? formatMb(event.bytes) : '—'
+          updateSplash(
+            fmt(t('splash.downloading'), {
+              pct,
+              done: event.done,
+              total: event.total,
+              bytes,
+              name: event.name,
+            }),
+          )
+        } else if (event.stage === 'resolve') {
+          showSplashProgress(null)
+          updateSplash(
+            event.total
+              ? fmt(t('splash.resolving'), { total: event.total, done: event.done ?? 0 })
+              : fmt(t('splash.resolvingUnknown'), { done: event.done ?? 0 }),
+          )
+        } else if (event.stage === 'done') {
+          showSplashDone()
+          updateSplash(t('splash.ready'))
+        }
+      },
+      onRollback: (info) => {
+        void bootLog(`boot: rolled back to last-known-good dsh ${info.to}`)
+        try {
+          new Notification({
+            title: t('common.appTitle'),
+            body: fmt(t('rollback.notification'), { from: info.from, to: info.to }),
+          }).show()
+        } catch {
+          // notifications unavailable
+        }
+      },
     })
+
+    appState.runtime = result.runtime
+    appState.dshPid = result.ready.pid
+    appState.dshVersion = result.ready.dshVersion
+    appState.mode = result.mode
+    appState.bundledAvailable = result.bundledAvailable
+    await runtimeLease.updateRuntime({
+      runtimePid: result.ready.pid,
+      dshVersion: result.ready.dshVersion,
+    })
+    await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
+    updateSplash(t('splash.loadingInterface'))
+    await createWindow(result.ready.url)
+
+    try {
+      autoUpdate = initAutoUpdate()
+    } catch (error) {
+      await bootLog(`auto-update init failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    try {
+      appState.tray = createTray({
+        onToggle: toggleMainWindow,
+        onOpenLog: () => void openLogDir(),
+        onDiagnostics: () => openDiagnosticsWindow('info'),
+        onVersions: () => openDiagnosticsWindow('versions'),
+        onQuit: () => app.quit(),
+        onCheckUpdate: () => autoUpdate?.checkNow(),
+      })
+    } catch (error) {
+      await bootLog(`tray creation failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   } catch (error) {
-    await bootLog(`tray creation failed: ${error instanceof Error ? error.message : String(error)}`)
+    appState.runtimeLease = undefined
+    await runtimeLease.release().catch(() => undefined)
+    throw error
   }
 }
 

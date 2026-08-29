@@ -18,11 +18,9 @@ export async function forceKillTree(pid: number | undefined): Promise<void> {
       })
       return
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return // already gone
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
     }
   }
-  // No taskkill at all (broken PATH / stripped Windows): at least kill the
-  // root process directly so nothing we spawned outlives the client.
   try {
     process.kill(pid, 'SIGKILL')
   } catch {
@@ -31,6 +29,18 @@ export async function forceKillTree(pid: number | undefined): Promise<void> {
 }
 
 let quitting = false
+let exiting = false
+
+async function releaseRuntimeLease(): Promise<void> {
+  const lease = appState.runtimeLease
+  appState.runtimeLease = undefined
+  if (!lease) return
+  try {
+    await lease.release()
+  } catch (error) {
+    await bootLog(`quit: runtime lease release failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
 
 /**
  * Graceful-but-bounded shutdown: give the dsh process tree a chance to stop
@@ -40,24 +50,23 @@ let quitting = false
 export function beginShutdown(event?: Electron.Event): void {
   const runtime = appState.runtime
   if (!runtime) return
-  if (quitting) {
-    // Second before-quit round: let the OS take the window down.
-    return
-  }
+  if (quitting) return
   if (event) event.preventDefault()
   quitting = true
   appState.runtime = undefined
 
-  // Feedback for slow quits: show a small "closing" window shortly after the
-  // stop starts (fast quits finish before it appears, so no flash).
   scheduleClosingHint()
 
   const hardExit = (reason: string) => {
-    void bootLog(`quit: ${reason}; calling app.exit(0)`)
-    app.exit(0)
+    if (exiting) return
+    exiting = true
+    void (async () => {
+      await releaseRuntimeLease()
+      await bootLog(`quit: ${reason}; calling app.exit(0)`)
+      app.exit(0)
+    })()
   }
-  // Watchdog = the final guarantee. Even if stop() itself never settles,
-  // force-kill the recorded dsh tree before leaving.
+
   const watchdog = setTimeout(() => {
     void forceKillTree(appState.dshPid).finally(() => hardExit('shutdown watchdog expired (15s)'))
   }, 15_000)
