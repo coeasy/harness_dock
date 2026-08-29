@@ -24,6 +24,7 @@ concurrency:
 
 env:
   PERRY_VERSION: '0.5.1220'
+  PERRY_SOURCE_SHA: '06137858dc8c6f80975238377138f2f948d6ef88'
   PERRY_NO_TELEMETRY: '1'
   CI: 'true'
   PERRY_IOS_SIM_CROSS_SHA256: '140c2dd79ffe785b142dd9c79cbda1bc02b63837a3aac2bbcd7f0de2dd99a3d6'
@@ -49,7 +50,7 @@ jobs:
   ios-simulator:
     needs: validate
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -88,6 +89,36 @@ jobs:
             '.perry_version == $version and .target_triple == "aarch64-apple-ios-sim" and (.files | length >= 3)' \
             "$runtime_dir/manifest.json" >/dev/null
           echo "PERRY_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+
+      # Perry 0.5.1220's published full iOS stdlib contains the known external
+      # HTTP-pump link regression even for apps that do not import node:http.
+      # The compiler's supported auto-optimize path avoids that full-stdlib
+      # fallback by rebuilding only the stdlib features this mobile client uses.
+      # Pin the exact source commit behind v0.5.1220 so this workaround is
+      # reproducible and can be removed when Perry publishes the upstream fix.
+      - name: Checkout pinned Perry source for iOS auto-optimize
+        uses: actions/checkout@v7
+        with:
+          repository: PerryTS/perry
+          ref: ${{ env.PERRY_SOURCE_SHA }}
+          path: .perry-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Enable Perry iOS auto-optimized stdlib
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-ios-sim
+          echo "PERRY_WORKSPACE_ROOT=$GITHUB_WORKSPACE/.perry-source" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/perry-auto-ios" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/perry-auto-ios
+          key: perry-auto-ios-${{ env.PERRY_VERSION }}-${{ hashFiles('apps/mobile/src/**/*.ts', 'packages/bootstrap/src/runtime-provider.ts') }}
+          restore-keys: |
+            perry-auto-ios-${{ env.PERRY_VERSION }}-
 
       - run: mkdir -p apps/mobile/release/ios-simulator
       - run: pnpm build:mobile:ios-sim
