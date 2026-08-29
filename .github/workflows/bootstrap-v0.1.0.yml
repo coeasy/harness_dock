@@ -1,0 +1,60 @@
+name: bootstrap-v0.1.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/bootstrap-v0.1.0.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Remove one-time bootstrap and resolve final main commit
+        id: final
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          path='.github/workflows/bootstrap-v0.1.0.yml'
+          file_sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq '.sha')
+          final_sha=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+            -f message='chore: remove v0.1.0 release bootstrap' \
+            -f sha="$file_sha" \
+            -f branch='main' \
+            --jq '.commit.sha')
+          echo "sha=$final_sha" >> "$GITHUB_OUTPUT"
+          echo "Final main commit: $final_sha"
+
+      - name: Move v0.1.0 tag to final main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_SHA: ${{ steps.final.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v0.1.0" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/v0.1.0" \
+              -f sha="$FINAL_SHA" \
+              -F force=true >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref='refs/tags/v0.1.0' \
+              -f sha="$FINAL_SHA" >/dev/null
+          fi
+          echo "v0.1.0 -> $FINAL_SHA"
+
+      - name: Dispatch full v0.1.0 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+            -f release_tag=v0.1.0 \
+            -f target=all
