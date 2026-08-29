@@ -79,6 +79,7 @@ async function installTargetNativePackages(): Promise<void> {
     [
       'install',
       '--no-save',
+      '--force',
       '--omit=dev',
       '--include=optional',
       '--ignore-scripts',
@@ -264,6 +265,12 @@ for (const registry of registries) {
 if (!installed) {
   throw lastNpmError ?? new Error('all npm registries failed')
 }
+
+// npm filters optional packages against the runner's real platform even when
+// --os/--cpu target a different release platform. Install the three required
+// target-native packages explicitly with --force so cross-built runtimes are
+// complete on a Linux or Apple Silicon preparation runner.
+await installTargetNativePackages()
 
 if (!inspectBundledRuntime(dest, platform)) {
   throw new Error(`prepare-runtime finished but layout is incomplete under ${dest}`)
