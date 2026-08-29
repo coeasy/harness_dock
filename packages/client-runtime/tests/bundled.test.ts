@@ -9,6 +9,7 @@ import {
   bundledNodeRel,
   bundledRuntimeVersion,
   canCopyHostNode,
+  inspectBundledModules,
   inspectBundledRuntime,
   NODE_BUNDLE_VERSION,
   nodeOfficialUrl,
@@ -45,7 +46,7 @@ describe('nodeOfficialUrl', () => {
   })
 })
 
-describe('inspectBundledRuntime', () => {
+describe('bundled layouts', () => {
   it('returns node + dsh bin when the full layout exists', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-bundle-'))
     temps.push(dir)
@@ -58,11 +59,23 @@ describe('inspectBundledRuntime', () => {
     expect(inspectBundledRuntime(dir, 'win32')).toEqual({
       nodeBin: path.join(dir, 'node.exe'),
       dshBin: dshRel,
+      usesElectronNode: false,
     })
   })
 
-  it('returns null when node or dsh is missing', () => {
+  it('detects a module-only Thin seed without pretending it is standalone Node', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-thin-seed-'))
+    temps.push(dir)
+    const dshRel = bundledDshBin(dir)
+    mkdirSync(path.dirname(dshRel), { recursive: true })
+    writeFileSync(dshRel, '')
+    expect(inspectBundledModules(dir)).toEqual({ dshBin: dshRel })
+    expect(inspectBundledRuntime(dir, 'linux')).toBeNull()
+  })
+
+  it('returns null when dsh is missing', () => {
     expect(inspectBundledRuntime('/missing-runtime', 'linux')).toBeNull()
+    expect(inspectBundledModules('/missing-runtime')).toBeNull()
   })
 })
 
