@@ -183,6 +183,7 @@ jobs:
           GH_OWNER: ${{ github.repository_owner }}
           GH_REPO: ${{ github.event.repository.name }}
           DSH_SKIP_RUNTIME_PREPARE: ${{ matrix.scenario == 'full' && '1' || '0' }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
       - name: Collect artifacts
         shell: bash
         run: |
