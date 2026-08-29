@@ -371,12 +371,13 @@ async function waitForReady(
       ) return
       validating = true
       const current = candidate
-      const ready = child.exitCode === null && await probeHttpReady(current.url)
+      const ready = child.exitCode === null && await probeCandidateReady(current.url)
       validating = false
       if (settled || candidate !== current) return
       if (!ready) {
-        candidate = undefined
-        candidateSince = 0
+        // Keep a one-shot stdout candidate and retry after a transient probe
+        // failure. New dsh versions intentionally print the launch URL once.
+        candidateSince = Date.now()
         return
       }
       succeed(current)
@@ -411,6 +412,34 @@ async function waitForReady(
     child.stderr.on('data', onData)
     child.once('error', onError)
     child.once('exit', onExit)
+  })
+}
+
+async function probeCandidateReady(url: string): Promise<boolean> {
+  const parsed = new URL(url)
+  if (parsed.searchParams.has('token')) {
+    return probeTcpReady(parsed.hostname, Number.parseInt(parsed.port, 10))
+  }
+  return probeHttpReady(url)
+}
+
+async function probeTcpReady(host: string, port: number): Promise<boolean> {
+  if (!Number.isInteger(port) || port <= 0) return false
+  const { createConnection } = await import('node:net')
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port })
+    let settled = false
+    const finish = (ready: boolean): void => {
+      if (settled) return
+      settled = true
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(ready)
+    }
+    socket.setTimeout(1_000)
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+    socket.once('timeout', () => finish(false))
   })
 }
 
