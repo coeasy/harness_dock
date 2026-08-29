@@ -42,17 +42,27 @@ export async function resolveDshCommand(input: {
   if (input.mode === 'bundled') {
     const root = input.bundledRoot
     if (!root) throw new Error('bundled runtime requested but bundledRoot is missing')
-    const full = inspectBundledRuntime(root, platform)
-    if (full) return { command: full.nodeBin, argsPrefix: [full.dshBin] }
+    const layout = inspectBundledRuntime(root, platform)
+    if (layout) {
+      return layout.usesElectronNode
+        ? {
+            command: input.execPath ?? layout.nodeBin,
+            argsPrefix: [layout.dshBin],
+            extraEnv: { ELECTRON_RUN_AS_NODE: '1' },
+          }
+        : { command: layout.nodeBin, argsPrefix: [layout.dshBin] }
+    }
 
+    // Unit tests and non-Electron hosts can still resolve an explicitly supplied
+    // module seed when an execPath is provided.
     const modules = inspectBundledModules(root)
-    if (!modules) {
+    if (!modules || !input.execPath) {
       throw new Error(
         `bundled runtime is incomplete under ${root}. Expected node_modules/@deepseek-ai/dsh/lib/bin.js`,
       )
     }
     return {
-      command: input.execPath ?? process.execPath,
+      command: input.execPath,
       argsPrefix: [modules.dshBin],
       extraEnv: { ELECTRON_RUN_AS_NODE: '1' },
     }
