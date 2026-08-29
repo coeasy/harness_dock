@@ -25,7 +25,7 @@ describe('resolveDshCommand', () => {
     expect(resolved.argsPrefix).toEqual(['--yes', '@deepseek-ai/dsh@0.1.1-rc.2'])
   })
 
-  it('bundled mode uses vendored node.exe plus the pinned dsh bin.js', async () => {
+  it('bundled Full mode uses vendored node.exe plus the pinned dsh bin.js', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises')
     const { mkdirSync, writeFileSync } = await import('node:fs')
     const os = await import('node:os')
@@ -36,7 +36,7 @@ describe('resolveDshCommand', () => {
     writeFileSync(path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), '')
     const resolved = await resolveDshCommand({
       mode: 'bundled',
-      version: '0.1.1-rc.2',
+      version: '0.1.2-alpha.1',
       env: {},
       bundledRoot: dir,
       platform: 'win32',
@@ -45,6 +45,34 @@ describe('resolveDshCommand', () => {
     expect(resolved.argsPrefix).toEqual([
       path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
     ])
+    expect(resolved.extraEnv).toBeUndefined()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('bundled Thin mode uses an explicit Electron executable in Node mode', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const os = await import('node:os')
+    const path = await import('node:path')
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-thin-'))
+    mkdirSync(path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib'), { recursive: true })
+    writeFileSync(path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), '')
+    const resolved = await resolveDshCommand({
+      mode: 'bundled',
+      version: '0.1.2-alpha.1',
+      env: {},
+      bundledRoot: dir,
+      platform: 'linux',
+      execPath: '/opt/HarnessDock/electron',
+    })
+    expect(resolved.command).toBe('/opt/HarnessDock/electron')
+    expect(resolved.argsPrefix).toEqual([
+      path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    ])
+    expect(resolved.extraEnv).toMatchObject({
+      ELECTRON_RUN_AS_NODE: '1',
+      DSH_PRESERVE_ELECTRON_RUN_AS_NODE: '1',
+    })
     await rm(dir, { recursive: true, force: true })
   })
 
