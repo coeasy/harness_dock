@@ -44,6 +44,22 @@ const runtimeDir = values['runtime-dir'] ?? process.env.DSH_RUNTIME_DIR
 const dest = runtimeDir
   ? path.resolve(repoRoot, runtimeDir as string)
   : runtimeCacheDir(repoRoot)
+const packageSetDir = process.env.DSH_PACKAGE_SET_DIR
+  ? path.resolve(repoRoot, process.env.DSH_PACKAGE_SET_DIR)
+  : undefined
+
+async function listPackageSetTarballs(root: string): Promise<string[]> {
+  const result: string[] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) await walk(full)
+      else if (entry.isFile() && entry.name.endsWith('.tgz')) result.push(full)
+    }
+  }
+  await walk(root)
+  return result.sort()
+}
 
 // --prune-only: apply the size pruning to an existing bundled runtime without
 // re-downloading node or re-running npm install. Useful after the prune rules
@@ -129,9 +145,7 @@ await rm(dest, { recursive: true, force: true })
 await mkdir(dest, { recursive: true })
 
 // npm scopes an install to the nearest package.json; without one it walks up to
-// the workspace root and mixes the repo's devDependencies into peer resolution
-// (ERESOLVE conflicts, e.g. typescript-eslint vs rollup). Pin a minimal local
-// package.json so the bundled runtime installs in isolation.
+// the workspace root and mixes the repo's devDependencies into peer resolution.
 await writeFile(
   path.join(dest, 'package.json'),
   `${JSON.stringify({ name: 'harnessdock-bundled-runtime', private: true, version: '0.0.0' }, null, 2)}\n`,
@@ -222,9 +236,22 @@ const registries = [
   'https://registry.npmmirror.com',
 ]
 let installed = false
-let lastNpmError
+let lastNpmError: unknown
+
+const localTarballs = packageSetDir ? await listPackageSetTarballs(packageSetDir) : []
+if (packageSetDir && localTarballs.length === 0) {
+  throw new Error(`DSH_PACKAGE_SET_DIR contains no .tgz files: ${packageSetDir}`)
+}
+
 for (const registry of registries) {
-  console.log(`npm install @deepseek-ai/dsh@${origin.dshVersion} --registry ${registry}`)
+  const installSpecs = localTarballs.length > 0
+    ? localTarballs
+    : [`@deepseek-ai/dsh@${origin.dshVersion}`]
+  console.log(
+    localTarballs.length > 0
+      ? `npm install ${localTarballs.length} source-built dsh/vendor tarballs for ${origin.gitTag} --registry ${registry}`
+      : `npm install @deepseek-ai/dsh@${origin.dshVersion} --registry ${registry}`,
+  )
   try {
     await execFileAsync(
       npmBin,
@@ -234,25 +261,26 @@ for (const registry of registries) {
         '--include=optional',
         '--no-fund',
         '--no-audit',
+        '--legacy-peer-deps',
         `--os=${platform}`,
         `--cpu=${arch}`,
         ...(platform === 'linux' ? ['--libc=glibc'] : []),
-        `--fetch-timeout=60000`,
-        `--fetch-retries=3`,
-        `--fetch-retry-mintimeout=1000`,
-        `--fetch-retry-maxtimeout=10000`,
+        '--fetch-timeout=60000',
+        '--fetch-retries=3',
+        '--fetch-retry-mintimeout=1000',
+        '--fetch-retry-maxtimeout=10000',
         `--registry=${registry}`,
-        `@deepseek-ai/dsh@${origin.dshVersion}`,
+        ...installSpecs,
       ],
       {
         cwd: dest,
         windowsHide: true,
         env: {
           ...process.env,
-          NODE_OPTIONS:
-            process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+          NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
         },
         shell: process.platform === 'win32',
+        maxBuffer: 16 * 1024 * 1024,
       },
     )
     installed = true
@@ -267,9 +295,8 @@ if (!installed) {
 }
 
 // npm filters optional packages against the runner's real platform even when
-// --os/--cpu target a different release platform. Install the three required
-// target-native packages explicitly with --force so cross-built runtimes are
-// complete on a Linux or Apple Silicon preparation runner.
+// --os/--cpu target a different release platform. Install required target-native
+// packages explicitly so cross-built runtimes are complete.
 await installTargetNativePackages()
 
 if (!inspectBundledRuntime(dest, platform)) {
@@ -281,9 +308,6 @@ if (repairedAssets.length > 0) {
   console.log(`repaired known upstream runtime assets: ${repairedAssets.join(', ')}`)
 }
 
-// Size pruning: the bundled runtime only ever runs on this host, so drop
-// @img/sharp variants for other platforms, non-host node-pty prebuilds, and
-// dev/debug weight (.map / .pdb / .d.ts) — dead bytes in the full package.
 const { removedBytes: prunedBytes, removedCount: prunedCount } = await pruneBundledRuntime(
   dest,
   platform,
@@ -296,6 +320,10 @@ await writeFile(
   `${JSON.stringify(
     {
       dshVersion: origin.dshVersion,
+      gitTag: origin.gitTag,
+      gitCommit: origin.gitCommit,
+      packageSource: localTarballs.length > 0 ? 'source-pack' : 'npm',
+      packageCount: localTarballs.length || undefined,
       nodeVersion: NODE_BUNDLE_VERSION,
       nodeSource,
       platform,
