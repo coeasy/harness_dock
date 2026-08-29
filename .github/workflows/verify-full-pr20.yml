@@ -79,6 +79,12 @@ jobs:
           github-token: ${{ github.token }}
           repository: coeasy/harness_dock
           run-id: 33255330251
+      - name: Repair and verify transported runtime
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
       - name: Build full package
         run: node apps/desktop/scripts/pack.mjs --os ${{ matrix.target_os }} --scenario full --arch ${{ matrix.arch }}
         env:
