@@ -1,4 +1,4 @@
-import { inspectBundledRuntime } from './bundled.ts'
+import { inspectBundledModules, inspectBundledRuntime } from './bundled.ts'
 import { rejectFloatingDistTag } from '@dsh/docs-sync'
 import type { RuntimeMode } from './types.ts'
 
@@ -21,6 +21,7 @@ export async function resolveDshCommand(input: {
   bundledRoot?: string
   platform?: NodeJS.Platform
   which?: (cmd: string) => Promise<string | null>
+  execPath?: string
 }): Promise<ResolvedCommand> {
   const version = rejectFloatingDistTag(input.version)
   const platform = input.platform ?? process.platform
@@ -41,13 +42,20 @@ export async function resolveDshCommand(input: {
   if (input.mode === 'bundled') {
     const root = input.bundledRoot
     if (!root) throw new Error('bundled runtime requested but bundledRoot is missing')
-    const layout = inspectBundledRuntime(root, platform)
-    if (!layout) {
+    const full = inspectBundledRuntime(root, platform)
+    if (full) return { command: full.nodeBin, argsPrefix: [full.dshBin] }
+
+    const modules = inspectBundledModules(root)
+    if (!modules) {
       throw new Error(
-        `bundled runtime is incomplete under ${root}. Expected vendored node plus node_modules/@deepseek-ai/dsh/lib/bin.js`,
+        `bundled runtime is incomplete under ${root}. Expected node_modules/@deepseek-ai/dsh/lib/bin.js`,
       )
     }
-    return { command: layout.nodeBin, argsPrefix: [layout.dshBin] }
+    return {
+      command: input.execPath ?? process.execPath,
+      argsPrefix: [modules.dshBin],
+      extraEnv: { ELECTRON_RUN_AS_NODE: '1' },
+    }
   }
 
   return {
