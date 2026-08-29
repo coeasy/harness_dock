@@ -49,13 +49,13 @@ jobs:
         run: |
           set -euo pipefail
           build_rows='[
-            {"runner":"windows-latest","artifact_os":"win","target_os":"win","scenario":"thin","arch":"x64","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin"},
-            {"runner":"windows-latest","artifact_os":"win","target_os":"win","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full"},
-            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","scenario":"thin","arch":"x64","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
-            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"thin","arch":"all","runtime_dir":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin"},
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/win-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/linux-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"thin","arch":"all","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","packaged_runtime_dir":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
           ]'
           runtime_rows='[
             {"enabled":true,"runner":"ubuntu-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
@@ -84,6 +84,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          pnpm check:versions
+          pnpm check:release
       - run: pnpm test
 
   prepare-runtime:
@@ -138,6 +143,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
           compression-level: 0
+          include-hidden-files: true
 
   build:
     needs: [test, plan, prepare-runtime]
@@ -178,6 +184,13 @@ jobs:
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
+      - name: Repair and verify downloaded runtime
+        if: matrix.scenario == 'full'
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
       - name: Build desktop package
         run: ${{ matrix.command }}
         env:
@@ -185,9 +198,11 @@ jobs:
           GH_REPO: ${{ github.event.repository.name }}
           DSH_SKIP_RUNTIME_PREPARE: ${{ matrix.scenario == 'full' && '1' || '0' }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Smoke test bundled runtime
+      - name: Smoke test packaged runtime
         if: matrix.scenario == 'full'
-        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.runtime_dir }} --plugin packages/plugin-embedded-client/lib/index.js
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.packaged_runtime_dir }} --plugin ${{ matrix.packaged_plugin }}
+      - name: Validate package size budget
+        run: pnpm check:size
       - name: Collect artifacts
         shell: bash
         run: |
