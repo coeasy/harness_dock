@@ -75,11 +75,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.12.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -100,20 +100,20 @@ jobs:
       - name: Skip runtime preparation for thin-only release
         if: matrix.enabled != true
         run: echo "No full runtime requested for this release target."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: matrix.enabled == true
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: matrix.enabled == true
         with:
           version: 10.12.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: matrix.enabled == true
         with:
           node-version: 24
           cache: pnpm
       - name: Cache prepared runtime
         if: matrix.enabled == true
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ matrix.runtime_dir }}
           key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/integrity.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
@@ -131,12 +131,13 @@ jobs:
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
       - name: Upload prepared runtime
         if: matrix.enabled == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
   build:
     needs: [test, plan, prepare-runtime]
@@ -150,30 +151,30 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.12.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - name: Cache electron-builder downloads (Unix)
         if: runner.os != 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/electron-builder
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Cache electron-builder downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Download prepared runtime
         if: matrix.scenario == 'full'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
@@ -196,28 +197,26 @@ jobs:
             \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
                -o -name '*.AppImage' -o -name '*.deb' \) \
             -exec cp {} dist/ \;
-          # Only full packages participate in the built-in updater. Keep their
-          # update metadata and differential maps; thin blockmaps are unused.
           if [ "${{ matrix.scenario }}" = "full" ]; then
             find "$release_dir" -maxdepth 1 -type f \
               \( -name '*.blockmap' -o -name 'latest*.yml' \) \
               -exec cp {} dist/ \;
           fi
           ls -la dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.artifact_os }}-${{ matrix.scenario }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
-          # Packages are already compressed; avoid compressing them again in the artifact.
           compression-level: 0
 
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: desktop-*
@@ -255,7 +254,7 @@ jobs:
           latest*.yml and full-package .blockmap files support automatic and
           differential updates; they are metadata, not installers.
           EOF
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: HarnessDock ${{ steps.tag.outputs.tag }}
