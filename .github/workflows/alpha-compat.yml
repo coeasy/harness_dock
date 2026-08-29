@@ -1,0 +1,84 @@
+name: alpha-compat
+
+on:
+  push:
+    branches:
+      - feat/dsh-0.1.2-alpha1-v0.1.1
+    paths:
+      - .github/workflows/alpha-compat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/dsh-0.1.2-alpha1-v0.1.1
+      - name: Read exact upstream commit
+        id: origin
+        shell: bash
+        run: |
+          commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.commit }}
+          path: upstream
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: upstream/pnpm-lock.yaml
+      - name: Pack upstream dsh/vendor/landlock families
+        run: bash scripts/pack-upstream-dsh.sh upstream upstream-package-set
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-alpha-package-set
+          path: upstream-package-set
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  linux-runtime:
+    needs: source-pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/dsh-0.1.2-alpha1-v0.1.1
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - uses: actions/download-artifact@v8
+        with:
+          name: dsh-alpha-package-set
+          path: upstream-package-set
+      - name: Prepare alpha runtime from source package set
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_PACKAGE_SET_DIR: upstream-package-set
+          DSH_RUNTIME_PLATFORM: linux
+          DSH_RUNTIME_ARCH: x64
+          DSH_RUNTIME_DIR: runtimes/pack
+      - name: Build embedded plugin
+        run: pnpm --filter @dsh/plugin-embedded-client bundle
+      - name: Smoke exact alpha runtime
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir runtimes/pack --plugin packages/plugin-embedded-client/lib/index.js
