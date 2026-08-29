@@ -1,0 +1,69 @@
+name: maintain-v0.1.1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/dsh-0.1.2-alpha1-v0.1.1
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Bump HarnessDock workspace and Electron
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+          import path from 'node:path'
+
+          const files = ['package.json']
+          for (const root of ['packages', 'apps', 'tests']) {
+            for (const entry of readdirSync(root, { withFileTypes: true })) {
+              if (!entry.isDirectory()) continue
+              const file = path.join(root, entry.name, 'package.json')
+              if (existsSync(file)) files.push(file)
+            }
+          }
+          for (const file of files) {
+            const pkg = JSON.parse(readFileSync(file, 'utf8'))
+            if (pkg.version) pkg.version = '0.1.1'
+            if (file === 'apps/desktop/package.json') {
+              pkg.devDependencies.electron = '43.4.1'
+            }
+            writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n')
+          }
+          NODE
+      - name: Refresh lockfile
+        run: pnpm install --no-frozen-lockfile
+      - name: Sync exact upstream alpha origin
+        run: pnpm sync:dsh -- --pin 0.1.2-alpha.1
+      - name: Validate generated metadata
+        run: |
+          pnpm check:versions
+          pnpm check:release
+          node -e "const o=require('./packages/docs-sync/origin.json'); if(o.dshVersion!=='0.1.2-alpha.1'||o.gitCommit!=='cd5ef8148158c3a752a658978873241fdf8e2bbc'||o.distribution!=='git-pack') process.exit(1)"
+      - name: Commit generated version and origin state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- package.json pnpm-lock.yaml packages/*/package.json apps/*/package.json tests/*/package.json packages/docs-sync/origin.json packages/docs-sync/capability-matrix.yaml packages/docs-sync/capability-summary.md
+          if git diff --cached --quiet; then
+            echo 'No generated changes.'
+            exit 0
+          fi
+          git commit -m 'chore: prepare HarnessDock v0.1.1 for dsh alpha.1'
+          git push origin HEAD:feat/dsh-0.1.2-alpha1-v0.1.1
