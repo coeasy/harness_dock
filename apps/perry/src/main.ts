@@ -46,7 +46,7 @@ function showFatal(message: string): void {
 }
 
 async function run(): Promise<void> {
-  let lease
+  let lease: Awaited<ReturnType<typeof acquireRuntimeLease>>
   try {
     lease = await acquireRuntimeLease({ host: 'perry' })
   } catch (error) {
@@ -117,14 +117,13 @@ async function run(): Promise<void> {
       onError: (code, message) => console.error(`[perry] webview error ${code}: ${message}`),
     })
 
-    const appConfig = {
+    App({
       title: PERRY_HOST.productName,
       width: 1280,
       height: 840,
       body: VStack([webview]),
       ...(existsSync(iconPath(resources)) ? { icon: iconPath(resources) } : {}),
-    }
-    App(appConfig)
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error('[perry] startup failed:', error)

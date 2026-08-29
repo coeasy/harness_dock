@@ -5,7 +5,7 @@ import { resourceRoot } from '../src/paths.ts'
 describe('Perry resource paths', () => {
   it('uses a sibling resources directory on Windows/Linux', () => {
     expect(resourceRoot('C:\\Apps\\HarnessDock\\HarnessDock-Native-Preview.exe', 'win32', {})).toBe(
-      path.join('C:\\Apps\\HarnessDock', 'resources'),
+      path.win32.join('C:\\Apps\\HarnessDock', 'resources'),
     )
     expect(resourceRoot('/opt/harnessdock/harnessdock-native-preview', 'linux', {})).toBe(
       '/opt/harnessdock/resources',

@@ -2,16 +2,6 @@ name: perry-preview
 
 on:
   workflow_dispatch:
-    inputs:
-      scenario:
-        description: 'Perry package scenario'
-        type: choice
-        required: true
-        default: both
-        options:
-          - both
-          - thin
-          - full
   pull_request:
     paths:
       - 'apps/perry/**'
@@ -55,12 +45,6 @@ jobs:
         scenario: [thin, full]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    if: >-
-      ${{
-        github.event_name == 'pull_request' ||
-        inputs.scenario == 'both' ||
-        inputs.scenario == matrix.scenario
-      }}
     env:
       PERRY_VERSION: '0.5.1220'
       PERRY_NO_TELEMETRY: '1'

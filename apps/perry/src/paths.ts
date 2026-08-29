@@ -8,15 +8,16 @@ export function resourceRoot(
 ): string {
   if (env.HARNESSDOCK_RESOURCE_DIR) return path.resolve(env.HARNESSDOCK_RESOURCE_DIR)
 
-  const exeDir = path.dirname(execPath)
+  const pathApi = platform === 'win32' ? path.win32 : path.posix
+  const exeDir = pathApi.dirname(execPath)
   if (
     platform === 'darwin' &&
-    path.basename(exeDir) === 'MacOS' &&
-    path.basename(path.dirname(exeDir)) === 'Contents'
+    pathApi.basename(exeDir) === 'MacOS' &&
+    pathApi.basename(pathApi.dirname(exeDir)) === 'Contents'
   ) {
-    return path.resolve(exeDir, '..', 'Resources')
+    return pathApi.resolve(exeDir, '..', 'Resources')
   }
-  return path.join(exeDir, 'resources')
+  return pathApi.join(exeDir, 'resources')
 }
 
 export function originPath(root = resourceRoot()): string {

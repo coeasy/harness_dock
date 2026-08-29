@@ -82,12 +82,20 @@ async function writeActiveAtomic(file: string, record: RuntimeLeaseRecord): Prom
   await rename(tmp, file)
 }
 
+/**
+ * runtime.lock is the ownership source of truth. active.json is richer status
+ * for diagnostics, but is only trusted when its token matches the lock owner.
+ * This ordering closes the tiny acquire race where a new owner has created the
+ * lock but has not yet replaced a stale active.json from a crashed process.
+ */
 export async function inspectRuntimeLease(
   leaseRoot = defaultRuntimeLeaseRoot(),
 ): Promise<RuntimeLeaseRecord | null> {
+  const lock = await readRecord(path.join(leaseRoot, 'runtime.lock'))
   const active = await readRecord(path.join(leaseRoot, 'active.json'))
-  if (active) return active
-  return readRecord(path.join(leaseRoot, 'runtime.lock'))
+  if (!lock) return active
+  if (active?.token === lock.token) return active
+  return lock
 }
 
 export async function acquireRuntimeLease(
@@ -163,8 +171,6 @@ export async function acquireRuntimeLease(
         throw new RuntimeLeaseConflictError(holder)
       }
 
-      // Stale lease from a crashed host. Only remove it after the recorded PID
-      // is confirmed dead; the next open('wx') remains the actual race arbiter.
       await rm(activePath, { force: true }).catch(() => undefined)
       await rm(lockPath, { force: true }).catch(() => undefined)
     }

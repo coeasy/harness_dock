@@ -45,7 +45,7 @@ const baseName = `HarnessDock-Native-Preview-${version}-${platformName}-${arch}-
 const releaseRoot = path.join(perryRoot, 'release', scenario)
 const stagingRoot = path.join(releaseRoot, 'staging')
 const artifactsRoot = path.join(releaseRoot, 'artifacts')
-const perryBin = process.env.PERRY_BIN || (process.platform === 'win32' ? 'perry.exe' : 'perry')
+const perryBin = process.env.PERRY_BIN || 'perry'
 const runtimeDir = path.resolve(process.env.DSH_RUNTIME_DIR || path.join(repoRoot, 'runtimes', 'pack'))
 
 function run(command, args, cwd = repoRoot, extraEnv = {}) {
@@ -55,7 +55,7 @@ function run(command, args, cwd = repoRoot, extraEnv = {}) {
       cwd,
       stdio: 'inherit',
       env: { ...process.env, ...extraEnv },
-      shell: false,
+      shell: process.platform === 'win32',
       windowsHide: true,
     })
     child.on('error', reject)
