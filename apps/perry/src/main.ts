@@ -1,4 +1,3 @@
-import 'node:http'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { App, Text, VStack, WebView } from 'perry/ui'
@@ -16,20 +15,6 @@ import {
   pluginPath,
   resourceRoot,
 } from './paths.ts'
-
-/*
- * Perry v0.5.1220 compatibility shim.
- *
- * Its published prebuilt `full` stdlib accidentally enables the external HTTP
- * client pump even when the program does not import node:http/https. Those FFI
- * symbols live in perry-ext-http, which the compiler only links when a program
- * declares the HTTP module surface. Perry upstream fixed this after 0.5.1220
- * (PerryTS/perry#5983 / #7491), but 0.5.1220 is still the latest formal release.
- *
- * The side-effect import above deliberately selects perry-ext-http so the
- * published compiler can resolve its own stdlib references. Remove it once a
- * formal Perry release containing #5983 is pinned here.
- */
 
 function openExternalUrl(url: string): void {
   try {
