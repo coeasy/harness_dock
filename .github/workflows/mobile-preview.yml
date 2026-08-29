@@ -1,0 +1,104 @@
+name: mobile-preview
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/bootstrap/src/runtime-provider.ts'
+      - 'packages/bootstrap/src/host-capabilities.ts'
+      - 'packages/bootstrap/src/gateway.ts'
+      - 'packages/bootstrap/tests/runtime-provider.test.ts'
+      - 'packages/bootstrap/tests/gateway.test.ts'
+      - 'apps/desktop/src/boot/boot-flow.ts'
+      - 'apps/desktop/src/shutdown.ts'
+      - '.github/workflows/mobile-preview.yml'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PERRY_VERSION: '0.5.1220'
+  PERRY_NO_TELEMETRY: '1'
+  CI: 'true'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm test
+      - run: pnpm check:mobile-host
+
+  ios-simulator:
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: npm install -g @perryts/perry@0.5.1220
+      - run: perry --version
+      - run: perry check apps/mobile/src/main.ts --strict
+      - run: mkdir -p apps/mobile/release/ios-simulator
+      - run: pnpm build:mobile:ios-sim
+      - uses: actions/upload-artifact@v7
+        with:
+          name: harnessdock-mobile-ios-simulator
+          path: apps/mobile/release/ios-simulator/*
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Discover preinstalled Android NDK
+        shell: bash
+        run: |
+          NDK="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -n "$NDK"
+          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+      - run: npm install -g @perryts/perry@0.5.1220
+      - run: perry --version
+      - run: perry check apps/mobile/src/main.ts --strict
+      - run: mkdir -p apps/mobile/release/android
+      - run: pnpm build:mobile:android
+      - uses: actions/upload-artifact@v7
+        with:
+          name: harnessdock-mobile-android
+          path: apps/mobile/release/android/*
+          if-no-files-found: error
+          retention-days: 7
