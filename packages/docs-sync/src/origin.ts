@@ -1,11 +1,12 @@
-import type { Origin } from './types.ts'
+import type { DshDistribution, Origin } from './types.ts'
 
 export function buildOrigin(input: {
   dshVersion: string
   gitTag: string
   gitCommit: string
-  npmIntegrity: string
-  npmTarball: string
+  distribution?: DshDistribution
+  npmIntegrity?: string
+  npmTarball?: string
   docsHash: string
   clientVersion: string
   now?: string
@@ -14,9 +15,10 @@ export function buildOrigin(input: {
     dshVersion: input.dshVersion,
     gitTag: input.gitTag,
     gitCommit: input.gitCommit,
+    distribution: input.distribution ?? 'npm',
     npmPackage: '@deepseek-ai/dsh',
-    npmIntegrity: input.npmIntegrity,
-    npmTarball: input.npmTarball,
+    npmIntegrity: input.npmIntegrity ?? '',
+    npmTarball: input.npmTarball ?? '',
     docsHash: input.docsHash,
     syncedAt: input.now ?? new Date().toISOString(),
     clientVersion: input.clientVersion,
@@ -32,6 +34,7 @@ export function diffOrigin(
     'dshVersion',
     'gitTag',
     'gitCommit',
+    'distribution',
     'npmIntegrity',
     'npmTarball',
     'docsHash',
