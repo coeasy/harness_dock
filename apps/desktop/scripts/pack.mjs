@@ -1,15 +1,10 @@
 #!/usr/bin/env node
 /**
- * Deduplicated desktop pack entry point. Replaces the eight pack:* script
- * chains in apps/desktop/package.json with a single script:
+ * Desktop pack entry point.
  *
- *   node scripts/pack.mjs --os <current|win|mac|linux> --scenario <thin|full>
- *
- * Steps (matching the previous pack:* chains exactly):
- *   1. Bundle the embedded client so its lib is always current
- *      (pnpm --filter @dsh/plugin-embedded-client bundle, at repo root).
- *   2. Bundle the Electron main/preload (pnpm bundle, at apps/desktop).
- *   3. Run electron-builder with the scenario config and OS targets.
+ * Both scenarios use the same exact prepared dsh module tree:
+ *   thin: modules only, executed by Electron's Node
+ *   full: modules + dedicated Node 22.19 runtime
  */
 import { readdirSync, existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -34,18 +29,7 @@ const { values } = parseArgs({
 })
 
 function usage() {
-  console.log(`Usage: node scripts/pack.mjs [--os current|win|mac|linux] [--scenario thin|full]
-
-  --os        target OS for electron-builder (default: current)
-  --scenario  thin or full package (default: thin)
-  --arch      macOS architecture: all, x64, or arm64 (default: all)
-
-  os targets:
-    current  no target args, uses electron-builder.yml / electron-builder.full.yml
-    win      --win nsis portable zip --x64
-    mac      --mac dmg zip --x64 --arm64
-    linux    --linux AppImage deb --x64
-`)
+  console.log(`Usage: node scripts/pack.mjs [--os current|win|mac|linux] [--scenario thin|full]\n\n  --os        target OS for electron-builder (default: current)\n  --scenario  thin or full package (default: thin)\n  --arch      macOS architecture: all, x64, or arm64 (default: all)\n\n  os targets:\n    current  no target args, uses electron-builder.yml / electron-builder.full.yml\n    win      --win nsis portable zip --x64\n    mac      --mac dmg zip --x64 --arm64\n    linux    --linux AppImage deb --x64\n`)
 }
 
 if (values.help) {
@@ -86,11 +70,6 @@ function targetsFor(targetOs, targetArch) {
 }
 const config = scenario === 'full' ? 'electron-builder.full.yml' : 'electron-builder.yml'
 
-// Auto-update feed (Phase A): bake app-update.yml only when a GitHub upstream
-// is configured at build time. electron-builder throws on undefined ${env.*}
-// macros, so we inject via CLI overrides instead of the yml. DSH_PACK_OUTPUT
-// additionally overrides the electron-builder output directory (handy when the
-// default release/<scenario> dir is locked by Windows/AV, or for temp builds).
 const extraArgs = []
 const owner = process.env.GH_OWNER
 const repo = process.env.GH_REPO
@@ -109,9 +88,6 @@ if (process.env.DSH_PACK_OUTPUT) {
   console.log(`[pack] output overridden to ${process.env.DSH_PACK_OUTPUT}`)
 }
 
-// Windows packaging spends most of its time compressing the full runtime tree.
-// Normal compression substantially reduces release build time while keeping
-// the installers fully functional; the trade-off is a modestly larger package.
 if (os === 'win') {
   extraArgs.push('-c.compression=normal')
   console.log('[pack] Windows compression=normal')
@@ -149,8 +125,6 @@ function findResourceDirs(root, depth = 0, result = []) {
       result.push(fullPath)
       continue
     }
-    // Avoid walking vendored dependency trees; the app resource directory is
-    // always above them in electron-builder's unpacked output.
     if (entry.name === 'node_modules') continue
     findResourceDirs(fullPath, depth + 1, result)
   }
@@ -171,24 +145,30 @@ function verifyPackagedResources() {
       `[pack] packaged embedded-client plugin missing under ${outputRoot}; refusing to publish a broken client`,
     )
   }
-  if (scenario === 'full') {
-    const runtimeDirs = resourceDirs.filter(
-      (dir) =>
-        existsSync(path.join(dir, 'dsh-runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')) &&
-        existsSync(path.join(dir, 'dsh-runtime', process.platform === 'win32' ? 'node.exe' : path.join('bin', 'node'))),
+
+  const runtimeDirs = resourceDirs.filter((dir) =>
+    existsSync(path.join(dir, 'dsh-runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')),
+  )
+  if (runtimeDirs.length === 0) {
+    throw new Error(
+      `[pack] packaged ${scenario} dsh modules missing under ${outputRoot}; refusing to publish a client that cannot run the pinned Git-only release`,
     )
-    if (runtimeDirs.length === 0) {
-      throw new Error(
-        `[pack] packaged full runtime missing under ${outputRoot}; refusing to publish a package that downloads ~300 MB on first launch`,
-      )
+  }
+
+  if (scenario === 'full') {
+    const withNode = runtimeDirs.filter((dir) =>
+      existsSync(path.join(dir, 'dsh-runtime', process.platform === 'win32' ? 'node.exe' : path.join('bin', 'node'))),
+    )
+    if (withNode.length === 0) {
+      throw new Error(`[pack] packaged full runtime has no dedicated Node under ${outputRoot}`)
     }
-    console.log(`[pack] verified full runtime + embedded plugin in ${runtimeDirs.length} unpacked app(s)`)
+    console.log(`[pack] verified full runtime + embedded plugin in ${withNode.length} unpacked app(s)`)
   } else {
-    console.log(`[pack] verified embedded plugin in ${pluginDirs.length} unpacked app(s)`)
+    console.log(`[pack] verified thin module seed + embedded plugin in ${runtimeDirs.length} unpacked app(s)`)
   }
 }
 
-async function prepareFullRuntimes() {
+async function prepareRuntimes() {
   const runtimePlatform = { win: 'win32', mac: 'darwin', linux: 'linux' }[os] ?? process.platform
   const arches = os === 'mac'
     ? (arch === 'all' ? ['x64', 'arm64'] : [arch])
@@ -210,20 +190,18 @@ async function prepareFullRuntimes() {
 }
 
 try {
-  // 1. keep the embedded client bundle current
   await run('pnpm', ['--filter', '@dsh/plugin-embedded-client', 'bundle'], repoRoot)
-  // 2. bundle the Electron main/preload
   await run('pnpm', ['bundle'], desktopRoot)
-  // Full builds need a matching bundled runtime for every target architecture.
-  // CI can set DSH_SKIP_RUNTIME_PREPARE after downloading prepared runtime artifacts.
-  if (scenario === 'full' && process.env.DSH_SKIP_RUNTIME_PREPARE !== '1') {
-    await prepareFullRuntimes()
+  // CI can set DSH_SKIP_RUNTIME_PREPARE after downloading exact prepared
+  // runtime artifacts. Local builds prepare the runtime for either scenario.
+  if (process.env.DSH_SKIP_RUNTIME_PREPARE !== '1') {
+    await prepareRuntimes()
   }
-  // 3. electron-builder with scenario config + OS targets
   await run(
     'pnpm',
     ['exec', 'electron-builder', ...targetsFor(os, arch), '--config', config, '--publish', 'never', ...extraArgs],
     desktopRoot,
+    { DSH_PACKAGE_SCENARIO: scenario },
   )
   verifyPackagedResources()
   console.log(`[pack] done: os=${os} scenario=${scenario}`)
