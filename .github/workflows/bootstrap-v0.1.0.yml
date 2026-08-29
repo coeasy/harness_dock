@@ -16,45 +16,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Remove one-time bootstrap and resolve final main commit
-        id: final
+      - name: Move v0.1.0 tag to validated release commit
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          path='.github/workflows/bootstrap-v0.1.0.yml'
-          file_sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq '.sha')
-          final_sha=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/contents/${path}" \
-            -f message='chore: remove final v0.1.0 release bootstrap' \
-            -f sha="$file_sha" \
-            -f branch='main' \
-            --jq '.commit.sha')
-          echo "sha=$final_sha" >> "$GITHUB_OUTPUT"
-          echo "Final main commit: $final_sha"
-
-      - name: Move v0.1.0 tag to final main commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FINAL_SHA: ${{ steps.final.outputs.sha }}
+          RELEASE_SHA: '95803dc1245736ce737e34f988a49ece19fe6027'
         shell: bash
         run: |
           set -euo pipefail
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v0.1.0" >/dev/null 2>&1; then
             gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/v0.1.0" \
-              -f sha="$FINAL_SHA" \
+              -f sha="$RELEASE_SHA" \
               -F force=true >/dev/null
           else
             gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
               -f ref='refs/tags/v0.1.0' \
-              -f sha="$FINAL_SHA" >/dev/null
+              -f sha="$RELEASE_SHA" >/dev/null
           fi
-          echo "v0.1.0 -> $FINAL_SHA"
+          echo "v0.1.0 -> $RELEASE_SHA"
 
-      - name: Dispatch final full v0.1.0 release
+      - name: Dispatch final full v0.1.0 release from tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run release.yml --repo "${GITHUB_REPOSITORY}" --ref main \
+          set -euo pipefail
+          gh workflow run release.yml --repo "${GITHUB_REPOSITORY}" --ref v0.1.0 \
             -f release_tag=v0.1.0 \
             -f target=all
