@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: verify-full-pr20-${{ github.ref }}
@@ -23,6 +24,7 @@ jobs:
             platform: win32
             arch: x64
             runtime_dir: runtimes/pack
+            runtime_artifact: runtime-win-x64
             packaged_runtime_dir: apps/desktop/release/full/win-unpacked/resources/dsh-runtime
             packaged_plugin: apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js
           - runner: ubuntu-latest
@@ -30,6 +32,7 @@ jobs:
             platform: linux
             arch: x64
             runtime_dir: runtimes/pack
+            runtime_artifact: runtime-linux-x64
             packaged_runtime_dir: apps/desktop/release/full/linux-unpacked/resources/dsh-runtime
             packaged_plugin: apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js
           - runner: macos-latest
@@ -37,6 +40,7 @@ jobs:
             platform: darwin
             arch: x64
             runtime_dir: runtimes/pack-x64
+            runtime_artifact: runtime-mac-x64
             packaged_runtime_dir: apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime
             packaged_plugin: apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
           - runner: macos-latest
@@ -44,6 +48,7 @@ jobs:
             platform: darwin
             arch: arm64
             runtime_dir: runtimes/pack-arm64
+            runtime_artifact: runtime-mac-arm64
             packaged_runtime_dir: apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime
             packaged_plugin: apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
     runs-on: ${{ matrix.runner }}
@@ -66,12 +71,14 @@ jobs:
         run: |
           pnpm check:versions
           pnpm check:release
-      - name: Prepare target runtime
-        run: pnpm --filter @dsh/client-runtime bundle-runtime
-        env:
-          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
-          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
-          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Download verified target runtime
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.runtime_artifact }}
+          path: ${{ matrix.runtime_dir }}
+          github-token: ${{ github.token }}
+          repository: coeasy/harness_dock
+          run-id: 33255330251
       - name: Build full package
         run: node apps/desktop/scripts/pack.mjs --os ${{ matrix.target_os }} --scenario full --arch ${{ matrix.arch }}
         env:
