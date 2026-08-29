@@ -15,9 +15,12 @@ export interface NodeDist {
   nodeRel: string
 }
 
-export interface BundledLayout {
-  nodeBin: string
+export interface BundledModuleLayout {
   dshBin: string
+}
+
+export interface BundledLayout extends BundledModuleLayout {
+  nodeBin: string
 }
 
 export function bundledNodeRel(platform: NodeJS.Platform): string {
@@ -52,21 +55,31 @@ export function nodeOfficialUrl(
   }
 }
 
+/** A Thin package carries the exact dsh module tree but reuses Electron's Node. */
+export function inspectBundledModules(
+  root: string,
+  exists: (filePath: string) => boolean = existsSync,
+): BundledModuleLayout | null {
+  const dshBin = bundledDshBin(root)
+  return exists(dshBin) ? { dshBin } : null
+}
+
+/** A Full package adds a dedicated, isolated Node executable to the module tree. */
 export function inspectBundledRuntime(
   root: string,
   platform: NodeJS.Platform,
   exists: (filePath: string) => boolean = existsSync,
 ): BundledLayout | null {
+  const modules = inspectBundledModules(root, exists)
+  if (!modules) return null
   const nodeBin = path.join(root, bundledNodeRel(platform))
-  const dshBin = bundledDshBin(root)
-  if (!exists(nodeBin) || !exists(dshBin)) return null
-  return { nodeBin, dshBin }
+  if (!exists(nodeBin)) return null
+  return { nodeBin, dshBin: modules.dshBin }
 }
 
 /**
  * The dsh version pinned inside a bundled runtime: prefers the manifest written
  * by prepare-cli, falls back to the vendored @deepseek-ai/dsh package.json.
- * Used to decide whether the bundled seed already matches the requested pin.
  */
 export function bundledRuntimeVersion(
   root: string,
