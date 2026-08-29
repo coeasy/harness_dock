@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to publish under (e.g. v0.1.0). Empty = draft release named "unreleased".'
+        description: 'Release tag to publish under (e.g. v0.1.1). Empty = draft unreleased build.'
         type: string
         required: false
       target:
@@ -50,31 +50,29 @@ jobs:
         run: |
           set -euo pipefail
           build_rows='[
-            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin"},
-            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/win-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full"},
-            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
-            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/linux-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"thin","arch":"all","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","packaged_runtime_dir":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"thin","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/thin/win-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/thin/win-unpacked/resources/plugin-embedded-client/index.js","electron":"apps/desktop/release/thin/win-unpacked/HarnessDock.exe","command":"node apps/desktop/scripts/pack.mjs --os win --scenario thin --arch x64"},
+            {"runner":"windows-latest","artifact_os":"win","target_os":"win","platform":"win32","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/win-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js","electron":"","command":"node apps/desktop/scripts/pack.mjs --os win --scenario full --arch x64"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"thin","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/thin/linux-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/thin/linux-unpacked/resources/plugin-embedded-client/index.js","electron":"apps/desktop/release/thin/linux-unpacked/HarnessDock","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin --arch x64"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/linux-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js","electron":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full --arch x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"thin","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/thin/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/thin/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","electron":"apps/desktop/release/thin/mac/HarnessDock.app/Contents/MacOS/HarnessDock","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin --arch x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"thin","arch":"arm64","runtime_dir":"runtimes/pack-arm64","packaged_runtime_dir":"apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","electron":"apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/MacOS/HarnessDock","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin --arch arm64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","electron":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","packaged_runtime_dir":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","electron":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
           ]'
           runtime_rows='[
-            {"enabled":true,"runner":"ubuntu-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
-            {"enabled":true,"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","arch":"x64","runtime_dir":"runtimes/pack"},
-            {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64","runtime_dir":"runtimes/pack-x64"},
-            {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
+            {"runner":"ubuntu-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
+            {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","arch":"x64","runtime_dir":"runtimes/pack"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64","runtime_dir":"runtimes/pack-x64"},
+            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
           ]'
           build_matrix=$(printf '%s' "$build_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-" + .scenario))]')
-          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-full"))]')
-          if [ "$(printf '%s' "$runtime_matrix" | jq 'length')" -eq 0 ]; then
-            runtime_matrix='[{"enabled":false,"runner":"ubuntu-latest","artifact_os":"none","target_os":"none","platform":"linux","arch":"x64","runtime_dir":"runtimes/unused"}]'
-          fi
+          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-thin") or $target == (.target_os + "-full"))]')
           echo "build_matrix=$(jq -cn --argjson include "$build_matrix" '{include:$include}')" >> "$GITHUB_OUTPUT"
           echo "runtime_matrix=$(jq -cn --argjson include "$runtime_matrix" '{include:$include}')" >> "$GITHUB_OUTPUT"
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -85,59 +83,73 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Validate release metadata
-        shell: bash
-        run: |
-          pnpm check:versions
-          pnpm check:release
+      - run: pnpm check:versions
+      - run: pnpm check:release
       - run: pnpm test
 
+  source-pack:
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read exact upstream commit
+        id: origin
+        run: echo "commit=$(node -p \"require('./packages/docs-sync/origin.json').gitCommit\")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.commit }}
+          path: upstream
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install upstream pnpm toolchain
+        run: npm install --global pnpm@11.7.0
+      - name: Pack exact upstream release family
+        run: bash scripts/pack-upstream-dsh.sh upstream upstream-package-set
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-source-package-set
+          path: upstream-package-set
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   prepare-runtime:
-    needs: [test, plan]
-    if: needs.test.result == 'success' && needs.plan.result == 'success'
+    needs: [test, plan, source-pack]
+    if: needs.test.result == 'success' && needs.plan.result == 'success' && needs.source-pack.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.runtime_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
-      NODE_OPTIONS: '--max-old-space-size=4096'
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
-      - name: Skip runtime preparation for thin-only release
-        if: matrix.enabled != true
-        run: echo "No full runtime requested for this release target."
       - uses: actions/checkout@v7
-        if: matrix.enabled == true
       - uses: pnpm/action-setup@v6
-        if: matrix.enabled == true
         with:
           version: 10.12.1
       - uses: actions/setup-node@v7
-        if: matrix.enabled == true
         with:
           node-version: 24
           cache: pnpm
-      - name: Cache prepared runtime
-        if: matrix.enabled == true
-        uses: actions/cache@v6
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - uses: actions/download-artifact@v8
         with:
-          path: ${{ matrix.runtime_dir }}
-          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/integrity.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
-          restore-keys: |
-            dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-
-      - name: Install workspace dependencies
-        if: matrix.enabled == true
-        run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Prepare bundled runtime
-        if: matrix.enabled == true
+          name: dsh-source-package-set
+          path: upstream-package-set
+      - name: Prepare target runtime from source package set
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
+          DSH_PACKAGE_SET_DIR: upstream-package-set
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
           DSH_RUNTIME_ARCH: ${{ matrix.arch }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Upload prepared runtime
-        if: matrix.enabled == true
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
@@ -153,10 +165,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: '--max-old-space-size=4096'
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -179,14 +191,11 @@ jobs:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Download prepared runtime
-        if: matrix.scenario == 'full'
-        uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
-      - name: Repair and verify downloaded runtime
-        if: matrix.scenario == 'full'
+      - name: Repair and verify transported runtime
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
@@ -197,11 +206,14 @@ jobs:
         env:
           GH_OWNER: ${{ github.repository_owner }}
           GH_REPO: ${{ github.event.repository.name }}
-          DSH_SKIP_RUNTIME_PREPARE: ${{ matrix.scenario == 'full' && '1' || '0' }}
+          DSH_SKIP_RUNTIME_PREPARE: '1'
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Smoke test packaged runtime
+      - name: Smoke packaged Full runtime
         if: matrix.scenario == 'full'
         run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.packaged_runtime_dir }} --plugin ${{ matrix.packaged_plugin }}
+      - name: Smoke packaged Thin runtime
+        if: matrix.scenario == 'thin'
+        run: pnpm --filter @dsh/client-runtime smoke-thin-runtime -- --runtime-dir ${{ matrix.packaged_runtime_dir }} --plugin ${{ matrix.packaged_plugin }} --electron ${{ matrix.electron }}
       - name: Validate package size budget
         run: pnpm check:size
       - name: Collect artifacts
@@ -210,16 +222,12 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           release_dir="apps/desktop/release/${{ matrix.scenario }}"
-          find "$release_dir" -maxdepth 1 -type f \
-            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
-               -o -name '*.AppImage' -o -name '*.deb' \) \
-            -exec cp {} dist/ \;
+          find "$release_dir" -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' \) -exec cp {} dist/ \;
           if [ "${{ matrix.scenario }}" = "full" ]; then
-            find "$release_dir" -maxdepth 1 -type f \
-              \( -name '*.blockmap' -o -name 'latest*.yml' \) \
-              -exec cp {} dist/ \;
+            find "$release_dir" -maxdepth 1 -type f \( -name '*.blockmap' -o -name 'latest*.yml' \) -exec cp {} dist/ \;
           fi
-          ls -la dist/
+          test -n "$(find dist -type f -print -quit)"
+          ls -lah dist
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.artifact_os }}-${{ matrix.scenario }}-${{ matrix.arch }}
@@ -229,8 +237,9 @@ jobs:
 
   publish:
     needs: build
+    if: needs.build.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -244,86 +253,53 @@ jobs:
           set -euo pipefail
           rm -rf artifacts
           mkdir -p artifacts
-
           while IFS= read -r file; do
             name=$(basename "$file")
-            if [ "$name" = "latest-mac.yml" ]; then
-              continue
-            fi
-            if [ -e "artifacts/$name" ]; then
-              echo "duplicate release asset filename: $name" >&2
-              exit 1
-            fi
+            [ "$name" = "latest-mac.yml" ] && continue
+            if [ -e "artifacts/$name" ]; then echo "duplicate release asset: $name" >&2; exit 1; fi
             cp "$file" "artifacts/$name"
           done < <(find artifact-bundles -type f -print | sort)
-
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
           import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
           import path from 'node:path'
-
           const dir = 'artifacts'
           const names = readdirSync(dir)
           const version = JSON.parse(readFileSync('package.json', 'utf8')).version
-          const zipRe = /^HarnessDock-.*-mac-(x64|arm64)-full\.zip$/
-          const zips = names
-            .filter((name) => zipRe.test(name))
-            .sort((a, b) => {
-              const aa = a.includes('-arm64-') ? 0 : 1
-              const bb = b.includes('-arm64-') ? 0 : 1
-              return aa - bb || a.localeCompare(b)
-            })
-
-          if (zips.length > 0) {
+          const zips = names.filter((n) => /^HarnessDock-.*-mac-(x64|arm64)-full\.zip$/.test(n)).sort()
+          if (zips.length) {
             const files = []
             for (const zip of zips) {
-              const match = zip.match(/-mac-(x64|arm64)-full\.zip$/)
-              if (!match) throw new Error(`cannot resolve macOS architecture from ${zip}`)
-              const arch = match[1]
-              const dmg = names.find((name) => name.endsWith(`-mac-${arch}-full.dmg`))
-              if (!dmg) throw new Error(`missing macOS ${arch} full DMG for combined update metadata`)
-
+              const arch = zip.match(/-mac-(x64|arm64)-full\.zip$/)?.[1]
+              const dmg = names.find((n) => n.endsWith(`-mac-${arch}-full.dmg`))
+              if (!arch || !dmg) throw new Error(`missing macOS ${arch} full pair`)
               for (const name of [zip, dmg]) {
                 const data = readFileSync(path.join(dir, name))
-                files.push({
-                  url: name,
-                  sha512: createHash('sha512').update(data).digest('base64'),
-                  size: data.length,
-                })
+                files.push({ url: name, sha512: createHash('sha512').update(data).digest('base64'), size: data.length })
               }
             }
-
             let yml = `version: ${version}\nfiles:\n`
-            for (const file of files) {
-              yml += `  - url: ${file.url}\n`
-              yml += `    sha512: ${file.sha512}\n`
-              yml += `    size: ${file.size}\n`
-            }
+            for (const f of files) yml += `  - url: ${f.url}\n    sha512: ${f.sha512}\n    size: ${f.size}\n`
             yml += `releaseDate: '${new Date().toISOString()}'\n`
-            writeFileSync(path.join(dir, 'latest-mac.yml'), yml, 'utf8')
+            writeFileSync(path.join(dir, 'latest-mac.yml'), yml)
           }
           NODE
-
-          echo "Final release assets:"
           find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
-          test -n "$(find artifacts -maxdepth 1 -type f -print -quit)"
       - name: Validate combined macOS update metadata
         shell: bash
         run: |
           set -euo pipefail
           if compgen -G 'artifacts/HarnessDock-*-mac-*-full.zip' >/dev/null; then
-            test -f artifacts/latest-mac.yml
             grep -q -- '-mac-arm64-full.zip' artifacts/latest-mac.yml
             grep -q -- '-mac-arm64-full.dmg' artifacts/latest-mac.yml
             grep -q -- '-mac-x64-full.zip' artifacts/latest-mac.yml
             grep -q -- '-mac-x64-full.dmg' artifacts/latest-mac.yml
-            echo 'Combined latest-mac.yml contains x64 and arm64 full assets.'
           fi
       - name: Resolve release tag
         id: tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "draft=false" >> "$GITHUB_OUTPUT"
           elif [ -n "${{ inputs.release_tag }}" ]; then
@@ -336,18 +312,13 @@ jobs:
       - name: Generate public release notes
         shell: bash
         run: |
-          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           template=".github/release-notes/v${VERSION}.md"
-          if [ -f "$template" ]; then
-            cp "$template" notes.md
-          else
-            printf '# HarnessDock v%s\n\nHarnessDock v%s release.\n' "$VERSION" "$VERSION" > notes.md
-          fi
+          if [ -f "$template" ]; then cp "$template" notes.md; else printf '# HarnessDock v%s\n' "$VERSION" > notes.md; fi
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: HarnessDock ${{ steps.tag.outputs.tag }}
+          name: HarnessDock v${{ github.event.repository.name && '' }}${{ '' }}
           draft: ${{ steps.tag.outputs.draft }}
           files: artifacts/*
           body_path: notes.md
@@ -382,9 +353,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          current_run="${GITHUB_RUN_ID}"
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" --jq '.workflow_runs[].id' | while IFS= read -r run_id; do
-            [ "$run_id" = "$current_run" ] && continue
-            echo "Deleting Actions run: $run_id"
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/$run_id" || true
+          current="${GITHUB_RUN_ID}"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" --jq '.workflow_runs[].id' | while IFS= read -r run; do
+            [ "$run" = "$current" ] && continue
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/$run" || true
           done
