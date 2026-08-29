@@ -9,6 +9,11 @@ export interface ResolvedCommand {
   extraEnv?: Record<string, string>
 }
 
+const electronNodeEnv = {
+  ELECTRON_RUN_AS_NODE: '1',
+  DSH_PRESERVE_ELECTRON_RUN_AS_NODE: '1',
+} as const
+
 export function npxCommand(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
   if (env.NPX_BIN) return env.NPX_BIN
   return platform === 'win32' ? 'npx.cmd' : 'npx'
@@ -48,13 +53,11 @@ export async function resolveDshCommand(input: {
         ? {
             command: input.execPath ?? layout.nodeBin,
             argsPrefix: [layout.dshBin],
-            extraEnv: { ELECTRON_RUN_AS_NODE: '1' },
+            extraEnv: { ...electronNodeEnv },
           }
         : { command: layout.nodeBin, argsPrefix: [layout.dshBin] }
     }
 
-    // Unit tests and non-Electron hosts can still resolve an explicitly supplied
-    // module seed when an execPath is provided.
     const modules = inspectBundledModules(root)
     if (!modules || !input.execPath) {
       throw new Error(
@@ -64,7 +67,7 @@ export async function resolveDshCommand(input: {
     return {
       command: input.execPath,
       argsPrefix: [modules.dshBin],
-      extraEnv: { ELECTRON_RUN_AS_NODE: '1' },
+      extraEnv: { ...electronNodeEnv },
     }
   }
 
