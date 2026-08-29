@@ -10,7 +10,6 @@ import { buildOrigin, diffOrigin } from './origin.ts'
 import { inspectPublishedPackage } from './tarball.ts'
 import type { Origin } from './types.ts'
 import {
-  intersectVersions,
   pickLatestVersion,
   rejectFloatingDistTag,
   versionToGitTag,
@@ -22,12 +21,7 @@ export const ORIGIN_PATH = path.resolve(here, '..', 'origin.json')
 export const MATRIX_PATH = path.resolve(here, '..', 'capability-matrix.yaml')
 export const SUMMARY_PATH = path.resolve(here, '..', 'capability-summary.md')
 
-/**
- * Resolve the HarnessDock client version from the repo root package.json.
- * Kept lazy (called inside syncDsh) because sync.ts is bundled by esbuild into
- * the desktop app, which only needs readOriginFile; reading files at module
- * top-level would crash after bundling. Falls back to a default on failure.
- */
+/** Resolve the HarnessDock client version from the repo root package.json. */
 export function resolveClientVersion(): string {
   try {
     const rootPackageJson = JSON.parse(
@@ -61,6 +55,12 @@ export interface SyncResult {
   written: boolean
 }
 
+/**
+ * Track the newest exact dsh Git release even when the CLI family has not yet
+ * been published to npm. npm-backed versions retain their integrity/tarball;
+ * Git-only versions are marked `git-pack` and the release workflow builds the
+ * package family from the exact tag/commit using upstream's official recipe.
+ */
 export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
   const fetchImpl = options.fetchImpl ?? fetch
   const pin = options.pin ? rejectFloatingDistTag(options.pin) : undefined
@@ -73,34 +73,36 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     listDshGitTags(fetchImpl),
     listNpmVersions(fetchImpl),
   ])
-  const intersection = intersectVersions(
-    gitTags.map((t) => t.version),
-    npmVersions,
-  )
-  if (intersection.length === 0) {
-    throw new Error('No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh')
+  if (gitTags.length === 0) {
+    throw new Error('No exact dsh-v* Git tags are available')
   }
 
-  const version = pin ?? pickLatestVersion(intersection)
-  if (!intersection.includes(version)) {
+  const gitVersions = gitTags.map((tag) => tag.version)
+  const version = pin ?? pickLatestVersion(gitVersions)
+  const tag = gitTags.find((entry) => entry.version === version)
+  if (!tag) {
     throw new Error(
-      `Pin ${version} is not in git tag ∩ npm. Available: ${intersection.sort().join(', ')}`,
+      `Pin ${version} is not an exact dsh Git tag. Available: ${gitVersions.sort().join(', ')}`,
     )
   }
 
-  const tag = gitTags.find((t) => t.version === version)
-  const gitTag = tag?.tag ?? versionToGitTag(version)
-  const gitCommit = tag?.sha
-  if (!gitCommit) {
-    throw new Error(`Missing git commit for ${gitTag}`)
-  }
+  const gitTag = tag.tag ?? versionToGitTag(version)
+  const gitCommit = tag.sha
+  if (!gitCommit) throw new Error(`Missing git commit for ${gitTag}`)
 
-  const npmMeta = await fetchNpmPackageMeta(version, fetchImpl)
-  const tarball = inspectPublishedPackage(npmMeta)
-  if (!tarball.ok) {
-    throw new Error(
-      `Refusing ${version}: ${tarball.reason}. Tag exists but the npm artifact is unusable.`,
-    )
+  const npmAvailable = npmVersions.includes(version)
+  let npmIntegrity = ''
+  let npmTarball = ''
+  if (npmAvailable) {
+    const npmMeta = await fetchNpmPackageMeta(version, fetchImpl)
+    const tarball = inspectPublishedPackage(npmMeta)
+    if (!tarball.ok) {
+      throw new Error(
+        `Refusing ${version}: ${tarball.reason}. The npm version exists but its artifact is unusable.`,
+      )
+    }
+    npmIntegrity = tarball.integrity
+    npmTarball = tarball.tarball
   }
 
   const docs = await fetchGuideDocs(gitTag, fetchImpl)
@@ -109,8 +111,9 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     dshVersion: version,
     gitTag,
     gitCommit,
-    npmIntegrity: tarball.integrity,
-    npmTarball: tarball.tarball,
+    distribution: npmAvailable ? 'npm' : 'git-pack',
+    npmIntegrity,
+    npmTarball,
     docsHash: hashDocs(docs),
     clientVersion,
   })
@@ -128,8 +131,6 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     return { origin, changed: diff.changed, fields: diff.fields, written: false }
   }
 
-  // The summary shares the YAML's write semantics exactly: it is only (re)written
-  // on a real change, never in dry-run/check mode, and untouched when unchanged.
   if (!options.dryRun && diff.changed) {
     await mkdir(path.dirname(originPath), { recursive: true })
     await writeFile(originPath, `${JSON.stringify(origin, null, 2)}\n`, 'utf8')
