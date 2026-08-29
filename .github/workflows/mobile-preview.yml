@@ -26,6 +26,8 @@ env:
   PERRY_VERSION: '0.5.1220'
   PERRY_NO_TELEMETRY: '1'
   CI: 'true'
+  PERRY_IOS_SIM_CROSS_SHA256: '140c2dd79ffe785b142dd9c79cbda1bc02b63837a3aac2bbcd7f0de2dd99a3d6'
+  PERRY_ANDROID_CROSS_SHA256: '66b365a385dacc7b439ab664d55fcb210b19ad85801d6e23fa5db5abd68189fe'
 
 jobs:
   validate:
@@ -61,6 +63,32 @@ jobs:
       - run: npm install -g @perryts/perry@0.5.1220
       - run: perry --version
       - run: perry check apps/mobile/src/main.ts --strict
+
+      # Perry's npm host package does not bundle cross-target runtime archives.
+      # Use the immutable cross bundle published with the pinned Perry release,
+      # verify its release SHA256 + manifest, then point the compiler at it.
+      - name: Provision pinned Perry iOS simulator cross runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/perry-cross-aarch64-apple-ios-sim.tar.gz"
+          runtime_dir="$RUNNER_TEMP/perry-cross-ios-simulator"
+          rm -rf "$runtime_dir"
+          mkdir -p "$runtime_dir"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/PerryTS/perry/releases/download/v${PERRY_VERSION}/perry-cross-aarch64-apple-ios-sim.tar.gz" \
+            --output "$archive"
+          actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          test "$actual" = "$PERRY_IOS_SIM_CROSS_SHA256"
+          tar -xzf "$archive" -C "$runtime_dir"
+          test -f "$runtime_dir/libperry_runtime.a"
+          test -f "$runtime_dir/libperry_stdlib.a"
+          test -f "$runtime_dir/libperry_ui_ios.a"
+          jq -e --arg version "$PERRY_VERSION" \
+            '.perry_version == $version and .target_triple == "aarch64-apple-ios-sim" and (.files | length >= 3)' \
+            "$runtime_dir/manifest.json" >/dev/null
+          echo "PERRY_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+
       - run: mkdir -p apps/mobile/release/ios-simulator
       - run: pnpm build:mobile:ios-sim
       - uses: actions/upload-artifact@v7
@@ -87,6 +115,7 @@ jobs:
       - name: Discover preinstalled Android NDK
         shell: bash
         run: |
+          set -euo pipefail
           NDK="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           test -n "$NDK"
           echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
@@ -94,6 +123,29 @@ jobs:
       - run: npm install -g @perryts/perry@0.5.1220
       - run: perry --version
       - run: perry check apps/mobile/src/main.ts --strict
+
+      - name: Provision pinned Perry Android cross runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/perry-cross-aarch64-linux-android.tar.gz"
+          runtime_dir="$RUNNER_TEMP/perry-cross-android"
+          rm -rf "$runtime_dir"
+          mkdir -p "$runtime_dir"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/PerryTS/perry/releases/download/v${PERRY_VERSION}/perry-cross-aarch64-linux-android.tar.gz" \
+            --output "$archive"
+          actual="$(sha256sum "$archive" | awk '{print $1}')"
+          test "$actual" = "$PERRY_ANDROID_CROSS_SHA256"
+          tar -xzf "$archive" -C "$runtime_dir"
+          test -f "$runtime_dir/libperry_runtime.a"
+          test -f "$runtime_dir/libperry_stdlib.a"
+          test -f "$runtime_dir/libperry_ui_android.a"
+          jq -e --arg version "$PERRY_VERSION" \
+            '.perry_version == $version and .target_triple == "aarch64-linux-android" and (.files | length >= 3)' \
+            "$runtime_dir/manifest.json" >/dev/null
+          echo "PERRY_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+
       - run: mkdir -p apps/mobile/release/android
       - run: pnpm build:mobile:android
       - uses: actions/upload-artifact@v7
