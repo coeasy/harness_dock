@@ -23,21 +23,29 @@ jobs:
             platform: win32
             arch: x64
             runtime_dir: runtimes/pack
+            packaged_runtime_dir: apps/desktop/release/full/win-unpacked/resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/win-unpacked/resources/plugin-embedded-client/index.js
           - runner: ubuntu-latest
             target_os: linux
             platform: linux
             arch: x64
             runtime_dir: runtimes/pack
+            packaged_runtime_dir: apps/desktop/release/full/linux-unpacked/resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js
           - runner: macos-latest
             target_os: mac
             platform: darwin
             arch: x64
             runtime_dir: runtimes/pack-x64
+            packaged_runtime_dir: apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
           - runner: macos-latest
             target_os: mac
             platform: darwin
             arch: arm64
             runtime_dir: runtimes/pack-arm64
+            packaged_runtime_dir: apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
@@ -53,6 +61,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          pnpm check:versions
+          pnpm check:release
       - name: Prepare target runtime
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
@@ -66,9 +79,9 @@ jobs:
           GH_REPO: ${{ github.event.repository.name }}
           DSH_SKIP_RUNTIME_PREPARE: '1'
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Smoke test bundled runtime
-        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.runtime_dir }} --plugin packages/plugin-embedded-client/lib/index.js
-      - name: Inventory release files
+      - name: Smoke test packaged runtime
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir ${{ matrix.packaged_runtime_dir }} --plugin ${{ matrix.packaged_plugin }}
+      - name: Validate package inventory and size
         shell: bash
         run: |
           set -euo pipefail
@@ -88,6 +101,7 @@ jobs:
               test -f apps/desktop/release/full/HarnessDock-0.1.0-mac-${{ matrix.arch }}-full.zip
               ;;
           esac
+          pnpm check:size
       - uses: actions/upload-artifact@v7
         with:
           name: verify-full-${{ matrix.target_os }}-${{ matrix.arch }}
