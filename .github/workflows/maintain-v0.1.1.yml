@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: feat/dsh-0.1.2-alpha1-v0.1.1
-      - name: Redact launch tokens and keep authenticated readiness candidate
+      - name: Preserve the browser token while probing readiness
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -28,28 +28,26 @@ jobs:
           let text = readFileSync(file, 'utf8')
 
           text = text.replace(
-            "import { parseWebUrl } from './output.ts'",
-            "import { parseWebUrl, redactWebLaunchToken } from './output.ts'",
+            'const ready = child.exitCode === null && await probeHttpReady(current.url)',
+            'const ready = child.exitCode === null && await probeCandidateReady(current.url)',
           )
           text = text.replace(
-            "    const raw = typeof chunk === 'string' ? chunk : chunk.toString('utf8')",
-            "    const raw = redactWebLaunchToken(typeof chunk === 'string' ? chunk : chunk.toString('utf8'))",
-          )
-          text = text.replace(
-            "      const output = buffer.trim()",
-            "      const output = redactWebLaunchToken(buffer).trim()",
+            `      if (!ready) {\n        candidate = undefined\n        candidateSince = 0\n        return\n      }`,
+            `      if (!ready) {\n        // Keep a one-shot stdout candidate and retry after a transient probe\n        // failure. New dsh versions intentionally print the launch URL once.\n        candidateSince = Date.now()\n        return\n      }`,
           )
 
-          const before = `    const consider = (info: ReadyInfo): void => {\n      if (candidate?.url === info.url) return\n      candidate = info\n      candidateSince = Date.now()\n    }`
-          const after = `    const consider = (info: ReadyInfo): void => {\n      if (candidate?.url === info.url) return\n      if (candidate && candidate.host === info.host && candidate.port === info.port) {\n        const currentHasToken = new URL(candidate.url).searchParams.has('token')\n        const nextHasToken = new URL(info.url).searchParams.has('token')\n        if (currentHasToken && !nextHasToken) return\n      }\n      candidate = info\n      candidateSince = Date.now()\n    }`
-          if (!text.includes(before) && !text.includes(after)) {
-            throw new Error('readiness candidate block not found')
+          const marker = 'async function probeHttpReady(url: string): Promise<boolean> {'
+          if (!text.includes('async function probeCandidateReady(')) {
+            if (!text.includes(marker)) throw new Error('HTTP readiness probe not found')
+            text = text.replace(marker, `async function probeCandidateReady(url: string): Promise<boolean> {\n  const parsed = new URL(url)\n  if (parsed.searchParams.has('token')) {\n    return probeTcpReady(parsed.hostname, Number.parseInt(parsed.port, 10))\n  }\n  return probeHttpReady(url)\n}\n\nasync function probeTcpReady(host: string, port: number): Promise<boolean> {\n  if (!Number.isInteger(port) || port <= 0) return false\n  const { createConnection } = await import('node:net')\n  return new Promise((resolve) => {\n    const socket = createConnection({ host, port })\n    let settled = false\n    const finish = (ready: boolean): void => {\n      if (settled) return\n      settled = true\n      socket.removeAllListeners()\n      socket.destroy()\n      resolve(ready)\n    }\n    socket.setTimeout(1_000)\n    socket.once('connect', () => finish(true))\n    socket.once('error', () => finish(false))\n    socket.once('timeout', () => finish(false))\n  })\n}\n\n${marker}`)
           }
-          text = text.replace(before, after)
-          if (!text.includes('redactWebLaunchToken')) throw new Error('redaction patch failed')
+
+          if (!text.includes('probeCandidateReady(current.url)')) throw new Error('candidate probe patch failed')
+          if (!text.includes("parsed.searchParams.has('token')")) throw new Error('token TCP probe patch failed')
+          if (text.includes('candidate = undefined\n        candidateSince = 0')) throw new Error('transient candidate discard still present')
           writeFileSync(file, text)
           NODE
-      - name: Commit runtime hardening
+      - name: Commit readiness fix
         shell: bash
         run: |
           set -euo pipefail
@@ -57,5 +55,5 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -- packages/client-runtime/src/runtime.ts
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'fix: protect dsh alpha launch credentials'
+          git commit -m 'fix: probe authenticated dsh readiness without consuming token'
           git push origin HEAD:feat/dsh-0.1.2-alpha1-v0.1.1
