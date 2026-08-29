@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Bump HarnessDock workspace and Electron
+      - name: Keep HarnessDock workspace on v0.1.1 / Electron 43.4.1
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -51,18 +51,39 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: Sync exact upstream alpha origin
         run: pnpm sync:dsh -- --pin 0.1.2-alpha.1
+      - name: Finalize permanent release workflow
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const file = '.github/workflows/release.yml'
+          let text = readFileSync(file, 'utf8')
+          const dollar = '$'
+          const wrongName = '          name: HarnessDock v' + dollar + "{{ github.event.repository.name && '' }}" + dollar + "{{ '' }}"
+          const goodName = '          name: HarnessDock ' + dollar + '{{ steps.tag.outputs.tag }}'
+          if (text.includes(wrongName)) text = text.replace(wrongName, goodName)
+          if (!text.includes(goodName)) throw new Error('release name line was not found/fixed')
+
+          if (!text.includes('Mark released origin baseline')) {
+            const marker = '    steps:\n      - name: Delete historical development branches'
+            const replacement = `    steps:\n      - uses: actions/checkout@v7\n        with:\n          ref: main\n      - name: Mark released origin baseline\n        shell: bash\n        run: |\n          set -euo pipefail\n          cp packages/docs-sync/origin.json packages/docs-sync/released-origin.json\n          if git diff --quiet -- packages/docs-sync/released-origin.json; then\n            echo 'released-origin baseline already current'\n          else\n            git config user.name github-actions[bot]\n            git config user.email 41898282+github-actions[bot]@users.noreply.github.com\n            git add -- packages/docs-sync/released-origin.json\n            git commit -m 'chore: mark HarnessDock v0.1.1 released origin'\n            git push origin HEAD:main\n          fi\n      - name: Delete historical development branches`
+            if (!text.includes(marker)) throw new Error('cleanup insertion point not found')
+            text = text.replace(marker, replacement)
+          }
+          writeFileSync(file, text)
+          NODE
       - name: Validate generated metadata
         run: |
           pnpm check:versions
           pnpm check:release
           node -e "const o=require('./packages/docs-sync/origin.json'); if(o.dshVersion!=='0.1.2-alpha.1'||o.gitCommit!=='cd5ef8148158c3a752a658978873241fdf8e2bbc'||o.distribution!=='git-pack') process.exit(1)"
-      - name: Commit generated version and origin state
+      - name: Commit generated release state
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -- package.json pnpm-lock.yaml packages/*/package.json apps/*/package.json tests/*/package.json packages/docs-sync/origin.json packages/docs-sync/capability-matrix.yaml packages/docs-sync/capability-summary.md
+          git add -- package.json pnpm-lock.yaml packages/*/package.json apps/*/package.json tests/*/package.json packages/docs-sync/origin.json packages/docs-sync/capability-matrix.yaml packages/docs-sync/capability-summary.md .github/workflows/release.yml
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'chore: prepare HarnessDock v0.1.1 for dsh alpha.1'
+          git commit -m 'chore: finalize HarnessDock v0.1.1 release state'
           git push origin HEAD:feat/dsh-0.1.2-alpha1-v0.1.1
