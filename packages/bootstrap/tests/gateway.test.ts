@@ -45,7 +45,7 @@ async function rawTcpRequest(baseUrl: string, request: string): Promise<string> 
     const socket = net.connect(Number(target.port), target.hostname, () => socket.write(request))
     const timer = setTimeout(() => socket.destroy(new Error('raw TCP request timed out')), 5_000)
     socket.setEncoding('utf8')
-    socket.on('data', (chunk) => chunks.push(chunk))
+    socket.on('data', (chunk) => chunks.push(String(chunk)))
     socket.on('end', () => {
       clearTimeout(timer)
       resolve(chunks.join(''))
