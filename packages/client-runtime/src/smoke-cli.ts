@@ -38,6 +38,22 @@ if (typeof manifest.dshVersion !== 'string' || manifest.dshVersion === '') {
   throw new Error('runtime manifest has no dshVersion')
 }
 
+function validateWebBoot(body: string, version: string): void {
+  // dsh-v0.1.2-alpha.1 had reports of a nominally healthy HTTP server whose
+  // generated DSH_BOOT manifest contained no module entries. A 200 response is
+  // therefore insufficient: reject the known blank-client failure mode.
+  if (/DSH_BOOT/.test(body) && /["']?entries["']?\s*:\s*\[\s*\]/.test(body)) {
+    throw new Error('web UI boot manifest has no module entries (DSH_BOOT entries is empty)')
+  }
+  if (
+    version === '0.1.2-alpha.1' &&
+    /DSH_BOOT/.test(body) &&
+    !body.includes('@deepseek-ai/dsh-client-modules')
+  ) {
+    throw new Error('alpha web UI did not preload @deepseek-ai/dsh-client-modules')
+  }
+}
+
 const home = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-home-'))
 const work = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-work-'))
 const logs: string[] = []
@@ -68,6 +84,7 @@ try {
         `web UI probe ${attempt} failed: HTTP ${response.status}, ${body.length} bytes`,
       )
     }
+    validateWebBoot(body, manifest.dshVersion)
     if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, 1_000))
   }
   console.log(`[smoke] PASS ${ready.url} remained healthy with dsh ${ready.dshVersion}`)
