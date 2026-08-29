@@ -31,10 +31,21 @@ export interface GatewayPairingTicket {
   expiresAt: string
 }
 
+export interface GatewayDeviceInfo {
+  id: string
+  name: string
+  pairedAt: string
+  lastSeenAt: string
+  sessionExpiresAt: string
+}
+
 export interface HarnessGatewayHandle {
   readonly localUrl: string
   readonly publicUrl: string
   createPairingTicket(): GatewayPairingTicket
+  listDevices(): GatewayDeviceInfo[]
+  revokeDevice(deviceId: string): boolean
+  revokeAllDevices(): number
   stop(): Promise<void>
 }
 
@@ -47,9 +58,16 @@ interface LaunchEntry {
   deviceName: string
 }
 
+interface DeviceEntry {
+  id: string
+  name: string
+  pairedAt: number
+  lastSeenAt: number
+}
+
 interface SessionEntry {
   expiresAt: number
-  deviceName: string
+  deviceId: string
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -128,6 +146,7 @@ function combineUpstreamPath(upstream: URL, requestUrl: string): string {
 function validSession(
   req: http.IncomingMessage,
   sessions: Map<string, SessionEntry>,
+  devices: Map<string, DeviceEntry>,
   now = Date.now(),
 ): SessionEntry | undefined {
   const token = cookieValue(req, SESSION_COOKIE)
@@ -138,6 +157,12 @@ function validSession(
     sessions.delete(token)
     return undefined
   }
+  const device = devices.get(session.deviceId)
+  if (!device) {
+    sessions.delete(token)
+    return undefined
+  }
+  device.lastSeenAt = now
   return session
 }
 
@@ -158,6 +183,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
   const pairing = new Map<string, PairingEntry>()
   const launches = new Map<string, LaunchEntry>()
   const sessions = new Map<string, SessionEntry>()
+  const devices = new Map<string, DeviceEntry>()
   const attemptWindows = new Map<string, { startedAt: number; count: number }>()
 
   const digestCode = (code: string): string =>
@@ -167,6 +193,8 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     for (const [key, value] of pairing) if (value.expiresAt <= now) pairing.delete(key)
     for (const [key, value] of launches) if (value.expiresAt <= now) launches.delete(key)
     for (const [key, value] of sessions) if (value.expiresAt <= now) sessions.delete(key)
+    const activeDeviceIds = new Set([...sessions.values()].map((session) => session.deviceId))
+    for (const deviceId of devices.keys()) if (!activeDeviceIds.has(deviceId)) devices.delete(deviceId)
     for (const [key, value] of attemptWindows) if (value.startedAt + 60_000 <= now) attemptWindows.delete(key)
   }
 
@@ -180,6 +208,17 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     }
     current.count += 1
     return current.count <= maxAttempts
+  }
+
+  const revokeDeviceSessions = (deviceId: string): number => {
+    let removed = 0
+    for (const [token, session] of sessions) {
+      if (session.deviceId !== deviceId) continue
+      sessions.delete(token)
+      removed += 1
+    }
+    devices.delete(deviceId)
+    return removed
   }
 
   let publicBase: URL | undefined
@@ -253,8 +292,16 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
         json(res, 401, { error: 'invalid_or_expired_connect_token' })
         return
       }
+      const now = Date.now()
+      const deviceId = randomBytes(16).toString('hex')
       const sessionToken = randomBytes(32).toString('base64url')
-      sessions.set(sessionToken, { expiresAt: Date.now() + sessionTtlMs, deviceName: launch.deviceName })
+      devices.set(deviceId, {
+        id: deviceId,
+        name: launch.deviceName,
+        pairedAt: now,
+        lastSeenAt: now,
+      })
+      sessions.set(sessionToken, { expiresAt: now + sessionTtlMs, deviceId })
       const secure = publicBase?.protocol === 'https:' ? '; Secure' : ''
       res.writeHead(302, {
         location: '/',
@@ -266,7 +313,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       return
     }
 
-    if (!validSession(req, sessions)) {
+    if (!validSession(req, sessions, devices)) {
       json(res, 401, { error: 'gateway_session_required' })
       return
     }
@@ -326,7 +373,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
 
   server.on('upgrade', (req, socket, head) => {
     prune()
-    if (!validSession(req, sessions)) {
+    if (!validSession(req, sessions, devices)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
       socket.destroy()
       return
@@ -400,6 +447,10 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     await new Promise<void>((resolve) => server.close(() => resolve()))
     throw new Error('Non-loopback gateway binding requires an explicit HTTPS publicBaseUrl.')
   }
+  if (publicBase.pathname !== '/') {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    throw new Error('HarnessDock gateway publicBaseUrl must be an origin-root URL (no path prefix).')
+  }
 
   options.log?.(`listening on ${localUrl}; public=${publicBase.toString()}`)
 
@@ -418,10 +469,45 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       pairing.set(key, { expiresAt })
       return { code: pairingCodeDisplay(raw), expiresAt: new Date(expiresAt).toISOString() }
     },
+    listDevices() {
+      prune()
+      const sessionExpiryByDevice = new Map<string, number>()
+      for (const session of sessions.values()) {
+        const current = sessionExpiryByDevice.get(session.deviceId) ?? 0
+        if (session.expiresAt > current) sessionExpiryByDevice.set(session.deviceId, session.expiresAt)
+      }
+      return [...devices.values()]
+        .map((device) => ({
+          id: device.id,
+          name: device.name,
+          pairedAt: new Date(device.pairedAt).toISOString(),
+          lastSeenAt: new Date(device.lastSeenAt).toISOString(),
+          sessionExpiresAt: new Date(sessionExpiryByDevice.get(device.id) ?? device.lastSeenAt).toISOString(),
+        }))
+        .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
+    },
+    revokeDevice(deviceId) {
+      prune()
+      if (!devices.has(deviceId)) return false
+      revokeDeviceSessions(deviceId)
+      options.log?.(`revoked mobile device ${deviceId}`)
+      return true
+    },
+    revokeAllDevices() {
+      prune()
+      const count = devices.size
+      pairing.clear()
+      launches.clear()
+      sessions.clear()
+      devices.clear()
+      if (count) options.log?.(`revoked all mobile devices (${count})`)
+      return count
+    },
     async stop() {
       pairing.clear()
       launches.clear()
       sessions.clear()
+      devices.clear()
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
       })
