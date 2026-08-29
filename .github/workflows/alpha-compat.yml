@@ -31,14 +31,11 @@ jobs:
           ref: ${{ steps.origin.outputs.commit }}
           path: upstream
           fetch-depth: 0
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.7.0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: upstream/pnpm-lock.yaml
+      - name: Install upstream pnpm toolchain
+        run: npm install --global pnpm@11.7.0
       - name: Pack upstream dsh/vendor/landlock families
         run: bash scripts/pack-upstream-dsh.sh upstream upstream-package-set
       - uses: actions/upload-artifact@v7
