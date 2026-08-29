@@ -21,6 +21,8 @@ export interface BundledModuleLayout {
 
 export interface BundledLayout extends BundledModuleLayout {
   nodeBin: string
+  /** Thin packages reuse the Electron executable under ELECTRON_RUN_AS_NODE. */
+  usesElectronNode: boolean
 }
 
 export function bundledNodeRel(platform: NodeJS.Platform): string {
@@ -64,7 +66,11 @@ export function inspectBundledModules(
   return exists(dshBin) ? { dshBin } : null
 }
 
-/** A Full package adds a dedicated, isolated Node executable to the module tree. */
+/**
+ * Resolve either Full (dedicated Node) or packaged Thin (Electron Node) layout.
+ * In ordinary Node processes a module-only tree is intentionally not treated as
+ * runnable; only Electron exposes the fallback executable contract.
+ */
 export function inspectBundledRuntime(
   root: string,
   platform: NodeJS.Platform,
@@ -73,8 +79,11 @@ export function inspectBundledRuntime(
   const modules = inspectBundledModules(root, exists)
   if (!modules) return null
   const nodeBin = path.join(root, bundledNodeRel(platform))
-  if (!exists(nodeBin)) return null
-  return { nodeBin, dshBin: modules.dshBin }
+  if (exists(nodeBin)) return { nodeBin, dshBin: modules.dshBin, usesElectronNode: false }
+  if (process.versions.electron) {
+    return { nodeBin: process.execPath, dshBin: modules.dshBin, usesElectronNode: true }
+  }
+  return null
 }
 
 /**
