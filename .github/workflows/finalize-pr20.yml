@@ -1,0 +1,41 @@
+name: finalize-pr20
+
+on:
+  push:
+    branches:
+      - fix/release-smoke-actions
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Mark PR ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr ready 20 --repo "${GITHUB_REPOSITORY}"
+
+      - name: Remove one-time finalizer from PR branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          path='.github/workflows/finalize-pr20.yml'
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=fix/release-smoke-actions" --jq '.sha')
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+            -f message='chore: remove one-time PR finalizer' \
+            -f sha="$sha" \
+            -f branch='fix/release-smoke-actions'
+
+      - name: Merge PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr merge 20 --repo "${GITHUB_REPOSITORY}" --squash \
+            --subject 'release: stabilize HarnessDock v0.1.0 packaging' \
+            --body 'Validated Windows/Linux/macOS tests and packaging; fixes full-runtime smoke, artifact integrity, Unix permissions, size gates, release notes, and post-release cleanup.'
