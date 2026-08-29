@@ -52,13 +52,22 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: Sync exact upstream alpha origin
         run: pnpm sync:dsh -- --pin 0.1.2-alpha.1
-      - name: Finalize permanent release workflow
+      - name: Finalize permanent workflows
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs'
-          const file = '.github/workflows/release.yml'
-          let text = readFileSync(file, 'utf8')
+
+          for (const file of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+            let text = readFileSync(file, 'utf8')
+            const unsafe = '        run: echo "commit=$(node -p \\"require(\'./packages/docs-sync/origin.json\').gitCommit\\")" >> "$GITHUB_OUTPUT"'
+            const safe = '        shell: bash\n        run: |\n          commit=$(node -p "require(\'./packages/docs-sync/origin.json\').gitCommit")\n          echo "commit=$commit" >> "$GITHUB_OUTPUT"'
+            if (text.includes(unsafe)) text = text.replaceAll(unsafe, safe)
+            writeFileSync(file, text)
+          }
+
+          const releaseFile = '.github/workflows/release.yml'
+          let text = readFileSync(releaseFile, 'utf8')
           const dollar = '$'
           const wrongName = '          name: HarnessDock v' + dollar + "{{ github.event.repository.name && '' }}" + dollar + "{{ '' }}"
           const goodName = '          name: HarnessDock ' + dollar + '{{ steps.tag.outputs.tag }}'
@@ -71,7 +80,7 @@ jobs:
             if (!text.includes(marker)) throw new Error('cleanup insertion point not found')
             text = text.replace(marker, replacement)
           }
-          writeFileSync(file, text)
+          writeFileSync(releaseFile, text)
           NODE
       - name: Validate generated metadata
         run: |
@@ -84,7 +93,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -- package.json pnpm-lock.yaml packages/*/package.json apps/*/package.json tests/*/package.json packages/docs-sync/origin.json packages/docs-sync/capability-matrix.yaml packages/docs-sync/capability-summary.md .github/workflows/release.yml
+          git add -- package.json pnpm-lock.yaml packages/*/package.json apps/*/package.json tests/*/package.json packages/docs-sync/origin.json packages/docs-sync/capability-matrix.yaml packages/docs-sync/capability-summary.md .github/workflows/ci.yml .github/workflows/release.yml
           if git diff --cached --quiet; then exit 0; fi
           git commit -m 'chore: finalize HarnessDock v0.1.1 release state'
           git push origin HEAD:feat/dsh-0.1.2-alpha1-v0.1.1
