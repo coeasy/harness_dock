@@ -35,23 +35,149 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm check:versions
       - run: pnpm test
 
-  pack:
+  source-pack:
     needs: test
     if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read exact upstream commit
+        id: origin
+        run: echo "commit=$(node -p \"require('./packages/docs-sync/origin.json').gitCommit\")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.commit }}
+          path: upstream
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install upstream pnpm toolchain
+        run: npm install --global pnpm@11.7.0
+      - name: Pack exact upstream release family
+        run: bash scripts/pack-upstream-dsh.sh upstream upstream-package-set
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-source-package-set
+          path: upstream-package-set
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  prepare-runtime:
+    needs: source-pack
+    if: needs.source-pack.result == 'success'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            script: pack:desktop:win
-          - os: ubuntu-latest
-            script: pack:desktop:linux
-          - os: macos-latest
-            script: pack:desktop:mac
-    runs-on: ${{ matrix.os }}
+          - runner: ubuntu-latest
+            os: win
+            platform: win32
+            arch: x64
+            runtime_dir: runtimes/pack
+          - runner: ubuntu-latest
+            os: linux
+            platform: linux
+            arch: x64
+            runtime_dir: runtimes/pack
+          - runner: macos-latest
+            os: mac
+            platform: darwin
+            arch: x64
+            runtime_dir: runtimes/pack-x64
+          - runner: macos-latest
+            os: mac
+            platform: darwin
+            arch: arm64
+            runtime_dir: runtimes/pack-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - uses: actions/download-artifact@v8
+        with:
+          name: dsh-source-package-set
+          path: upstream-package-set
+      - name: Prepare target runtime
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_PACKAGE_SET_DIR: upstream-package-set
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ matrix.runtime_dir }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          include-hidden-files: true
+
+  pack:
+    needs: prepare-runtime
+    if: needs.prepare-runtime.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            os: win
+            platform: win32
+            arch: x64
+            runtime_dir: runtimes/pack
+            command: node apps/desktop/scripts/pack.mjs --os win --scenario thin --arch x64
+            packaged_runtime: apps/desktop/release/thin/win-unpacked/resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/thin/win-unpacked/resources/plugin-embedded-client/index.js
+            electron: apps/desktop/release/thin/win-unpacked/HarnessDock.exe
+          - runner: ubuntu-latest
+            os: linux
+            platform: linux
+            arch: x64
+            runtime_dir: runtimes/pack
+            command: node apps/desktop/scripts/pack.mjs --os linux --scenario thin --arch x64
+            packaged_runtime: apps/desktop/release/thin/linux-unpacked/resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/thin/linux-unpacked/resources/plugin-embedded-client/index.js
+            electron: apps/desktop/release/thin/linux-unpacked/HarnessDock
+          - runner: macos-latest
+            os: mac
+            platform: darwin
+            arch: x64
+            runtime_dir: runtimes/pack-x64
+            command: node apps/desktop/scripts/pack.mjs --os mac --scenario thin --arch x64
+            packaged_runtime: apps/desktop/release/thin/mac/HarnessDock.app/Contents/Resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/thin/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
+            electron: apps/desktop/release/thin/mac/HarnessDock.app/Contents/MacOS/HarnessDock
+          - runner: macos-latest
+            os: mac
+            platform: darwin
+            arch: arm64
+            runtime_dir: runtimes/pack-arm64
+            command: node apps/desktop/scripts/pack.mjs --os mac --scenario thin --arch arm64
+            packaged_runtime: apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime
+            packaged_plugin: apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
+            electron: apps/desktop/release/thin/mac-arm64/HarnessDock.app/Contents/MacOS/HarnessDock
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -74,20 +200,35 @@ jobs:
           path: ~/AppData/Local/electron-builder/Cache
           key: electron-builder-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - run: pnpm ${{ matrix.script }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: runtime-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ matrix.runtime_dir }}
+      - name: Repair and verify transported runtime
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Build Thin desktop package
+        run: ${{ matrix.command }}
         env:
           GH_OWNER: ${{ github.repository_owner }}
           GH_REPO: ${{ github.event.repository.name }}
+          DSH_SKIP_RUNTIME_PREPARE: '1'
+          DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
+      - name: Smoke packaged Thin runtime
+        run: pnpm --filter @dsh/client-runtime smoke-thin-runtime -- --runtime-dir ${{ matrix.packaged_runtime }} --plugin ${{ matrix.packaged_plugin }} --electron ${{ matrix.electron }}
+      - run: pnpm check:size
       - uses: actions/upload-artifact@v7
         with:
-          name: desktop-${{ matrix.os }}
+          name: desktop-${{ matrix.os }}-thin-${{ matrix.arch }}
           path: |
-            apps/desktop/release/**/*.exe
-            apps/desktop/release/**/*.dmg
-            apps/desktop/release/**/*.zip
-            apps/desktop/release/**/*.AppImage
-            apps/desktop/release/**/*.deb
-            apps/desktop/release/**/*.blockmap
+            apps/desktop/release/thin/*.exe
+            apps/desktop/release/thin/*.dmg
+            apps/desktop/release/thin/*.zip
+            apps/desktop/release/thin/*.AppImage
+            apps/desktop/release/thin/*.deb
           if-no-files-found: error
           compression-level: 0
 
@@ -112,8 +253,9 @@ jobs:
       - uses: peter-evans/create-pull-request@v8
         with:
           branch: chore/sync-dsh-origin
-          title: 'chore: sync HarnessDock dsh origin to latest documented version'
+          title: 'chore: sync HarnessDock dsh origin to latest exact release'
           commit-message: 'chore: sync HarnessDock dsh origin'
           body: |
-            Automated docs-sync: git tag ∩ npm exact version, never `latest`.
-            Review changelog before merging.
+            Automated docs-sync: tracks the newest exact `dsh-v*` Git release.
+            npm-backed releases keep npm integrity; tag-only releases use the verified `git-pack` pipeline.
+            Review upstream changelog and CI compatibility gates before merging.
