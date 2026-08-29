@@ -2,9 +2,11 @@
 /**
  * Size-budget gate for desktop release artifacts (scheme D4).
  *
- * Scans apps/desktop/release recursively for HarnessDock desktop packages,
- * groups them by scenario (-thin / -full) and package kind, and compares each
- * against the release budget.
+ * Scans apps/desktop/release recursively for HarnessDock desktop packages and
+ * compares every distinct release filename against its scenario/kind budget.
+ * Identically named copies from multiple staging directories are deduplicated
+ * by filename (the smallest copy wins), while different OS/CPU architectures
+ * remain independent checks.
  *
  * Package kinds covered:
  *   Windows: Portable.exe, Setup.exe, zip
@@ -17,9 +19,6 @@
  * Windows self-extracting executables retain their tighter historical budgets:
  *   thin Portable / Setup <= 90 MB
  *   full Portable / Setup <= 165 MB
- *
- * When several files map to the same (scenario, kind) bucket, only the
- * smallest is counted so a pruned build can win over an unpruned duplicate.
  *
  * Exit codes (best-effort by design):
  *   0  all discovered budgets pass, or no artifacts were found (pure source build)
@@ -78,10 +77,13 @@ async function findArtifacts() {
   return found
 }
 
+// Keep only the smallest copy of an identical release filename. This preserves
+// the historical pruned-vs-unpruned behavior without collapsing x64/arm64 or
+// platform-specific filenames into the same budget bucket.
 function dedupe(artifacts) {
   const best = new Map()
   for (const artifact of artifacts) {
-    const key = `${artifact.scenario}:${artifact.kind}`
+    const key = artifact.name
     const previous = best.get(key)
     if (!previous || artifact.bytes < previous.bytes) best.set(key, artifact)
   }
@@ -99,7 +101,12 @@ if (artifacts.length === 0) {
   process.exit(0)
 }
 
-artifacts.sort((a, b) => a.scenario.localeCompare(b.scenario) || a.kind.localeCompare(b.kind))
+artifacts.sort(
+  (a, b) =>
+    a.scenario.localeCompare(b.scenario) ||
+    a.kind.localeCompare(b.kind) ||
+    a.name.localeCompare(b.name),
+)
 
 let failed = false
 console.log('[check:size] release artifact sizes (budget gate):')
