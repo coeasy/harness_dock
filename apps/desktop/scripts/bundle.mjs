@@ -1,4 +1,4 @@
-// Desktop bundle: main (ESM) + three preloads (CJS).
+// Desktop bundle: main (ESM) + sandboxed helper preloads (CJS).
 //
 // The main bundle needs a `require` injection banner: Electron's ESM main
 // process has no `require` in scope, and esbuild's ESM output shim for dynamic
@@ -36,6 +36,7 @@ const preloads = [
   ['src/preload.ts', 'dist/preload.cjs'],
   ['src/splash-preload.ts', 'dist/splash-preload.cjs'],
   ['src/diagnostics/diagnostics-preload.ts', 'dist/diagnostics-preload.cjs'],
+  ['src/mobile/mobile-preload.ts', 'dist/mobile-preload.cjs'],
 ]
 
 for (const [entry, outfile] of preloads) {

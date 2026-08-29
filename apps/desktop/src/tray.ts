@@ -1,7 +1,7 @@
 import { app, Menu, nativeImage, Tray } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { t } from './i18n.ts'
+import { systemLocale, t } from './i18n.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -14,6 +14,8 @@ export interface TrayHandlers {
   onDiagnostics(): void
   /** open the diagnostics panel on the runtime-versions tab */
   onVersions(): void
+  /** open mobile pairing + active-device revocation */
+  onMobileDevices(): void
   onQuit(): void
 }
 
@@ -31,12 +33,17 @@ function trayIcon(): Electron.NativeImage {
   }
 }
 
+function mobileDevicesLabel(): string {
+  return systemLocale().toLowerCase().startsWith('zh') ? '移动设备…' : 'Mobile devices…'
+}
+
 export function createTray(handlers: TrayHandlers): Tray {
   const tray = new Tray(trayIcon())
   tray.setToolTip(t('tray.tooltip'))
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: t('tray.toggle'), click: () => handlers.onToggle() },
+      { label: mobileDevicesLabel(), click: () => handlers.onMobileDevices() },
       { label: t('tray.diagnostics'), click: () => handlers.onDiagnostics() },
       { label: t('tray.versions'), click: () => handlers.onVersions() },
       { type: 'separator' },

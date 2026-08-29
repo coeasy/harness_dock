@@ -18,6 +18,7 @@ import { createWindow, toggleMainWindow } from '../window/main-window.ts'
 import { createTray } from '../tray.ts'
 import { initAutoUpdate, type AutoUpdateHandle } from '../auto-update.ts'
 import { openDiagnosticsWindow } from '../diagnostics/diagnostics.ts'
+import { openMobileManagerWindow } from '../mobile/mobile-window.ts'
 import { bundledRoot, originPath, pluginPath } from '../paths.ts'
 import {
   isAllowedVersion,
@@ -135,6 +136,7 @@ export async function bootFlow(): Promise<void> {
       appState.tray = createTray({
         onToggle: toggleMainWindow,
         onOpenLog: () => void openLogDir(),
+        onMobileDevices: openMobileManagerWindow,
         onDiagnostics: () => openDiagnosticsWindow('info'),
         onVersions: () => openDiagnosticsWindow('versions'),
         onQuit: () => app.quit(),
@@ -178,9 +180,8 @@ async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
   appState.gateway = gateway
   await bootLog(`remote gateway ready: local=${gateway.localUrl} public=${gateway.publicUrl}`)
 
-  // Explicit opt-in only: pairing codes are credentials and must never be
-  // silently written to disk logs. A preview user can request one native toast
-  // at startup while the diagnostics/pairing UI is developed.
+  // Compatibility switch for early Preview automation. The new tray Mobile
+  // Devices panel is the preferred place to create/revoke one-time codes.
   if (process.env.HARNESSDOCK_GATEWAY_PAIR_ON_START === '1') {
     const ticket = gateway.createPairingTicket()
     try {
