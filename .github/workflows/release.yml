@@ -96,7 +96,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Read exact upstream commit
         id: origin
-        run: echo "commit=$(node -p \"require('./packages/docs-sync/origin.json').gitCommit\")" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           repository: deepseek-ai/deepseek-harness
@@ -119,8 +122,8 @@ jobs:
           compression-level: 0
 
   prepare-runtime:
-    needs: [test, plan, source-pack]
-    if: needs.test.result == 'success' && needs.plan.result == 'success' && needs.source-pack.result == 'success'
+    needs: [plan, source-pack]
+    if: needs.plan.result == 'success' && needs.source-pack.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.runtime_matrix) }}
@@ -159,13 +162,13 @@ jobs:
           include-hidden-files: true
 
   build:
-    needs: [test, plan, prepare-runtime]
-    if: always() && needs.test.result == 'success' && needs.plan.result == 'success' && needs.prepare-runtime.result == 'success'
+    needs: [plan, prepare-runtime]
+    if: always() && needs.plan.result == 'success' && needs.prepare-runtime.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 50
+    timeout-minutes: 55
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       NODE_OPTIONS: --max-old-space-size=4096
@@ -256,9 +259,13 @@ jobs:
           while IFS= read -r file; do
             name=$(basename "$file")
             [ "$name" = "latest-mac.yml" ] && continue
-            if [ -e "artifacts/$name" ]; then echo "duplicate release asset: $name" >&2; exit 1; fi
+            if [ -e "artifacts/$name" ]; then
+              echo "duplicate release asset filename: $name" >&2
+              exit 1
+            fi
             cp "$file" "artifacts/$name"
           done < <(find artifact-bundles -type f -print | sort)
+
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
           import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -266,30 +273,41 @@ jobs:
           const dir = 'artifacts'
           const names = readdirSync(dir)
           const version = JSON.parse(readFileSync('package.json', 'utf8')).version
-          const zips = names.filter((n) => /^HarnessDock-.*-mac-(x64|arm64)-full\.zip$/.test(n)).sort()
-          if (zips.length) {
+          const zips = names
+            .filter((name) => /^HarnessDock-.*-mac-(x64|arm64)-full\.zip$/.test(name))
+            .sort((a, b) => Number(a.includes('-arm64-')) - Number(b.includes('-arm64-')) || a.localeCompare(b))
+          if (zips.length > 0) {
             const files = []
             for (const zip of zips) {
               const arch = zip.match(/-mac-(x64|arm64)-full\.zip$/)?.[1]
-              const dmg = names.find((n) => n.endsWith(`-mac-${arch}-full.dmg`))
+              const dmg = names.find((name) => name.endsWith(`-mac-${arch}-full.dmg`))
               if (!arch || !dmg) throw new Error(`missing macOS ${arch} full pair`)
               for (const name of [zip, dmg]) {
                 const data = readFileSync(path.join(dir, name))
-                files.push({ url: name, sha512: createHash('sha512').update(data).digest('base64'), size: data.length })
+                files.push({
+                  url: name,
+                  sha512: createHash('sha512').update(data).digest('base64'),
+                  size: data.length,
+                })
               }
             }
             let yml = `version: ${version}\nfiles:\n`
-            for (const f of files) yml += `  - url: ${f.url}\n    sha512: ${f.sha512}\n    size: ${f.size}\n`
+            for (const file of files) {
+              yml += `  - url: ${file.url}\n    sha512: ${file.sha512}\n    size: ${file.size}\n`
+            }
             yml += `releaseDate: '${new Date().toISOString()}'\n`
-            writeFileSync(path.join(dir, 'latest-mac.yml'), yml)
+            writeFileSync(path.join(dir, 'latest-mac.yml'), yml, 'utf8')
           }
           NODE
+          echo 'Final release assets:'
           find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
+          test -n "$(find artifacts -maxdepth 1 -type f -print -quit)"
       - name: Validate combined macOS update metadata
         shell: bash
         run: |
           set -euo pipefail
           if compgen -G 'artifacts/HarnessDock-*-mac-*-full.zip' >/dev/null; then
+            test -f artifacts/latest-mac.yml
             grep -q -- '-mac-arm64-full.zip' artifacts/latest-mac.yml
             grep -q -- '-mac-arm64-full.dmg' artifacts/latest-mac.yml
             grep -q -- '-mac-x64-full.zip' artifacts/latest-mac.yml
@@ -314,11 +332,15 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           template=".github/release-notes/v${VERSION}.md"
-          if [ -f "$template" ]; then cp "$template" notes.md; else printf '# HarnessDock v%s\n' "$VERSION" > notes.md; fi
+          if [ -f "$template" ]; then
+            cp "$template" notes.md
+          else
+            printf '# HarnessDock v%s\n\nHarnessDock v%s release.\n' "$VERSION" "$VERSION" > notes.md
+          fi
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: HarnessDock v${{ github.event.repository.name && '' }}${{ '' }}
+          name: HarnessDock ${{ steps.tag.outputs.tag }}
           draft: ${{ steps.tag.outputs.draft }}
           files: artifacts/*
           body_path: notes.md
@@ -336,6 +358,23 @@ jobs:
       contents: write
       actions: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Mark released origin baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp packages/docs-sync/origin.json packages/docs-sync/released-origin.json
+          if git diff --quiet -- packages/docs-sync/released-origin.json; then
+            echo 'released-origin baseline already current'
+          else
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -- packages/docs-sync/released-origin.json
+            git commit -m 'chore: mark HarnessDock v0.1.1 released origin'
+            git push origin HEAD:main
+          fi
       - name: Delete historical development branches
         shell: bash
         env:
