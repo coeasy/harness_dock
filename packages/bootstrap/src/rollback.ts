@@ -19,13 +19,17 @@ export function defaultPreviousOriginPath(userDataDir: string): string {
  * Back up the effective current origin whenever the successful dsh version
  * changes. When effectiveOrigin is omitted the packaged origin file is read,
  * preserving the original API for callers that do not use an override.
+ *
+ * Returns false only when persistence failed. Existing callers may ignore the
+ * boolean; managed auto-update uses it as a safety gate before promoting a
+ * candidate Runtime to active.
  */
 export async function backupOrigin(
   originPath: string,
   previousOriginPath: string,
   log?: (message: string) => void,
   effectiveOrigin?: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const current = effectiveOrigin ?? (JSON.parse(await readFile(originPath, 'utf8')) as Record<string, unknown>)
     const currentVersion = typeof current.dshVersion === 'string' ? current.dshVersion : undefined
@@ -37,13 +41,15 @@ export async function backupOrigin(
     } catch {
       // no previous backup yet
     }
-    if (previous?.dshVersion === currentVersion) return
+    if (previous?.dshVersion === currentVersion) return true
 
     await mkdir(path.dirname(previousOriginPath), { recursive: true })
     await writeFile(previousOriginPath, `${JSON.stringify(current, null, 2)}\n`, 'utf8')
     log?.(`origin backup: ${previous?.dshVersion ?? '(none)'} -> ${currentVersion}`)
+    return true
   } catch (error) {
     log?.(`origin backup failed: ${error instanceof Error ? error.message : String(error)}`)
+    return false
   }
 }
 
