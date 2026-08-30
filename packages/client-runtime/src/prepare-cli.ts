@@ -24,6 +24,10 @@ import {
   repairKnownRuntimeAssets,
   requiredNativePackages,
 } from './integrity.ts'
+import {
+  resolvePackedRuntimeClosure,
+  type PackedPackageMeta,
+} from './packed-closure.ts'
 
 const execFileAsync = promisify(execFile)
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -100,14 +104,14 @@ async function installTargetNativePackages(): Promise<void> {
   )
 }
 
-async function packedTarballIdentity(tarball: string): Promise<{ name: string; version: string }> {
+async function packedTarballMetadata(tarball: string): Promise<PackedPackageMeta> {
   const { stdout } = await execFileAsync('tar', ['-xOzf', tarball, 'package/package.json'], {
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
   })
-  const pkg = JSON.parse(stdout) as { name?: string; version?: string }
+  const pkg = JSON.parse(stdout) as PackedPackageMeta
   if (!pkg.name || !pkg.version) throw new Error(`packed tarball has no package identity: ${tarball}`)
-  return { name: pkg.name, version: pkg.version }
+  return pkg
 }
 
 async function installPackedRuntime(root: string): Promise<void> {
@@ -116,14 +120,22 @@ async function installPackedRuntime(root: string): Promise<void> {
     .filter((entry) => typeof entry === 'string' && entry.endsWith('.tgz')) as string[]
   if (entries.length === 0) throw new Error(`no upstream packed tarballs under ${absolute}`)
 
-  const dependencies: Record<string, string> = {}
+  const packed = new Map<string, { tarball: string; meta: PackedPackageMeta }>()
   for (const entry of entries.sort()) {
     const tarball = path.join(absolute, entry)
-    const identity = await packedTarballIdentity(tarball)
-    dependencies[identity.name] = pathToFileURL(tarball).href
+    const meta = await packedTarballMetadata(tarball)
+    if (packed.has(meta.name)) throw new Error(`duplicate packed package ${meta.name}`)
+    packed.set(meta.name, { tarball, meta })
   }
-  if (!dependencies['@deepseek-ai/dsh']) {
-    throw new Error(`packed runtime does not contain @deepseek-ai/dsh under ${absolute}`)
+
+  const selectedNames = resolvePackedRuntimeClosure(
+    new Map([...packed].map(([name, entry]) => [name, entry.meta])),
+  )
+  const dependencies: Record<string, string> = {}
+  for (const name of selectedNames) {
+    const selected = packed.get(name)
+    if (!selected) throw new Error(`selected packed package disappeared: ${name}`)
+    dependencies[name] = pathToFileURL(selected.tarball).href
   }
 
   await writeFile(
@@ -138,13 +150,20 @@ async function installPackedRuntime(root: string): Promise<void> {
   )
 
   const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  console.log(`installing ${entries.length} official packed upstream tarballs for dsh ${origin.dshVersion}`)
+  console.log(
+    `installing ${selectedNames.length}/${entries.length} required official packed upstream tarballs for dsh ${origin.dshVersion}`,
+  )
+  // Match upstream's clean packed-install verification: optional platform
+  // packages must not be required for the CLI to start. HarnessDock installs
+  // only the target-native optional packages it actually needs immediately
+  // afterwards via installTargetNativePackages(), avoiding unrelated release
+  // packages and cross-feature optional dependency payloads in shipped runtimes.
   await execFileAsync(
     npmBin,
     [
       'install',
       '--omit=dev',
-      '--include=optional',
+      '--omit=optional',
       '--no-fund',
       '--no-audit',
       '--package-lock=false',
