@@ -95,6 +95,21 @@ export type {
   HostUpdateRecoveryPhase,
   HostUpdateRecoveryRecord,
 } from './update-journal.ts'
+export {
+  clearManagedRuntimeState,
+  commitManagedRuntimeCandidate,
+  defaultManagedRuntimeStatePath,
+  failManagedRuntimeCandidate,
+  markManagedRuntimeVerifying,
+  readManagedRuntimeState,
+  selectManagedRuntimeVersion,
+  shouldStageManagedRuntime,
+  stageManagedRuntimeCandidate,
+} from './managed-runtime.ts'
+export type {
+  ManagedRuntimePhase,
+  ManagedRuntimeState,
+} from './managed-runtime.ts'
 export { applyPlannedRuntimeUpdate } from './runtime-update.ts'
 export type {
   ApplyPlannedRuntimeUpdateOptions,
