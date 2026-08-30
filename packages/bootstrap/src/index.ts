@@ -30,6 +30,25 @@ export type {
   RuntimeAccessMode,
 } from './host-capabilities.ts'
 export * from './client-core.ts'
+export {
+  InvalidRuntimeManifestError,
+  RuntimeArtifactIntegrityError,
+  RuntimeRollbackUnavailableError,
+  RuntimeUpdateManager,
+  RuntimeVersionConflictError,
+  normalizeRuntimeReleaseManifest,
+  runtimeManifestDigest,
+} from './runtime-update.ts'
+export type {
+  NormalizedRuntimeReleaseManifest,
+  RuntimeActivationState,
+  RuntimeArtifactFetcher,
+  RuntimeInstallMetadata,
+  RuntimePrepareResult,
+  RuntimeReleaseFile,
+  RuntimeReleaseManifest,
+  RuntimeUpdateManagerOptions,
+} from './runtime-update.ts'
 export { backupOrigin, defaultPreviousOriginPath, readPreviousOrigin } from './rollback.ts'
 export {
   ELECTRON_HOST,

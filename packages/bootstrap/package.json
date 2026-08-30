@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./gateway": "./src/gateway.ts",
     "./runtime-provider": "./src/runtime-provider.ts",
+    "./runtime-update": "./src/runtime-update.ts",
     "./host-capabilities": "./src/host-capabilities.ts",
     "./client-core": "./src/client-core.ts"
   },
