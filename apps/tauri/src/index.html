@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <title>HarnessDock</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="brand">HarnessDock</div>
+      <div id="platform-badge" class="badge">Detecting host…</div>
+      <h1>DeepSeek Harness, everywhere.</h1>
+      <p class="lead">Tauri host for Windows, macOS, Linux, Android and iOS. Desktop can run the pinned local runtime; mobile connects through a paired HarnessDock Gateway.</p>
+    </header>
+
+    <section id="desktop-panel" class="panel hidden">
+      <div class="panel-heading">
+        <div>
+          <h2>Local Runtime</h2>
+          <p>Launch the bundled, pinned DeepSeek Harness runtime and open the official Web UI.</p>
+        </div>
+        <span id="runtime-status" class="status">stopped</span>
+      </div>
+      <div id="runtime-detail" class="detail">Runtime has not started.</div>
+      <div class="actions">
+        <button id="runtime-start" class="primary">Start runtime</button>
+        <button id="runtime-open" disabled>Open Harness</button>
+        <button id="runtime-stop" class="danger" disabled>Stop</button>
+      </div>
+    </section>
+
+    <section id="gateway-panel" class="panel hidden">
+      <div class="panel-heading">
+        <div>
+          <h2>Mobile Gateway</h2>
+          <p>Expose the running desktop runtime through a paired HTTPS gateway. Use a trusted reverse proxy or a private LAN endpoint.</p>
+        </div>
+        <span id="gateway-status" class="status">stopped</span>
+      </div>
+      <div class="grid two">
+        <label>Bind host<input id="gateway-bind" value="127.0.0.1" autocomplete="off" /></label>
+        <label>Port<input id="gateway-port" value="17834" inputmode="numeric" autocomplete="off" /></label>
+      </div>
+      <label>Public URL<input id="gateway-public" placeholder="https://harness.example.com/" autocomplete="url" /></label>
+      <label class="check"><input id="gateway-insecure" type="checkbox" /> Allow HTTP only for a private LAN endpoint</label>
+      <div class="actions">
+        <button id="gateway-start">Start gateway</button>
+        <button id="gateway-pair" class="primary" disabled>Create pairing code</button>
+        <button id="gateway-refresh" disabled>Refresh devices</button>
+        <button id="gateway-stop" class="danger" disabled>Stop gateway</button>
+      </div>
+      <div id="pairing-card" class="pairing hidden">
+        <div class="muted">One-time pairing code</div>
+        <div id="pairing-code" class="pairing-code">—</div>
+        <div id="pairing-expiry" class="muted"></div>
+      </div>
+      <div id="device-list" class="devices"></div>
+    </section>
+
+    <section id="remote-panel" class="panel">
+      <div class="panel-heading">
+        <div>
+          <h2>Connect to Remote Runtime</h2>
+          <p>Enter the desktop Gateway address and one-time pairing code. The resulting session cookie is owned by the WebView and never exposed to JavaScript.</p>
+        </div>
+        <span id="remote-status" class="status">ready</span>
+      </div>
+      <label>Gateway URL<input id="remote-url" placeholder="https://harness.example.com/" autocomplete="url" /></label>
+      <div class="grid two">
+        <label>Pairing code<input id="remote-code" placeholder="1234-5678" inputmode="numeric" autocomplete="one-time-code" /></label>
+        <label>Device name<input id="remote-device" placeholder="My phone" autocomplete="off" /></label>
+      </div>
+      <label class="check"><input id="remote-insecure" type="checkbox" /> Allow HTTP only when the Gateway URL is a private LAN address</label>
+      <div class="actions">
+        <button id="remote-connect" class="primary">Pair and connect</button>
+        <button id="remote-open">Open existing session</button>
+      </div>
+    </section>
+
+    <section id="error-panel" class="error hidden" role="alert"></section>
+    <footer>HarnessDock v0.2.0 · Tauri 2 host · official DeepSeek Harness Web UI</footer>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

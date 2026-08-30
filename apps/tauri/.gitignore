@@ -1,0 +1,5 @@
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/dsh-runtime/*
+!src-tauri/resources/dsh-runtime/.gitkeep
+.DS_Store

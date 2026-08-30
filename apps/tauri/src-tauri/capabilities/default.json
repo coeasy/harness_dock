@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Minimal capability set for the trusted local HarnessDock launcher WebView.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

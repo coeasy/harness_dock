@@ -1,0 +1,14 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HarnessDock",
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "resources": ["resources/origin.json"]
+  }
+}
