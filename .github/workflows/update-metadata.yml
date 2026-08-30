@@ -1,0 +1,93 @@
+name: update-metadata
+
+on:
+  workflow_run:
+    workflows:
+      - release
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+env:
+  CI: 'true'
+
+jobs:
+  publish-update-metadata:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Resolve published version release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag is not published; skipping post-release metadata (draft/custom-tag release)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Download immutable release assets
+        if: steps.release.outputs.available == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf artifacts
+          mkdir -p artifacts
+          gh release download "${{ steps.release.outputs.tag }}" --dir artifacts
+      - name: Generate host/runtime release manifest
+        if: steps.release.outputs.available == 'true'
+        run: >-
+          node scripts/generate-release-manifest.mjs
+          --dir artifacts
+          --version "${{ steps.release.outputs.version }}"
+          --tag "${{ steps.release.outputs.tag }}"
+          --repository "${{ github.repository }}"
+          --host electron
+      - name: Generate Full/Thin Electron channel metadata
+        if: steps.release.outputs.available == 'true'
+        run: >-
+          node scripts/generate-electron-update-metadata.mjs
+          --dir artifacts
+          --version "${{ steps.release.outputs.version }}"
+      - name: Validate generated metadata
+        if: steps.release.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const m=require('./artifacts/release-manifest.json'); if(m.schemaVersion!==2||!m.artifacts.length) process.exit(1)"
+          test -s artifacts/release-manifest.sha256
+          for channel in full thin; do
+            test -s "artifacts/${channel}.yml" || true
+            test -s "artifacts/${channel}-mac.yml" || true
+            test -s "artifacts/${channel}-linux.yml" || true
+          done
+      - name: Upload update metadata to the same release
+        if: steps.release.outputs.available == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=(artifacts/release-manifest.json artifacts/release-manifest.sha256)
+          for pattern in artifacts/full.yml artifacts/thin.yml artifacts/full-mac.yml artifacts/thin-mac.yml artifacts/full-linux.yml artifacts/thin-linux.yml; do
+            [ -f "$pattern" ] && files+=("$pattern")
+          done
+          gh release upload "${{ steps.release.outputs.tag }}" "${files[@]}" --clobber
