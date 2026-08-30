@@ -1,6 +1,7 @@
 import type { BrowserWindow, Tray } from 'electron'
 import type { DshRuntime, RuntimeMode } from '@dsh/client-runtime'
 import type { RuntimeLeaseHandle } from '@dsh/bootstrap'
+import type { UpdateService } from '@dsh/bootstrap/client-core'
 import type { HarnessGatewayHandle } from '@dsh/bootstrap/gateway'
 
 /**
@@ -12,6 +13,7 @@ export const appState: {
   runtime: DshRuntime | undefined
   runtimeLease: RuntimeLeaseHandle | undefined
   gateway: HarnessGatewayHandle | undefined
+  hostUpdate: UpdateService | undefined
   mainWindow: BrowserWindow | undefined
   dshPid: number | undefined
   tray: Tray | undefined
@@ -24,6 +26,7 @@ export const appState: {
   runtime: undefined,
   runtimeLease: undefined,
   gateway: undefined,
+  hostUpdate: undefined,
   mainWindow: undefined,
   dshPid: undefined,
   tray: undefined,

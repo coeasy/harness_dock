@@ -113,6 +113,12 @@ function diagnosticsDestination(payload: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
+function hostUpdateService() {
+  const service = appState.hostUpdate
+  if (!service) throw new Error('Host update service is not initialized yet')
+  return service
+}
+
 export interface ElectronClientAdapter {
   readonly commands: ClientCommandBus
   readonly lifecycle: AppLifecycleService
@@ -147,6 +153,8 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
   commands.register('app.focus', async () => lifecycle.focus())
   commands.register('app.quit', async () => lifecycle.quit())
   commands.register('app.relaunch', async () => lifecycle.relaunch())
+  commands.register('update.check', async () => hostUpdateService().check('host'))
+  commands.register('update.install', async () => hostUpdateService().install('host'))
   commands.register('diagnostics.export', async (command) => {
     const file = await diagnostics.exportBundle(diagnosticsDestination(command.payload))
     await bootLog(`diagnostics exported: ${file}`)
