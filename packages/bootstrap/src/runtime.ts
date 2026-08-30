@@ -54,6 +54,12 @@ export interface BootstrapOptions {
   onRollback?: (info: { from: string; to: string }) => void
   /** set false to disable the last-known-good rollback */
   enableRollback?: boolean
+  /**
+   * Do not persist the effective origin as last-known-good immediately after
+   * `dsh web` reports ready. Managed auto-update uses this so the Host can wait
+   * until the official Harness UI also loads before committing a candidate.
+   */
+  deferOriginBackup?: boolean
   /** injectable DshRuntime factory (tests) */
   dshRuntimeFactory?: (origin: Origin) => DshRuntime
 }
@@ -61,6 +67,7 @@ export interface BootstrapOptions {
 export interface BootstrapResult {
   runtime: DshRuntime
   ready: ReadyInfo
+  /** The effective origin for the Runtime that actually won (candidate or rollback). */
   origin: Origin
   mode: RuntimeMode
   bundledAvailable: boolean
@@ -109,29 +116,30 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
   let rolledBack: { from: string; to: string } | null = null
   try {
     ready = await runtime.start()
-    // Record last-known-good AFTER a successful start and record the effective
-    // origin that actually ran. This is essential for managed Runtime updates:
-    // the packaged origin may still pin vN while versionOverride just proved
-    // vN+1 healthy, and a later vN+2 failure must roll back to vN+1.
-    if (previousOriginPath) {
+    // Normal hosts can commit last-known-good once dsh is ready. Managed Runtime
+    // candidates defer this until their enclosing Host/UI health gate succeeds.
+    if (previousOriginPath && !options.deferOriginBackup) {
       await backupOrigin(options.originPath, previousOriginPath, log, origin as unknown as Record<string, unknown>)
     }
   } catch (startError) {
+    const failedOrigin = origin
     const previous =
       options.enableRollback === false
         ? null
         : previousOriginPath
-          ? await readPreviousOrigin(previousOriginPath, origin.dshVersion)
+          ? await readPreviousOrigin(previousOriginPath, failedOrigin.dshVersion)
           : null
     if (previous) {
       log?.(
-        `bootstrap: new dsh ${origin.dshVersion} failed to start; attempting last-known-good ${previous.dshVersion}`,
+        `bootstrap: new dsh ${failedOrigin.dshVersion} failed to start; attempting last-known-good ${previous.dshVersion}`,
       )
-      const fallbackRuntime = makeRuntime(previous.origin as unknown as Origin)
+      const fallbackOrigin = previous.origin as unknown as Origin
+      const fallbackRuntime = makeRuntime(fallbackOrigin)
       try {
         ready = await fallbackRuntime.start()
         runtime = fallbackRuntime
-        rolledBack = { from: origin.dshVersion, to: previous.dshVersion }
+        origin = fallbackOrigin
+        rolledBack = { from: failedOrigin.dshVersion, to: previous.dshVersion }
         log?.(`bootstrap: rolled back to last-known-good dsh ${previous.dshVersion}`)
         options.onRollback?.(rolledBack)
       } catch (fallbackError) {
