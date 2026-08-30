@@ -25,6 +25,9 @@ export type { UpdatePhase, UpdateSnapshot, UpdateTarget } from './update-state.t
 export { REDACTED, redactDiagnostics } from './diagnostics-redaction.ts'
 export type {
   AppLifecycleService,
+  ClientLogEvent,
+  ClientLogLevel,
+  ClientLogRecord,
   ClientServices,
   ClientSessionSnapshot,
   CredentialService,
@@ -34,8 +37,11 @@ export type {
   FilePickerOptions,
   FileService,
   HostUpdateInfo,
+  LogService,
+  NetworkDiagnostic,
   NetworkService,
   NetworkState,
+  ProxyMode,
   SaveFileOptions,
   SessionRecoveryService,
   UpdateService,

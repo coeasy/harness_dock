@@ -9,6 +9,7 @@ import {
   type DiagnosticsService,
   type FilePickerOptions,
   type FileService,
+  type LogService,
   type NetworkService,
   type SaveFileOptions,
   type SessionRecoveryService,
@@ -18,6 +19,7 @@ import { extractHarnessDockDeepLinks } from './client-activation.ts'
 import {
   createElectronCredentialService,
   createElectronDiagnosticsService,
+  createElectronLogService,
   createElectronNetworkService,
   createElectronSessionRecoveryService,
 } from './electron-services.ts'
@@ -127,6 +129,7 @@ export interface ElectronClientAdapter {
   readonly recovery: SessionRecoveryService
   readonly diagnostics: DiagnosticsService
   readonly network: NetworkService
+  readonly logs: LogService
   registerProtocol(): Promise<boolean>
   dispatchArgv(argv: readonly string[]): Promise<void>
   dispatchDeepLink(url: string): Promise<void>
@@ -145,7 +148,8 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
   const credentials = createElectronCredentialService()
   const recovery = createElectronSessionRecoveryService()
   const network = createElectronNetworkService()
-  const diagnostics = createElectronDiagnosticsService(network)
+  const logs = createElectronLogService()
+  const diagnostics = createElectronDiagnosticsService(network, logs)
   const pendingUrls: string[] = []
   let pendingFocus = false
   let ready = false
@@ -157,7 +161,12 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
   commands.register('update.install', async () => hostUpdateService().install('host'))
   commands.register('diagnostics.export', async (command) => {
     const file = await diagnostics.exportBundle(diagnosticsDestination(command.payload))
-    await bootLog(`diagnostics exported: ${file}`)
+    await logs.write({
+      level: 'info',
+      component: 'diagnostics',
+      event: 'exported',
+      data: { file },
+    })
     return file
   })
 
@@ -209,6 +218,7 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
     recovery,
     diagnostics,
     network,
+    logs,
     async registerProtocol() {
       if (!app.isPackaged) return false
       try {
