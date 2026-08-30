@@ -1,22 +1,30 @@
-import { app, dialog, Notification, shell } from 'electron'
+import { app, dialog, Notification, powerMonitor, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import {
+  DEFAULT_UPDATE_POLICY,
+  shouldRestartAutomatically,
+  type UpdatePolicy,
+} from '@dsh/bootstrap'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { bootLog } from './boot-log.ts'
 import { fmt, t } from './i18n.ts'
 
 /**
- * Auto-update (assessment Phase A).
+ * Electron Stable update adapter.
  *
- *  - Windows NSIS installs: check the GitHub Releases feed (resources/app-update.yml)
- *    generated from the `publish` config, download the new NSIS installer in the
- *    background (blockmap differential), install on quit.
- *  - Portable single-file exe: cannot replace itself; auto-update is disabled and
- *    "check for updates" degrades to opening the GitHub Releases page.
- *  - Development / un-packaged builds: inert.
+ * Host-neutral package selection / runtime planning lives in @dsh/bootstrap.
+ * This file only adapts electron-updater to that policy:
  *
- * All events go to the boot log and are surfaced with native Notification /
- * dialog (the embedded Web UI is the official SPA and is never modified).
+ *  - startup + periodic update checks;
+ *  - background downloads (NSIS blockmap differential when available);
+ *  - install-on-quit by default;
+ *  - optional automatic restart immediately or when the system is idle;
+ *  - force-run the new app after quitAndInstall so an automatic update really
+ *    completes as one transaction from the user's perspective.
+ *
+ * Portable single-file executables still cannot safely replace themselves and
+ * therefore degrade to the GitHub Releases page.
  */
 
 export function isPortable(): boolean {
@@ -32,11 +40,6 @@ export function hasUpdateFeed(): boolean {
   }
 }
 
-/**
- * Derive the GitHub Releases URL from the baked feed (owner/repo), so even the
- * portable build can point the user at the manual download page without any
- * hard-coded repo. `DSH_RELEASES_URL` wins when set explicitly.
- */
 export function releasesUrl(): string | null {
   const override = process.env.DSH_RELEASES_URL
   if (override) return override
@@ -52,9 +55,7 @@ export function releasesUrl(): string | null {
 }
 
 export interface AutoUpdateHandle {
-  /** Manual "check for updates" (tray menu). Handles portable / dev / no-feed degrade. */
   checkNow(): void
-  /** Open the project's GitHub Releases page (used by the portable degrade path). */
   openReleasesPage(): void
 }
 
@@ -81,18 +82,21 @@ export function initAutoUpdate(): AutoUpdateHandle {
     return { checkNow: openReleasesPage, openReleasesPage }
   }
 
-  void bootLog(`auto-update enabled (feed: ${releasesUrl() ?? 'unknown'})`)
+  const policy = readUpdatePolicy(process.env)
+  const checkIntervalMs = readCheckIntervalMs(process.env)
+  void bootLog(
+    `auto-update enabled (current=${app.getVersion()} feed=${releasesUrl() ?? 'unknown'} download=${policy.download} install=${policy.install} restart=${policy.restart})`,
+  )
 
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoDownload = policy.download === 'automatic'
+  autoUpdater.autoInstallOnAppQuit = process.env.HARNESSDOCK_UPDATE_INSTALL_ON_QUIT !== '0'
   if (process.env.DSH_UPDATE_FEED_URL) {
-    // Unofficial/self-hosted feed override for testing.
     autoUpdater.setFeedURL({ provider: 'generic', url: process.env.DSH_UPDATE_FEED_URL })
   }
 
   autoUpdater.on('checking-for-update', () => void bootLog('auto-update: checking for updates'))
   autoUpdater.on('update-available', (info) => {
-    void bootLog(`auto-update: update available ${info.version}`)
+    void bootLog(`auto-update: update available ${app.getVersion()} -> ${info.version}`)
     notify(t('update.available.title'), fmt(t('update.available.body'), { version: info.version }))
   })
   autoUpdater.on('update-not-available', () => void bootLog('auto-update: up to date'))
@@ -111,9 +115,54 @@ export function initAutoUpdate(): AutoUpdateHandle {
     }
   })
 
+  let idleRestartTimer: NodeJS.Timeout | undefined
+  const clearIdleRestart = (): void => {
+    if (!idleRestartTimer) return
+    clearInterval(idleRestartTimer)
+    idleRestartTimer = undefined
+  }
+
+  const installAndRestart = (version: string, reason: string): void => {
+    clearIdleRestart()
+    void bootLog(`auto-update: installing ${version} and restarting (${reason})`)
+    // before-quit continues through the normal HarnessDock shutdown path, which
+    // stops dsh/gateway and releases the Runtime Lease before Electron exits.
+    autoUpdater.quitAndInstall(false, true)
+  }
+
+  const scheduleIdleRestart = (version: string): void => {
+    clearIdleRestart()
+    const checkIdle = (): void => {
+      let idleSeconds = 0
+      try {
+        idleSeconds = powerMonitor.getSystemIdleTime()
+      } catch {
+        return
+      }
+      if (shouldRestartAutomatically(policy, { idleSeconds })) {
+        installAndRestart(version, `idle ${idleSeconds}s`)
+      }
+    }
+    checkIdle()
+    if (!idleRestartTimer) {
+      idleRestartTimer = setInterval(checkIdle, 30_000)
+      idleRestartTimer.unref()
+    }
+  }
+
   autoUpdater.on('update-downloaded', (info) => {
     void bootLog(`auto-update: update downloaded (${info.version}), ready to install`)
     notify(t('update.downloaded.title'), fmt(t('update.downloaded.body'), { version: info.version }))
+
+    if (policy.restart === 'immediate') {
+      installAndRestart(info.version, 'policy=immediate')
+      return
+    }
+    if (policy.restart === 'idle') {
+      scheduleIdleRestart(info.version)
+      return
+    }
+
     void dialog
       .showMessageBox({
         type: 'info',
@@ -125,23 +174,58 @@ export function initAutoUpdate(): AutoUpdateHandle {
         cancelId: 1,
       })
       .then(({ response }) => {
-        if (response === 0) autoUpdater.quitAndInstall()
+        if (response === 0) installAndRestart(info.version, 'user-confirmed')
       })
       .catch(() => undefined)
   })
 
+  let checking = false
   const checkNow = (): void => {
+    if (checking) {
+      void bootLog('auto-update: check skipped (already checking)')
+      return
+    }
+    checking = true
     void autoUpdater
       .checkForUpdates()
-      .then((result) => void bootLog(`auto-update: checkForUpdates resolved (${result?.updateInfo.version ?? 'n/a'})`))
+      .then((result) => void bootLog(`auto-update: check resolved (${result?.updateInfo.version ?? 'n/a'})`))
       .catch((error) => void bootLog(`auto-update: check failed: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => {
+        checking = false
+      })
   }
 
-  // First check shortly after startup so it never delays boot.
+  // Startup check never delays boot. Periodic checks keep long-running tray
+  // sessions current without requiring the user to relaunch HarnessDock.
   const first = setTimeout(() => checkNow(), 5_000)
   first.unref()
+  const periodic = setInterval(() => checkNow(), checkIntervalMs)
+  periodic.unref()
 
   return { checkNow, openReleasesPage }
+}
+
+function readUpdatePolicy(env: NodeJS.ProcessEnv): UpdatePolicy {
+  const restart = env.HARNESSDOCK_UPDATE_RESTART
+  const normalizedRestart: UpdatePolicy['restart'] =
+    restart === 'immediate' || restart === 'idle' || restart === 'prompt' ? restart : DEFAULT_UPDATE_POLICY.restart
+  const idleRaw = Number.parseInt(env.HARNESSDOCK_UPDATE_IDLE_SECONDS ?? '', 10)
+  const idleSeconds = Number.isInteger(idleRaw) && idleRaw >= 30 ? idleRaw : DEFAULT_UPDATE_POLICY.idleSeconds
+  return {
+    ...DEFAULT_UPDATE_POLICY,
+    download: env.HARNESSDOCK_UPDATE_AUTO_DOWNLOAD === '0' ? 'manual' : 'automatic',
+    install: env.HARNESSDOCK_UPDATE_INSTALL === 'immediate' || env.HARNESSDOCK_UPDATE_INSTALL === 'idle'
+      ? env.HARNESSDOCK_UPDATE_INSTALL
+      : DEFAULT_UPDATE_POLICY.install,
+    restart: normalizedRestart,
+    idleSeconds,
+  }
+}
+
+function readCheckIntervalMs(env: NodeJS.ProcessEnv): number {
+  const raw = Number.parseInt(env.HARNESSDOCK_UPDATE_CHECK_INTERVAL_MINUTES ?? '', 10)
+  const minutes = Number.isInteger(raw) && raw >= 15 ? raw : 240
+  return minutes * 60_000
 }
 
 export function openReleasesPage(): void {
