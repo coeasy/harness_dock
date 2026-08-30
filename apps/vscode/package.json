@@ -2,7 +2,7 @@
   "name": "dsh-full-client",
   "displayName": "HarnessDock",
   "description": "Full HarnessDock Web UI inside VS Code / Cursor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "harnessdock",
   "private": true,
   "type": "module",
@@ -14,14 +14,8 @@
   "main": "./dist/extension.cjs",
   "contributes": {
     "commands": [
-      {
-        "command": "dshClient.open",
-        "title": "HarnessDock: Open Workbench"
-      },
-      {
-        "command": "dshClient.stop",
-        "title": "HarnessDock: Stop Runtime"
-      }
+      { "command": "dshClient.open", "title": "HarnessDock: Open Workbench" },
+      { "command": "dshClient.stop", "title": "HarnessDock: Stop Runtime" }
     ],
     "configuration": {
       "title": "HarnessDock",

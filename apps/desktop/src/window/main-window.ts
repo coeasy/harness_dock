@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { redactWebAuthTokens } from '@dsh/client-runtime'
 import { appState } from '../state.ts'
 import { bootLog } from '../boot-log.ts'
 import { suggestedDownloadPath } from '../downloads.ts'
@@ -102,13 +103,18 @@ export async function createWindow(url: string): Promise<void> {
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) return
     void bootLog(
-      `renderer: did-fail-load code=${errorCode} description=${errorDescription} url=${validatedURL}`,
+      `renderer: did-fail-load code=${errorCode} description=${redactWebAuthTokens(errorDescription)} url=${redactWebAuthTokens(validatedURL)}`,
     )
   })
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     const detail = message.length > 2000 ? message.slice(0, 2000) + '…' : message
-    void bootLog(`renderer: console level=${level} source=${sourceId}:${line} ${detail}`)
+    void bootLog(
+      `renderer: console level=${level} source=${redactWebAuthTokens(sourceId)}:${line} ${redactWebAuthTokens(detail)}`,
+    )
   })
+  // Keep the dsh 0.1.2+ launch token intact for the first navigation. The
+  // server exchanges it for an HttpOnly authority-bound cookie and redirects
+  // to the clean root URL; all persistent logs above redact the token.
   await mainWindow.loadURL(url)
   installRendererRecovery(mainWindow)
 }

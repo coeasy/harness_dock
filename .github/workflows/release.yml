@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to publish under (e.g. v0.1.0). Empty = draft release named "unreleased".'
+        description: 'Release tag to publish under (e.g. v0.1.1). Empty = draft release named "unreleased".'
         type: string
         required: false
       target:
@@ -55,17 +55,17 @@ jobs:
             {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"thin","arch":"x64","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario thin"},
             {"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack","packaged_runtime_dir":"apps/desktop/release/full/linux-unpacked/resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/linux-unpacked/resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os linux --scenario full"},
             {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"thin","arch":"all","runtime_dir":"","packaged_runtime_dir":"","packaged_plugin":"","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario thin"},
-            {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
+            {"runner":"macos-15-intel","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64","runtime_dir":"runtimes/pack-x64","packaged_runtime_dir":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch x64"},
             {"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"arm64","runtime_dir":"runtimes/pack-arm64","packaged_runtime_dir":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime","packaged_plugin":"apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js","command":"node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64"}
           ]'
           runtime_rows='[
             {"enabled":true,"runner":"ubuntu-latest","artifact_os":"win","target_os":"win","platform":"win32","arch":"x64","runtime_dir":"runtimes/pack"},
             {"enabled":true,"runner":"ubuntu-latest","artifact_os":"linux","target_os":"linux","platform":"linux","arch":"x64","runtime_dir":"runtimes/pack"},
-            {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64","runtime_dir":"runtimes/pack-x64"},
+            {"enabled":true,"runner":"macos-15-intel","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64","runtime_dir":"runtimes/pack-x64"},
             {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
           ]'
           build_matrix=$(printf '%s' "$build_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-" + .scenario))]')
-          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-full"))]')
+          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-thin") or $target == (.target_os + "-full"))]')
           if [ "$(printf '%s' "$runtime_matrix" | jq 'length')" -eq 0 ]; then
             runtime_matrix='[{"enabled":false,"runner":"ubuntu-latest","artifact_os":"none","target_os":"none","platform":"linux","arch":"x64","runtime_dir":"runtimes/unused"}]'
           fi
@@ -86,26 +86,85 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Validate release metadata
-        shell: bash
         run: |
           pnpm check:versions
           pnpm check:release
       - run: pnpm test
 
+  pack-upstream:
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve pinned upstream source
+        id: origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tag=$(node -p "require('./packages/docs-sync/origin.json').gitTag")" >> "$GITHUB_OUTPUT"
+          echo "commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.tag }}
+          path: upstream
+          fetch-depth: 1
+      - name: Verify immutable upstream commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C upstream rev-parse HEAD)
+          expected='${{ steps.origin.outputs.commit }}'
+          test "$actual" = "$expected" || {
+            echo "upstream source mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install upstream dependencies with pinned pnpm
+        working-directory: upstream
+        run: npx --yes pnpm@11.7.0 install --frozen-lockfile
+      - name: Build official upstream profile
+        working-directory: upstream
+        run: npx --yes pnpm@11.7.0 build:official
+      - name: Pack and verify official dsh runtime closure
+        working-directory: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+          test -n "$(find dist/dsh dist/vendor -type f -name '*.tgz' -print -quit)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: upstream-dsh-packed
+          path: |
+            upstream/dist/dsh/*.tgz
+            upstream/dist/vendor/*.tgz
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
   prepare-runtime:
-    needs: [test, plan]
-    if: needs.test.result == 'success' && needs.plan.result == 'success'
+    needs: [test, plan, pack-upstream]
+    if: needs.test.result == 'success' && needs.plan.result == 'success' && needs.pack-upstream.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.runtime_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
-      - name: Skip runtime preparation for thin-only release
+      - name: Skip runtime preparation when not requested
         if: matrix.enabled != true
-        run: echo "No full runtime requested for this release target."
+        run: echo "No runtime requested for this release target."
       - uses: actions/checkout@v7
         if: matrix.enabled == true
       - uses: pnpm/action-setup@v6
@@ -117,27 +176,41 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Download official upstream packed closure
+        if: matrix.enabled == true
+        uses: actions/download-artifact@v8
+        with:
+          name: upstream-dsh-packed
+          path: upstream-packed
       - name: Cache prepared runtime
         if: matrix.enabled == true
         uses: actions/cache@v6
         with:
           path: ${{ matrix.runtime_dir }}
-          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/prepare-cli.ts', 'packages/client-runtime/src/integrity.ts', 'packages/client-runtime/src/bundled.ts', 'packages/client-runtime/src/prune.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
-          restore-keys: |
-            dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-
+          key: dsh-runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**/*.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml') }}
       - name: Install workspace dependencies
         if: matrix.enabled == true
         run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Prepare bundled runtime
+      - name: Prepare bundled runtime from official source packs
         if: matrix.enabled == true
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
+          DSH_PACKED_RUNTIME_DIR: upstream-packed
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
           DSH_RUNTIME_ARCH: ${{ matrix.arch }}
           DSH_RUNTIME_DIR: ${{ matrix.runtime_dir }}
-      - name: Upload prepared runtime
+      - name: Create Thin runtime bundle
         if: matrix.enabled == true
-        uses: actions/upload-artifact@v7
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./packages/docs-sync/origin.json').dshVersion")
+          mkdir -p runtime-bundle
+          archive="runtime-bundle/HarnessDock-runtime-${version}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz"
+          tar -czf "$archive" -C "${{ matrix.runtime_dir }}" .
+          test -s "$archive"
+      - uses: actions/upload-artifact@v7
+        if: matrix.enabled == true
         with:
           name: runtime-${{ matrix.artifact_os }}-${{ matrix.arch }}
           path: ${{ matrix.runtime_dir }}
@@ -145,6 +218,14 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           include-hidden-files: true
+      - uses: actions/upload-artifact@v7
+        if: matrix.enabled == true
+        with:
+          name: runtime-bundle-${{ matrix.artifact_os }}-${{ matrix.arch }}
+          path: runtime-bundle/*.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
 
   build:
     needs: [test, plan, prepare-runtime]
@@ -211,8 +292,7 @@ jobs:
           mkdir -p dist
           release_dir="apps/desktop/release/${{ matrix.scenario }}"
           find "$release_dir" -maxdepth 1 -type f \
-            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
-               -o -name '*.AppImage' -o -name '*.deb' \) \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' \) \
             -exec cp {} dist/ \;
           if [ "${{ matrix.scenario }}" = "full" ]; then
             find "$release_dir" -maxdepth 1 -type f \
@@ -228,9 +308,10 @@ jobs:
           compression-level: 0
 
   publish:
-    needs: build
+    needs: [build, prepare-runtime]
+    if: needs.build.result == 'success' && needs.prepare-runtime.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -238,75 +319,74 @@ jobs:
           path: artifact-bundles
           pattern: desktop-*
           merge-multiple: false
+      - uses: actions/download-artifact@v8
+        with:
+          path: runtime-bundles
+          pattern: runtime-bundle-*
+          merge-multiple: false
       - name: Assemble release assets and merge macOS update metadata
         shell: bash
         run: |
           set -euo pipefail
           rm -rf artifacts
           mkdir -p artifacts
-
           while IFS= read -r file; do
             name=$(basename "$file")
-            if [ "$name" = "latest-mac.yml" ]; then
-              continue
-            fi
+            [ "$name" = "latest-mac.yml" ] && continue
             if [ -e "artifacts/$name" ]; then
               echo "duplicate release asset filename: $name" >&2
               exit 1
             fi
             cp "$file" "artifacts/$name"
-          done < <(find artifact-bundles -type f -print | sort)
+          done < <(find artifact-bundles runtime-bundles -type f -print | sort)
 
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
           import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
           import path from 'node:path'
-
           const dir = 'artifacts'
           const names = readdirSync(dir)
           const version = JSON.parse(readFileSync('package.json', 'utf8')).version
-          const zipRe = /^HarnessDock-.*-mac-(x64|arm64)-full\.zip$/
-          const zips = names
-            .filter((name) => zipRe.test(name))
-            .sort((a, b) => {
-              const aa = a.includes('-arm64-') ? 0 : 1
-              const bb = b.includes('-arm64-') ? 0 : 1
-              return aa - bb || a.localeCompare(b)
-            })
-
+          const zips = names.filter((name) => /^HarnessDock-.*-mac-(x64|arm64)-full\.zip$/.test(name))
+            .sort((a, b) => Number(a.includes('-x64-')) - Number(b.includes('-x64-')) || a.localeCompare(b))
           if (zips.length > 0) {
             const files = []
             for (const zip of zips) {
-              const match = zip.match(/-mac-(x64|arm64)-full\.zip$/)
-              if (!match) throw new Error(`cannot resolve macOS architecture from ${zip}`)
-              const arch = match[1]
+              const arch = zip.match(/-mac-(x64|arm64)-full\.zip$/)?.[1]
+              if (!arch) throw new Error(`cannot resolve macOS architecture from ${zip}`)
               const dmg = names.find((name) => name.endsWith(`-mac-${arch}-full.dmg`))
-              if (!dmg) throw new Error(`missing macOS ${arch} full DMG for combined update metadata`)
-
+              if (!dmg) throw new Error(`missing macOS ${arch} full DMG`)
               for (const name of [zip, dmg]) {
                 const data = readFileSync(path.join(dir, name))
-                files.push({
-                  url: name,
-                  sha512: createHash('sha512').update(data).digest('base64'),
-                  size: data.length,
-                })
+                files.push({ url: name, sha512: createHash('sha512').update(data).digest('base64'), size: data.length })
               }
             }
-
             let yml = `version: ${version}\nfiles:\n`
             for (const file of files) {
-              yml += `  - url: ${file.url}\n`
-              yml += `    sha512: ${file.sha512}\n`
-              yml += `    size: ${file.size}\n`
+              yml += `  - url: ${file.url}\n    sha512: ${file.sha512}\n    size: ${file.size}\n`
             }
             yml += `releaseDate: '${new Date().toISOString()}'\n`
             writeFileSync(path.join(dir, 'latest-mac.yml'), yml, 'utf8')
           }
           NODE
-
-          echo "Final release assets:"
           find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
-          test -n "$(find artifacts -maxdepth 1 -type f -print -quit)"
+      - name: Validate runtime bundle assets
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          set -euo pipefail
+          dsh_version=$(node -p "require('./packages/docs-sync/origin.json').dshVersion")
+          case "$RELEASE_TARGET" in
+            all) expected='win32-x64 linux-x64 darwin-x64 darwin-arm64' ;;
+            win*) expected='win32-x64' ;;
+            linux*) expected='linux-x64' ;;
+            mac*) expected='darwin-x64 darwin-arm64' ;;
+            *) expected='' ;;
+          esac
+          for target in $expected; do
+            test -s "artifacts/HarnessDock-runtime-${dsh_version}-${target}.tar.gz"
+          done
       - name: Validate combined macOS update metadata
         shell: bash
         run: |
@@ -317,7 +397,6 @@ jobs:
             grep -q -- '-mac-arm64-full.dmg' artifacts/latest-mac.yml
             grep -q -- '-mac-x64-full.zip' artifacts/latest-mac.yml
             grep -q -- '-mac-x64-full.dmg' artifacts/latest-mac.yml
-            echo 'Combined latest-mac.yml contains x64 and arm64 full assets.'
           fi
       - name: Resolve release tag
         id: tag
@@ -334,16 +413,11 @@ jobs:
             echo "draft=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Generate public release notes
-        shell: bash
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           template=".github/release-notes/v${VERSION}.md"
-          if [ -f "$template" ]; then
-            cp "$template" notes.md
-          else
-            printf '# HarnessDock v%s\n\nHarnessDock v%s release.\n' "$VERSION" "$VERSION" > notes.md
-          fi
+          if [ -f "$template" ]; then cp "$template" notes.md; else printf '# HarnessDock v%s\n' "$VERSION" > notes.md; fi
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -366,18 +440,15 @@ jobs:
       actions: write
     steps:
       - name: Delete historical development branches
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | while IFS= read -r branch; do
             [ "$branch" = "main" ] && continue
-            echo "Deleting branch: $branch"
             gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/$branch" || true
           done
       - name: Delete historical Actions runs
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -385,6 +456,5 @@ jobs:
           current_run="${GITHUB_RUN_ID}"
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" --jq '.workflow_runs[].id' | while IFS= read -r run_id; do
             [ "$run_id" = "$current_run" ] && continue
-            echo "Deleting Actions run: $run_id"
             gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/$run_id" || true
           done

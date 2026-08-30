@@ -1,5 +1,5 @@
 import { app, Notification } from 'electron'
-import { bundledRuntimeVersion } from '@dsh/client-runtime'
+import { bundledRuntimeVersion, redactWebAuthTokens } from '@dsh/client-runtime'
 import { acquireRuntimeLease, LocalRuntimeProvider } from '@dsh/bootstrap'
 import { startHarnessGateway } from '@dsh/bootstrap/gateway'
 import { readOriginFile } from '@dsh/docs-sync'
@@ -26,6 +26,7 @@ import {
   readVersionOverride,
   runtimeCacheDir,
 } from '../version-override.ts'
+import { BootProgressTracker } from './progress.ts'
 
 let autoUpdate: AutoUpdateHandle | undefined
 
@@ -38,9 +39,10 @@ let autoUpdate: AutoUpdateHandle | undefined
  * same runtime contract through RemoteRuntimeProvider and never spawn dsh.
  */
 export async function bootFlow(): Promise<void> {
+  const progress = new BootProgressTracker()
   await createSplash()
   updateSplash(t('splash.loading'))
-  showSplashProgress(null)
+  showSplashProgress(progress.start())
 
   const runtimeLease = await acquireRuntimeLease({ host: 'electron' })
   appState.runtimeLease = runtimeLease
@@ -60,6 +62,7 @@ export async function bootFlow(): Promise<void> {
       stopTimeoutMs: 12_000,
       log: (message) => void bootLog(message),
       onBeforeStart: ({ bundledAvailable }) => {
+        showSplashProgress(progress.preparingRuntime(bundledAvailable))
         void bootLog(
           `runtime mode: ${bundledAvailable ? 'bundled (offline)' : 'download (first launch fetches ~300MB over HTTPS)'}`,
         )
@@ -72,7 +75,7 @@ export async function bootFlow(): Promise<void> {
       },
       onProgress: (event) => {
         if (event.stage === 'fetch') {
-          showSplashProgress(event.percent ?? null)
+          showSplashProgress(progress.fetching(event.percent))
           const pct = `${event.percent ?? 0}%`
           const bytes = event.bytes ? formatMb(event.bytes) : '—'
           updateSplash(
@@ -85,14 +88,14 @@ export async function bootFlow(): Promise<void> {
             }),
           )
         } else if (event.stage === 'resolve') {
-          showSplashProgress(null)
+          showSplashProgress(progress.resolving(event.done ?? 0, event.total))
           updateSplash(
             event.total
               ? fmt(t('splash.resolving'), { total: event.total, done: event.done ?? 0 })
               : fmt(t('splash.resolvingUnknown'), { done: event.done ?? 0 }),
           )
         } else if (event.stage === 'done') {
-          showSplashDone()
+          showSplashProgress(progress.runtimeInstalled())
           updateSplash(t('splash.ready'))
         }
       },
@@ -122,10 +125,14 @@ export async function bootFlow(): Promise<void> {
       runtimePid: result.ready.pid,
       dshVersion: result.ready.dshVersion,
     })
-    await bootLog(`dsh web ready at ${session.appUrl} (pid ${result.ready.pid})`)
+    await bootLog(`dsh web ready at ${redactWebAuthTokens(session.appUrl)} (pid ${result.ready.pid})`)
+    showSplashProgress(progress.runtimeReady())
     await startRemoteGatewayIfEnabled(session.appUrl)
     updateSplash(t('splash.loadingInterface'))
+    showSplashProgress(progress.loadingInterface())
     await createWindow(session.appUrl)
+    showSplashProgress(progress.complete())
+    showSplashDone()
 
     try {
       autoUpdate = initAutoUpdate()
@@ -180,8 +187,8 @@ async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
   appState.gateway = gateway
   await bootLog(`remote gateway ready: local=${gateway.localUrl} public=${gateway.publicUrl}`)
 
-  // Compatibility switch for early Preview automation. The new tray Mobile
-  // Devices panel is the preferred place to create/revoke one-time codes.
+  // Compatibility switch for early Preview automation. The tray Mobile Devices
+  // panel is the preferred place to create/revoke one-time pairing codes.
   if (process.env.HARNESSDOCK_GATEWAY_PAIR_ON_START === '1') {
     const ticket = gateway.createPairingTicket()
     try {
