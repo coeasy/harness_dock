@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1120" />
+  <title>HarnessDock</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">HarnessDock v0.2.0 · Tauri 2</div>
+        <h1 id="title">连接 DeepSeek Harness</h1>
+        <p id="subtitle">Desktop 可启动本地 Runtime；Android / iOS 通过安全 Gateway 连接。</p>
+      </div>
+      <span id="platform" class="pill">检测平台…</span>
+    </header>
+
+    <section id="desktop-card" class="card hidden">
+      <h2>本地 Runtime</h2>
+      <p>Full Desktop 会优先使用随应用打包的固定版本 DSH Runtime，并在回环地址启动 Web UI。</p>
+      <button id="start-local" class="primary">启动本地 Runtime</button>
+    </section>
+
+    <section class="card">
+      <h2>Remote Gateway</h2>
+      <label for="gateway">Gateway HTTPS 地址</label>
+      <input id="gateway" type="url" inputmode="url" placeholder="https://harness.example.com" autocomplete="url" />
+      <label for="pairing">配对码 / Access Token</label>
+      <input id="pairing" type="password" placeholder="一次性配对码或访问令牌" autocomplete="one-time-code" />
+      <div class="actions">
+        <button id="probe">检测连接</button>
+        <button id="connect" class="primary">连接 Harness</button>
+      </div>
+      <p class="hint">移动端不运行 Node/DSH 子进程；运行时保持在可信 Desktop / Server 上。</p>
+    </section>
+
+    <section class="card compact">
+      <div class="status-row"><span>状态</span><strong id="status">就绪</strong></div>
+      <pre id="detail"></pre>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HarnessDock",
+        "width": 390,
+        "height": 844
+      }
+    ]
+  },
+  "bundle": {
+    "iOS": {
+      "minimumSystemVersion": "14.0"
+    }
+  }
+}

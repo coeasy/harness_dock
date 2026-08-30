@@ -1,0 +1,18 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HarnessDock",
+        "width": 420,
+        "height": 820
+      }
+    ]
+  },
+  "bundle": {
+    "android": {
+      "minSdkVersion": 24,
+      "versionCode": 2000
+    }
+  }
+}
