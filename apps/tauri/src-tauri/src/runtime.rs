@@ -93,7 +93,8 @@ fn work_dir() -> Result<PathBuf, String> {
 
 fn embedded_patch(plugin: &Path) -> Result<String, String> {
     let url = Url::from_file_path(plugin).map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
-    Ok(format!("- insert:\n    - id: embedded-client\n      name: '{}'\n", url.as_str().replace('\\'', "''")))
+    let escaped = url.as_str().replace('\'', "''");
+    Ok(format!("- insert:\n    - id: embedded-client\n      name: '{escaped}'\n"))
 }
 
 fn validated_ready(raw: &str, expected_version: &str) -> Result<ReadyInfo, String> {
