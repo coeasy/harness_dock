@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HarnessDock",
+  "version": "0.2.0",
+  "identifier": "com.harnessdock.client",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "HarnessDock",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false,
+        "useHttpsScheme": true
+      }
+    ],
+    "security": {
+      "capabilities": ["local-main"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "shortDescription": "HarnessDock DeepSeek Harness client",
+    "longDescription": "Tauri desktop and mobile host for DeepSeek Harness with local desktop runtime and secure mobile gateway pairing.",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": {
+      "../../../packages/docs-sync/origin.json": "origin.json",
+      "../../../packages/plugin-embedded-client/lib/index.js": "plugin-embedded-client/index.js",
+      "resources/": ""
+    },
+    "android": {
+      "minSdkVersion": 24
+    },
+    "iOS": {
+      "minimumSystemVersion": "14.0"
+    }
+  }
+}

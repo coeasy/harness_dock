@@ -1,0 +1,104 @@
+name: tauri-ci
+
+on:
+  push:
+    branches:
+      - refactor/tauri-v0.2.0
+    paths:
+      - 'apps/tauri/**'
+      - 'packages/bootstrap/**'
+      - '.github/workflows/tauri-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/tauri/**'
+      - 'packages/bootstrap/**'
+      - '.github/workflows/tauri-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  shared-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm --filter @dsh/bootstrap build
+      - run: pnpm vitest run packages/bootstrap/tests/mobile-gateway-contract.test.ts packages/bootstrap/tests/gateway.test.ts packages/bootstrap/tests/runtime-lease.test.ts
+
+  desktop-rust:
+    name: desktop-rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
+
+  android-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux Tauri dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Resolve Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$ndk" ]; then ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"; fi
+          test -d "$ndk"
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+      - name: Initialize Android project
+        working-directory: apps/tauri
+        run: cargo tauri android init --ci --skip-targets-install
+      - name: Build Android debug APK
+        working-directory: apps/tauri
+        run: cargo tauri android build --debug --apk --target aarch64 --ci
+
+  ios-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Initialize iOS project
+        working-directory: apps/tauri
+        run: cargo tauri ios init --ci --skip-targets-install
+      - name: Build iOS simulator app
+        working-directory: apps/tauri
+        run: cargo tauri ios build --debug --target aarch64-sim --ci

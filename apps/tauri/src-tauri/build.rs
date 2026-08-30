@@ -1,0 +1,16 @@
+fn main() {
+    const COMMANDS: &[&str] = &[
+        "platform_info",
+        "gateway_health",
+        "pair_gateway",
+        "runtime_status",
+        "runtime_start",
+        "runtime_stop",
+    ];
+
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("failed to build HarnessDock Tauri manifest");
+}

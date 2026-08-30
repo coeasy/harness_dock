@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" />
+  <title>HarnessDock</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="brand">HarnessDock</div>
+      <h1>Tauri v0.2.0</h1>
+      <p id="platform-summary" class="muted">正在检测运行环境…</p>
+    </section>
+
+    <section id="desktop-card" class="card hidden">
+      <div class="card-heading">
+        <div>
+          <h2>本地 Runtime</h2>
+          <p>桌面端直接启动随应用打包的 DeepSeek Harness Runtime。</p>
+        </div>
+        <span id="runtime-state" class="badge">stopped</span>
+      </div>
+      <div class="actions">
+        <button id="runtime-start" class="primary">启动并进入 Harness</button>
+        <button id="runtime-stop" class="secondary">停止 Runtime</button>
+      </div>
+      <p id="runtime-detail" class="status"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <h2>移动端 / Remote Gateway</h2>
+          <p>Android 与 iOS 通过 HTTPS Gateway 配对，不在手机内执行桌面 Node Runtime。</p>
+        </div>
+        <span id="gateway-state" class="badge">offline</span>
+      </div>
+      <label>
+        Gateway 地址
+        <input id="gateway-url" type="url" autocomplete="url" placeholder="https://harness.example.com" />
+      </label>
+      <label>
+        设备名称
+        <input id="device-name" type="text" maxlength="80" autocomplete="off" />
+      </label>
+      <label>
+        一次性配对码
+        <input id="pairing-code" type="text" inputmode="numeric" maxlength="9" autocomplete="one-time-code" placeholder="1234-5678" />
+      </label>
+      <div class="actions">
+        <button id="gateway-check" class="secondary">检查 Gateway</button>
+        <button id="gateway-pair" class="primary">配对并连接</button>
+      </div>
+      <p id="gateway-detail" class="status"></p>
+    </section>
+
+    <footer>HarnessDock v0.2.0 · Tauri Desktop / Android / iOS</footer>
+  </main>
+  <script src="./app.js" defer></script>
+</body>
+</html>
