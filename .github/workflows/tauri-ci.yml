@@ -7,11 +7,15 @@ on:
     paths:
       - 'apps/tauri/**'
       - 'packages/bootstrap/**'
+      - 'packages/client-runtime/**'
+      - 'tests/parity/tauri-host.test.ts'
       - '.github/workflows/tauri-ci.yml'
   pull_request:
     paths:
       - 'apps/tauri/**'
       - 'packages/bootstrap/**'
+      - 'packages/client-runtime/**'
+      - 'tests/parity/tauri-host.test.ts'
       - '.github/workflows/tauri-ci.yml'
 
 permissions:
@@ -31,7 +35,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm --filter @dsh/bootstrap build
-      - run: pnpm vitest run packages/bootstrap/tests/mobile-gateway-contract.test.ts packages/bootstrap/tests/gateway.test.ts packages/bootstrap/tests/runtime-lease.test.ts
+      - name: Bundle Tauri Gateway sidecar
+        run: node apps/desktop/node_modules/esbuild/bin/esbuild packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
+      - run: test -s /tmp/harnessdock-gateway-sidecar.mjs
+      - run: pnpm vitest run packages/bootstrap/tests/mobile-gateway-contract.test.ts packages/bootstrap/tests/gateway.test.ts packages/bootstrap/tests/runtime-lease.test.ts tests/parity/tauri-host.test.ts
 
   desktop-rust:
     name: desktop-rust (${{ matrix.os }})
