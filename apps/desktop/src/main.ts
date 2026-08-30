@@ -9,22 +9,27 @@ import { registerDiagnosticsIpc } from './diagnostics/diagnostics-ipc.ts'
 import { registerMobileIpc } from './mobile/mobile-ipc.ts'
 import { fmt, t } from './i18n.ts'
 import { bundledRoot, originPath, pluginPath } from './paths.ts'
+import { createElectronClientAdapter } from './electron-client-adapter.ts'
+
+const clientAdapter = createElectronClientAdapter()
 
 // ---------- single instance lock ----------
-// Re-launching the app just focuses the existing window instead of starting
-// a second dsh process tree (which would race on the same port / data dir).
+// Re-launching the app never starts a second dsh process tree. The second
+// process forwards argv/deep links to the shared Client Command Bus and exits.
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
-  // Another instance is already running. Hand the focus over and exit.
   app.quit()
 }
 
-app.on('second-instance', () => {
-  const mainWindow = appState.mainWindow
-  if (!mainWindow) return
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  if (!mainWindow.isVisible()) mainWindow.show()
-  mainWindow.focus()
+app.on('second-instance', (_event, argv) => {
+  void clientAdapter.dispatchArgv(argv)
+})
+
+// macOS delivers registered custom-scheme activations through open-url, often
+// before app.whenReady(). The adapter queues those URLs until boot is complete.
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  void clientAdapter.dispatchDeepLink(url)
 })
 
 app.on('window-all-closed', () => {
@@ -60,17 +65,13 @@ registerMobileIpc()
 
 /** Restart the whole app (used by boot-failure retry). */
 function relaunchApp(): void {
-  try {
-    app.relaunch()
-  } catch {
-    // relaunch unavailable (dev / bare electron); fall through to exit
-  }
-  app.exit(0)
+  void clientAdapter.lifecycle.relaunch()
 }
 
 if (gotSingleInstanceLock) {
   void app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
+    await clientAdapter.registerProtocol()
     await bootLog(
       `boot start | packaged=${app.isPackaged} resources=${process.resourcesPath ?? '?'} electron=${process.versions.electron}`,
     )
@@ -79,6 +80,8 @@ if (gotSingleInstanceLock) {
     try {
       await bootLog(`plugin=${pluginPath()} | bundled=${bundledRoot()} | origin=${originPath()}`)
       await bootFlow()
+      await clientAdapter.markReady()
+      await clientAdapter.dispatchArgv(process.argv)
       await bootLog('boot ok')
     } catch (error) {
       const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error)
