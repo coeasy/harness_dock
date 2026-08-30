@@ -17,7 +17,7 @@ for (const scenario of ['full', 'thin']) {
 function writeWindowsChannel(scenario) {
   const installer = findExact(new RegExp(`^HarnessDock-Setup-${escapeRegex(version)}-win-(x64|arm64)-${scenario}\\.exe$`))
   if (!installer) return
-  writeChannel(`${scenario}.yml`, [installer], installer)
+  writeChannel(`${scenario}.yml`, [installer], installer, scenario === 'full' ? 'latest.yml' : undefined)
 }
 
 function writeMacChannel(scenario) {
@@ -30,16 +30,16 @@ function writeMacChannel(scenario) {
     })
   if (files.length === 0) return
   const primary = files.find((name) => name.endsWith('.zip')) ?? files[0]
-  writeChannel(`${scenario}-mac.yml`, files, primary)
+  writeChannel(`${scenario}-mac.yml`, files, primary, scenario === 'full' ? 'latest-mac.yml' : undefined)
 }
 
 function writeLinuxChannel(scenario) {
   const appImage = findExact(new RegExp(`^HarnessDock-${escapeRegex(version)}-linux-(x64|x86_64)-${scenario}\\.AppImage$`))
   if (!appImage) return
-  writeChannel(`${scenario}-linux.yml`, [appImage], appImage)
+  writeChannel(`${scenario}-linux.yml`, [appImage], appImage, scenario === 'full' ? 'latest-linux.yml' : undefined)
 }
 
-function writeChannel(output, fileNames, primaryName) {
+function writeChannel(output, fileNames, primaryName, legacyAlias) {
   const files = fileNames.map((name) => {
     const file = path.join(dir, name)
     return {
@@ -59,6 +59,15 @@ function writeChannel(output, fileNames, primaryName) {
   yml += `path: ${primary.name}\nsha512: ${primary.sha512}\nreleaseDate: '${releaseDate}'\n`
   writeFileSync(path.join(dir, output), yml, 'utf8')
   console.log(`electron update metadata: ${output} -> ${primary.name}`)
+
+  // v0.1.1 baked the default `latest` channel into both Full and Thin. The
+  // first v0.2 release keeps a legacy alias pointing at the reliable Full
+  // package so those installations can migrate. New v0.2 installations use
+  // explicit full/thin channels and never read latest* again.
+  if (legacyAlias) {
+    writeFileSync(path.join(dir, legacyAlias), yml, 'utf8')
+    console.log(`legacy update alias: ${legacyAlias} -> ${output}`)
+  }
 }
 
 function findExact(pattern) {
