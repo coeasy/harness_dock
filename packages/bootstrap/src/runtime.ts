@@ -14,11 +14,9 @@ import { backupOrigin, readPreviousOrigin } from './rollback.ts'
  * Shared host bootstrap orchestration (used by both the Electron desktop shell
  * and the VS Code / Cursor extension):
  *
- *   read origin → resolve runtime mode → backup last-known-good → construct
- *   DshRuntime → start (with rollback to last-known-good on failure) → ready.
- *
- * Hosts supply paths + callbacks and receive a started runtime. Everything else
- * is injected so the flow is unit-testable and identical across hosts.
+ *   read origin → resolve runtime mode → construct DshRuntime → start → record
+ *   the effective last-known-good origin (including a managed versionOverride)
+ *   → ready, with rollback to the previous healthy origin on failure.
  */
 
 export interface BootstrapOptions {
@@ -111,12 +109,12 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
   let rolledBack: { from: string; to: string } | null = null
   try {
     ready = await runtime.start()
-    // Record last-known-good AFTER a successful start: previous-origin.json must
-    // always hold the version that actually ran, otherwise a failing new version
-    // would overwrite the good one before it even boots (the rollback would find
-    // the failing version and never fire).
+    // Record last-known-good AFTER a successful start and record the effective
+    // origin that actually ran. This is essential for managed Runtime updates:
+    // the packaged origin may still pin vN while versionOverride just proved
+    // vN+1 healthy, and a later vN+2 failure must roll back to vN+1.
     if (previousOriginPath) {
-      await backupOrigin(options.originPath, previousOriginPath, log)
+      await backupOrigin(options.originPath, previousOriginPath, log, origin as unknown as Record<string, unknown>)
     }
   } catch (startError) {
     const previous =
@@ -134,7 +132,6 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
         ready = await fallbackRuntime.start()
         runtime = fallbackRuntime
         rolledBack = { from: origin.dshVersion, to: previous.dshVersion }
-        // previous-origin.json already holds the fallback (last-known-good) version
         log?.(`bootstrap: rolled back to last-known-good dsh ${previous.dshVersion}`)
         options.onRollback?.(rolledBack)
       } catch (fallbackError) {
