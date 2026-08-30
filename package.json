@@ -16,7 +16,7 @@
     "check:size": "node scripts/check-size.mjs",
     "check:perry-host": "tsc -p apps/perry/tsconfig.json --noEmit",
     "check:mobile-host": "tsc -p apps/mobile/tsconfig.json --noEmit",
-    "build:tauri-bridge": "pnpm --filter @dsh/desktop exec esbuild apps/tauri/bridge/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=apps/tauri/dist/runtime-bridge.mjs",
+    "build:tauri-bridge": "pnpm --filter @dsh/desktop exec esbuild ../../apps/tauri/bridge/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=../../apps/tauri/dist/runtime-bridge.mjs",
     "check:tauri-host": "node apps/tauri/scripts/check-config.mjs && pnpm build:tauri-bridge",
     "build:tauri": "pnpm check:tauri-host && cargo build --manifest-path apps/tauri/src-tauri/Cargo.toml --release",
     "dev:tauri": "pnpm check:tauri-host && cd apps/tauri && cargo tauri dev",
