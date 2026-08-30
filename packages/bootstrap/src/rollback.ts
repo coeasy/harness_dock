@@ -1,13 +1,14 @@
-import { copyFile, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 /**
  * last-known-good origin backup (shared by desktop and VS Code hosts).
  *
- * Keeps a copy of the previously pinned origin so that if a freshly released
- * dsh version fails to boot, the host can fall back to the previous pinned
- * version instead of bricking. Backing up happens before starting the runtime;
- * the rollback is attempted only when the new version actually fails to start.
+ * Keeps the origin that actually booted successfully so a failing future dsh
+ * version can fall back without bricking. `effectiveOrigin` matters when a Host
+ * runs a cached/managed version through versionOverride: copying the packaged
+ * origin file would incorrectly record the older packaged pin instead of the
+ * Runtime that just proved healthy.
  */
 
 export function defaultPreviousOriginPath(userDataDir: string): string {
@@ -15,26 +16,32 @@ export function defaultPreviousOriginPath(userDataDir: string): string {
 }
 
 /**
- * Back up the current origin to previous-origin.json whenever the pinned dsh
- * version changes. No-op when the version is unchanged or the backup path is
- * not configured.
+ * Back up the effective current origin whenever the successful dsh version
+ * changes. When effectiveOrigin is omitted the packaged origin file is read,
+ * preserving the original API for callers that do not use an override.
  */
 export async function backupOrigin(
   originPath: string,
   previousOriginPath: string,
   log?: (message: string) => void,
+  effectiveOrigin?: Record<string, unknown>,
 ): Promise<void> {
   try {
-    const current = JSON.parse(await readFile(originPath, 'utf8')) as { dshVersion?: string }
+    const current = effectiveOrigin ?? (JSON.parse(await readFile(originPath, 'utf8')) as Record<string, unknown>)
+    const currentVersion = typeof current.dshVersion === 'string' ? current.dshVersion : undefined
+    if (!currentVersion) throw new Error('effective origin is missing dshVersion')
+
     let previous: { dshVersion?: string } | null = null
     try {
       previous = JSON.parse(await readFile(previousOriginPath, 'utf8')) as { dshVersion?: string }
     } catch {
       // no previous backup yet
     }
-    if (previous?.dshVersion === current.dshVersion) return
-    await copyFile(originPath, previousOriginPath)
-    log?.(`origin backup: ${previous?.dshVersion ?? '(none)'} -> ${current.dshVersion}`)
+    if (previous?.dshVersion === currentVersion) return
+
+    await mkdir(path.dirname(previousOriginPath), { recursive: true })
+    await writeFile(previousOriginPath, `${JSON.stringify(current, null, 2)}\n`, 'utf8')
+    log?.(`origin backup: ${previous?.dshVersion ?? '(none)'} -> ${currentVersion}`)
   } catch (error) {
     log?.(`origin backup failed: ${error instanceof Error ? error.message : String(error)}`)
   }
