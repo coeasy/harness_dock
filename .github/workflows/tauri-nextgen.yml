@@ -74,3 +74,51 @@ jobs:
       - run: pnpm check:tauri-host
       - name: Build Tauri Next-Gen native host
         run: cargo build --manifest-path apps/tauri/src-tauri/Cargo.toml --release
+
+  full-package:
+    needs: native-build
+    if: needs.native-build.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - name: Install Linux Tauri packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Cache prepared dsh full runtime
+        id: runtime-cache
+        uses: actions/cache@v6
+        with:
+          path: runtimes/pack
+          key: tauri-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**') }}
+      - name: Build Tauri Full installer/package
+        run: pnpm pack:tauri:full
+        env:
+          DSH_SKIP_RUNTIME_PREPARE: ${{ steps.runtime-cache.outputs.cache-hit == 'true' && '1' || '0' }}
+      - name: List Tauri Full artifacts
+        shell: bash
+        run: find apps/tauri/release/full -maxdepth 1 -type f -print
+      - uses: actions/upload-artifact@v7
+        with:
+          name: harnessdock-tauri-${{ runner.os }}-${{ runner.arch }}-full
+          path: apps/tauri/release/full/**
+          if-no-files-found: error
+          retention-days: 7

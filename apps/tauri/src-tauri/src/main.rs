@@ -24,6 +24,14 @@ struct RuntimeBridgeProcess {
     shutdown_file: PathBuf,
 }
 
+struct RuntimeResources {
+    bridge: PathBuf,
+    origin: PathBuf,
+    plugin: PathBuf,
+    bundled_root: Option<PathBuf>,
+    packaged_node: Option<PathBuf>,
+}
+
 type SharedRuntime = Arc<Mutex<Option<RuntimeBridgeProcess>>>;
 type AllowedOrigin = Arc<Mutex<Option<String>>>;
 
@@ -31,26 +39,51 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-fn bridge_paths(app: &tauri::App) -> Result<(PathBuf, PathBuf, PathBuf, Option<PathBuf>), String> {
+fn node_path(root: &Path) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        root.join("node.exe")
+    } else {
+        root.join("bin/node")
+    }
+}
+
+fn runtime_resources(app: &tauri::App) -> Result<RuntimeResources, String> {
     if cfg!(debug_assertions) {
         let root = repo_root();
         let bundled = root.join("runtimes/pack");
-        return Ok((
-            root.join("apps/tauri/dist/runtime-bridge.mjs"),
-            root.join("packages/docs-sync/origin.json"),
-            root.join("packages/plugin-embedded-client/lib/index.js"),
-            bundled.exists().then_some(bundled),
-        ));
+        let bundled_root = bundled.exists().then_some(bundled);
+        let packaged_node = bundled_root
+            .as_ref()
+            .map(|runtime| node_path(runtime))
+            .filter(|node| node.exists());
+        return Ok(RuntimeResources {
+            bridge: root.join("apps/tauri/dist/runtime-bridge.mjs"),
+            origin: root.join("packages/docs-sync/origin.json"),
+            plugin: root.join("packages/plugin-embedded-client/lib/index.js"),
+            bundled_root,
+            packaged_node,
+        });
     }
 
     let resources = app.path().resource_dir().map_err(|error| error.to_string())?;
-    let bundled = resources.join("runtime/dsh-runtime");
-    Ok((
-        resources.join("runtime/runtime-bridge.mjs"),
-        resources.join("runtime/origin.json"),
-        resources.join("runtime/plugin/index.js"),
-        bundled.exists().then_some(bundled),
-    ))
+    let full_root = resources.join("runtime/dsh-runtime");
+    let thin_root = resources.join("runtime/node");
+    let bundled_root = full_root.exists().then_some(full_root);
+    let packaged_node = bundled_root
+        .as_ref()
+        .map(|runtime| node_path(runtime))
+        .filter(|node| node.exists())
+        .or_else(|| {
+            let node = node_path(&thin_root);
+            node.exists().then_some(node)
+        });
+    Ok(RuntimeResources {
+        bridge: resources.join("runtime/runtime-bridge.mjs"),
+        origin: resources.join("runtime/origin.json"),
+        plugin: resources.join("runtime/plugin/index.js"),
+        bundled_root,
+        packaged_node,
+    })
 }
 
 fn set_status(window: &WebviewWindow, message: &str) {
@@ -64,11 +97,11 @@ fn launch_runtime_bridge(
     window: WebviewWindow,
     allowed_origin: AllowedOrigin,
 ) -> Result<RuntimeBridgeProcess, String> {
-    let (bridge, origin, plugin, bundled_root) = bridge_paths(app)?;
-    for required in [&bridge, &origin, &plugin] {
+    let resources = runtime_resources(app)?;
+    for required in [&resources.bridge, &resources.origin, &resources.plugin] {
         if !required.exists() {
             return Err(format!(
-                "Missing Tauri runtime input: {}. Run `pnpm check:tauri-host` first.",
+                "Missing Tauri runtime input: {}. Run `pnpm check:tauri-host` or rebuild the package.",
                 required.display()
             ));
         }
@@ -87,14 +120,21 @@ fn launch_runtime_bridge(
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&user_data).map_err(|error| error.to_string())?;
 
-    let node = env::var("HARNESSDOCK_NODE").unwrap_or_else(|_| "node".to_string());
-    let mut command = Command::new(node);
+    let node = env::var_os("HARNESSDOCK_NODE")
+        .map(PathBuf::from)
+        .or(resources.packaged_node.clone())
+        .unwrap_or_else(|| PathBuf::from("node"));
+    if !cfg!(debug_assertions) && env::var_os("HARNESSDOCK_NODE").is_none() && resources.packaged_node.is_none() {
+        return Err("Packaged Tauri host is missing its bundled Node runtime.".to_string());
+    }
+
+    let mut command = Command::new(&node);
     command
-        .arg(&bridge)
+        .arg(&resources.bridge)
         .arg("--origin")
-        .arg(&origin)
+        .arg(&resources.origin)
         .arg("--plugin")
-        .arg(&plugin)
+        .arg(&resources.plugin)
         .arg("--user-data")
         .arg(&user_data)
         .arg("--state-file")
@@ -104,13 +144,16 @@ fn launch_runtime_bridge(
         .arg(format!("--packaged={}", !cfg!(debug_assertions)))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(root) = bundled_root {
+    if let Some(root) = resources.bundled_root {
         command.arg("--bundled-root").arg(root);
     }
 
-    let child = command
-        .spawn()
-        .map_err(|error| format!("Failed to start Tauri runtime bridge: {error}"))?;
+    let child = command.spawn().map_err(|error| {
+        format!(
+            "Failed to start Tauri runtime bridge with {}: {error}",
+            node.display()
+        )
+    })?;
 
     thread::spawn(move || {
         for _ in 0..480 {

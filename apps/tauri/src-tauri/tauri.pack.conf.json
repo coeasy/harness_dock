@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "active": true,
+    "resources": {
+      "resources/": ""
+    },
+    "icon": [
+      "generated-icons/32x32.png",
+      "generated-icons/128x128.png",
+      "generated-icons/128x128@2x.png",
+      "generated-icons/icon.icns",
+      "generated-icons/icon.ico"
+    ]
+  }
+}
