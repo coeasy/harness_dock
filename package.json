@@ -2,11 +2,9 @@
   "name": "harnessdock",
   "version": "0.2.0",
   "private": true,
-  "description": "DeepSeek Harness full-capability client: embed official Web UI, pin docs+runtime to the same exact version.",
+  "description": "DeepSeek Harness Tauri 2 client for Windows, macOS, Linux, Android and iOS.",
   "type": "module",
-  "engines": {
-    "node": "^22.19.0 || >=24.0.0"
-  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
   "packageManager": "pnpm@10.12.1",
   "scripts": {
     "test": "vitest run",
@@ -21,19 +19,15 @@
     "setup": "node scripts/bootstrap.mjs",
     "sync:dsh": "pnpm --filter @dsh/docs-sync start",
     "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
-    "build:desktop": "node scripts/build.mjs",
-    "pack:desktop": "pnpm --filter @dsh/desktop pack:current",
-    "pack:desktop:full": "pnpm --filter @dsh/desktop pack:current:full",
-    "pack:desktop:win": "pnpm --filter @dsh/desktop pack:win",
-    "pack:desktop:win:full": "pnpm --filter @dsh/desktop pack:win:full",
-    "pack:desktop:mac": "pnpm --filter @dsh/desktop pack:mac",
-    "pack:desktop:mac:full": "pnpm --filter @dsh/desktop pack:mac:full",
-    "pack:desktop:linux": "pnpm --filter @dsh/desktop pack:linux",
-    "pack:desktop:linux:full": "pnpm --filter @dsh/desktop pack:linux:full",
+    "build:tauri": "cargo tauri build --manifest-path apps/tauri/src-tauri/Cargo.toml",
+    "build:android": "cargo tauri android build --manifest-path apps/tauri/src-tauri/Cargo.toml --apk --aab --ci",
+    "build:ios": "cargo tauri ios build --manifest-path apps/tauri/src-tauri/Cargo.toml --ci",
+    "check:tauri": "cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml --all-targets",
     "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
     "parity": "pnpm --filter @dsh/parity-tests test",
     "dev:dsh": "node --import tsx scripts/dev-dsh.mjs",
-    "start:desktop": "pnpm --filter @dsh/desktop start"
+    "legacy:electron:start": "pnpm --filter @dsh/desktop start",
+    "legacy:electron:pack": "pnpm --filter @dsh/desktop pack:current"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
@@ -42,10 +36,5 @@
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "electron"
-    ]
-  }
+  "pnpm": { "onlyBuiltDependencies": ["esbuild", "electron"] }
 }

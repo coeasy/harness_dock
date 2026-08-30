@@ -13,51 +13,28 @@ struct RuntimeState {
 }
 
 #[derive(Serialize)]
-struct PlatformProfile {
-    os: String,
-    arch: String,
-    mobile: bool,
-}
-
+struct PlatformProfile { os: String, arch: String, mobile: bool }
 #[derive(Serialize)]
-struct ProbeResult {
-    ok: bool,
-    message: String,
-}
-
+struct ProbeResult { ok: bool, message: String }
 #[derive(Serialize)]
-struct RuntimeLaunch {
-    pid: u32,
-    web_url: String,
-}
-
+struct RuntimeLaunch { pid: u32, web_url: String }
 #[derive(Serialize)]
-struct GatewaySession {
-    web_url: String,
-}
+struct GatewaySession { web_url: String }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct SavedConnection {
-    gateway_url: String,
-}
+struct SavedConnection { gateway_url: String }
 
-fn is_mobile() -> bool {
-    cfg!(any(target_os = "android", target_os = "ios"))
-}
+fn is_mobile() -> bool { cfg!(any(target_os = "android", target_os = "ios")) }
 
 #[tauri::command]
 fn platform_profile() -> PlatformProfile {
-    PlatformProfile {
-        os: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        mobile: is_mobile(),
-    }
+    PlatformProfile { os: std::env::consts::OS.to_string(), arch: std::env::consts::ARCH.to_string(), mobile: is_mobile() }
 }
 
 fn normalize_https_url(value: &str) -> Result<Url, String> {
     let parsed = Url::parse(value.trim()).map_err(|e| format!("invalid gateway URL: {e}"))?;
     let host = parsed.host_str().ok_or("gateway URL must include a host")?;
-    let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
+    let loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
     if parsed.scheme() != "https" && !(parsed.scheme() == "http" && loopback) {
         return Err("gateway must use HTTPS (HTTP is accepted only for loopback development)".into());
     }
@@ -88,7 +65,7 @@ fn save_connection(app: &AppHandle, gateway_url: &str) -> Result<(), String> {
 #[tauri::command]
 async fn gateway_probe(url: String) -> Result<ProbeResult, String> {
     let base = normalize_https_url(&url)?;
-    let endpoint = base.join("health").unwrap_or(base.clone());
+    let endpoint = base.join("api/harnessdock/health").map_err(|e| e.to_string())?;
     let client = reqwest::Client::builder().timeout(Duration::from_secs(8)).build().map_err(|e| e.to_string())?;
     match client.get(endpoint).send().await {
         Ok(response) => Ok(ProbeResult { ok: response.status().is_success(), message: format!("HTTP {}", response.status()) }),
@@ -99,19 +76,17 @@ async fn gateway_probe(url: String) -> Result<ProbeResult, String> {
 #[tauri::command]
 async fn connect_gateway(app: AppHandle, gateway_url: String, credential: String) -> Result<GatewaySession, String> {
     let base = normalize_https_url(&gateway_url)?;
+    if credential.trim().is_empty() { return Err("pairing code is required".into()); }
+    let endpoint = base.join("api/harnessdock/pair").map_err(|e| e.to_string())?;
     let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
-    let session_endpoint = base.join("api/mobile/session").map_err(|e| e.to_string())?;
-    let mut request = client.post(session_endpoint).json(&serde_json::json!({ "client": "harnessdock-tauri", "version": "0.2.0" }));
-    if !credential.trim().is_empty() {
-        request = request.bearer_auth(credential.trim());
-    }
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("gateway session failed: HTTP {}", response.status()));
-    }
+    let response = client.post(endpoint)
+        .json(&serde_json::json!({ "code": credential.trim(), "deviceName": format!("HarnessDock {}", std::env::consts::OS) }))
+        .send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() { return Err(format!("pairing failed: HTTP {}", response.status())); }
     let payload: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    let web_url = payload.get("webUrl").or_else(|| payload.get("web_url")).and_then(|v| v.as_str()).ok_or("gateway response did not include webUrl")?;
-    let parsed = normalize_https_url(web_url)?;
+    let connect_url = payload.get("connectUrl").and_then(|v| v.as_str()).ok_or("gateway response did not include connectUrl")?;
+    let parsed = normalize_https_url(connect_url)?;
+    if parsed.origin() != base.origin() { return Err("gateway returned a cross-origin connect URL".into()); }
     save_connection(&app, base.as_str())?;
     Ok(GatewaySession { web_url: parsed.to_string() })
 }
@@ -134,7 +109,7 @@ fn write_patch(app: &AppHandle, plugin: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("embedded-client.yml");
     let plugin_url = Url::from_file_path(plugin).map_err(|_| "failed to convert plugin path to file URL")?;
-    let escaped = plugin_url.as_str().replace(''\'', "''");
+    let escaped = plugin_url.as_str().replace('\'', "''");
     fs::write(&path, format!("- insert:\n    - id: embedded-client\n      name: '{escaped}'\n")).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -144,18 +119,19 @@ fn find_loopback_url(line: &str) -> Option<String> {
     for token in line.split_whitespace() {
         let clean = token.trim_matches(|c: char| ")]}>'\"\u{1b},".contains(c));
         if clean.starts_with("http://127.0.0.1:") || clean.starts_with("https://127.0.0.1:") {
-            if Url::parse(clean).ok()?.host_str()? == "127.0.0.1" { return Some(clean.to_string()); }
+            let parsed = Url::parse(clean).ok()?;
+            if parsed.host_str()? == "127.0.0.1" { return Some(clean.to_string()); }
         }
     }
     None
 }
 
 #[tauri::command]
-fn launch_local_runtime(app: AppHandle, state: State<RuntimeState>) -> Result<RuntimeLaunch, String> {
+fn launch_local_runtime(app: AppHandle, state: State<'_, RuntimeState>) -> Result<RuntimeLaunch, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (app, state);
-        return Err("local DSH runtime is intentionally disabled on Android/iOS; connect through Gateway".into());
+        Err("local DSH runtime is intentionally disabled on Android/iOS; connect through Gateway".into())
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -170,9 +146,7 @@ fn launch_local_runtime(app: AppHandle, state: State<RuntimeState>) -> Result<Ru
         let (node, dsh, plugin) = runtime_layout(&resource_dir)?;
         let patch = write_patch(&app, &plugin)?;
         let mut child = Command::new(node)
-            .arg(dsh)
-            .args(["--profile", "web", "--patch"])
-            .arg(patch)
+            .arg(dsh).args(["--profile", "web", "--patch"]).arg(patch)
             .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
             .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
             .spawn().map_err(|e| format!("failed to spawn bundled DSH runtime: {e}"))?;
@@ -200,12 +174,10 @@ fn launch_local_runtime(app: AppHandle, state: State<RuntimeState>) -> Result<Ru
     }
 }
 
-fn run() {
+fn main() {
     tauri::Builder::default()
         .manage(RuntimeState::default())
         .invoke_handler(tauri::generate_handler![platform_profile, load_connection, gateway_probe, connect_gateway, launch_local_runtime])
         .run(tauri::generate_context!())
         .expect("error while running HarnessDock");
 }
-
-fn main() { run(); }
