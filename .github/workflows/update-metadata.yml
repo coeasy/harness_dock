@@ -107,6 +107,9 @@ jobs:
             test -s "artifacts/${channel}-mac.yml" || true
             test -s "artifacts/${channel}-linux.yml" || true
           done
+          [ ! -f artifacts/full.yml ] || test -s artifacts/latest.yml
+          [ ! -f artifacts/full-mac.yml ] || test -s artifacts/latest-mac.yml
+          [ ! -f artifacts/full-linux.yml ] || test -s artifacts/latest-linux.yml
       - name: Upload update metadata and Runtime deltas to the same release
         if: steps.release.outputs.available == 'true'
         shell: bash
@@ -118,7 +121,8 @@ jobs:
           for candidate in \
             artifacts/full.yml artifacts/thin.yml \
             artifacts/full-mac.yml artifacts/thin-mac.yml \
-            artifacts/full-linux.yml artifacts/thin-linux.yml; do
+            artifacts/full-linux.yml artifacts/thin-linux.yml \
+            artifacts/latest.yml artifacts/latest-mac.yml artifacts/latest-linux.yml; do
             [ -f "$candidate" ] && files+=("$candidate")
           done
           while IFS= read -r delta; do
