@@ -36,6 +36,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm test
+      - run: pnpm check:update-core
 
   pack:
     needs: test
