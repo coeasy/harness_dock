@@ -2,7 +2,10 @@ import { app, dialog, Notification, powerMonitor, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import {
   DEFAULT_UPDATE_POLICY,
+  defaultUpdateJournalPath,
+  markHostUpdateInstalling,
   shouldRestartAutomatically,
+  stageHostUpdateRecovery,
   type UpdatePolicy,
 } from '@dsh/bootstrap'
 import { existsSync, readFileSync } from 'node:fs'
@@ -20,6 +23,7 @@ import { fmt, t } from './i18n.ts'
  *  - background downloads (NSIS blockmap differential when available);
  *  - install-on-quit by default;
  *  - optional automatic restart immediately or when the system is idle;
+ *  - a persisted update journal before installation/restart;
  *  - force-run the new app after quitAndInstall so an automatic update really
  *    completes as one transaction from the user's perspective.
  *
@@ -84,6 +88,7 @@ export function initAutoUpdate(): AutoUpdateHandle {
 
   const policy = readUpdatePolicy(process.env)
   const checkIntervalMs = readCheckIntervalMs(process.env)
+  const journalPath = defaultUpdateJournalPath(app.getPath('userData'))
   void bootLog(
     `auto-update enabled (current=${app.getVersion()} feed=${releasesUrl() ?? 'unknown'} download=${policy.download} install=${policy.install} restart=${policy.restart})`,
   )
@@ -122,9 +127,19 @@ export function initAutoUpdate(): AutoUpdateHandle {
     idleRestartTimer = undefined
   }
 
-  const installAndRestart = (version: string, reason: string): void => {
+  const installAndRestart = async (version: string, reason: string): Promise<void> => {
     clearIdleRestart()
-    void bootLog(`auto-update: installing ${version} and restarting (${reason})`)
+    try {
+      await markHostUpdateInstalling(journalPath)
+    } catch (error) {
+      await bootLog(
+        `auto-update: failed to mark install transaction: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      // Do not start a self-replacing update without a recovery breadcrumb.
+      notify(t('update.available.title'), 'Update staging could not be recorded. Please restart HarnessDock and try again.')
+      return
+    }
+    await bootLog(`auto-update: installing ${version} and restarting (${reason})`)
     // before-quit continues through the normal HarnessDock shutdown path, which
     // stops dsh/gateway and releases the Runtime Lease before Electron exits.
     autoUpdater.quitAndInstall(false, true)
@@ -140,7 +155,7 @@ export function initAutoUpdate(): AutoUpdateHandle {
         return
       }
       if (shouldRestartAutomatically(policy, { idleSeconds })) {
-        installAndRestart(version, `idle ${idleSeconds}s`)
+        void installAndRestart(version, `idle ${idleSeconds}s`)
       }
     }
     checkIdle()
@@ -151,32 +166,45 @@ export function initAutoUpdate(): AutoUpdateHandle {
   }
 
   autoUpdater.on('update-downloaded', (info) => {
-    void bootLog(`auto-update: update downloaded (${info.version}), ready to install`)
-    notify(t('update.downloaded.title'), fmt(t('update.downloaded.body'), { version: info.version }))
+    void (async () => {
+      try {
+        await stageHostUpdateRecovery(journalPath, {
+          previousHostVersion: app.getVersion(),
+          targetHostVersion: info.version,
+        })
+        await bootLog(`auto-update: update downloaded (${info.version}), staged for health-checked install`)
+      } catch (error) {
+        await bootLog(
+          `auto-update: cannot stage recovery journal: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        notify(t('update.available.title'), 'The update was downloaded but could not be staged safely. It will not be auto-installed.')
+        autoUpdater.autoInstallOnAppQuit = false
+        return
+      }
 
-    if (policy.restart === 'immediate') {
-      installAndRestart(info.version, 'policy=immediate')
-      return
-    }
-    if (policy.restart === 'idle') {
-      scheduleIdleRestart(info.version)
-      return
-    }
+      notify(t('update.downloaded.title'), fmt(t('update.downloaded.body'), { version: info.version }))
+      if (policy.restart === 'immediate') {
+        await installAndRestart(info.version, 'policy=immediate')
+        return
+      }
+      if (policy.restart === 'idle') {
+        scheduleIdleRestart(info.version)
+        return
+      }
 
-    void dialog
-      .showMessageBox({
-        type: 'info',
-        title: t('common.appTitle'),
-        message: fmt(t('update.restart.title'), { version: info.version }),
-        detail: t('update.restart.detail'),
-        buttons: [t('update.restart.now'), t('update.restart.later')],
-        defaultId: 0,
-        cancelId: 1,
-      })
-      .then(({ response }) => {
-        if (response === 0) installAndRestart(info.version, 'user-confirmed')
-      })
-      .catch(() => undefined)
+      const { response } = await dialog
+        .showMessageBox({
+          type: 'info',
+          title: t('common.appTitle'),
+          message: fmt(t('update.restart.title'), { version: info.version }),
+          detail: t('update.restart.detail'),
+          buttons: [t('update.restart.now'), t('update.restart.later')],
+          defaultId: 0,
+          cancelId: 1,
+        })
+        .catch(() => ({ response: 1 }))
+      if (response === 0) await installAndRestart(info.version, 'user-confirmed')
+    })()
   })
 
   let checking = false
@@ -209,14 +237,15 @@ function readUpdatePolicy(env: NodeJS.ProcessEnv): UpdatePolicy {
   const restart = env.HARNESSDOCK_UPDATE_RESTART
   const normalizedRestart: UpdatePolicy['restart'] =
     restart === 'immediate' || restart === 'idle' || restart === 'prompt' ? restart : DEFAULT_UPDATE_POLICY.restart
+  const install = env.HARNESSDOCK_UPDATE_INSTALL
+  const normalizedInstall: UpdatePolicy['install'] =
+    install === 'immediate' || install === 'idle' ? install : DEFAULT_UPDATE_POLICY.install
   const idleRaw = Number.parseInt(env.HARNESSDOCK_UPDATE_IDLE_SECONDS ?? '', 10)
   const idleSeconds = Number.isInteger(idleRaw) && idleRaw >= 30 ? idleRaw : DEFAULT_UPDATE_POLICY.idleSeconds
   return {
     ...DEFAULT_UPDATE_POLICY,
     download: env.HARNESSDOCK_UPDATE_AUTO_DOWNLOAD === '0' ? 'manual' : 'automatic',
-    install: env.HARNESSDOCK_UPDATE_INSTALL === 'immediate' || env.HARNESSDOCK_UPDATE_INSTALL === 'idle'
-      ? env.HARNESSDOCK_UPDATE_INSTALL
-      : DEFAULT_UPDATE_POLICY.install,
+    install: normalizedInstall,
     restart: normalizedRestart,
     idleSeconds,
   }
