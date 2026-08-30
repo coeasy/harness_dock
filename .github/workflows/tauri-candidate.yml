@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
+      - integrate/tauri-v0.2.0
       - refactor/tauri-v0.2.0
     paths:
       - 'apps/tauri/**'
@@ -11,7 +13,11 @@ on:
       - 'packages/client-runtime/**'
       - 'packages/plugin-embedded-client/**'
       - 'packages/docs-sync/origin.json'
+      - 'tests/parity/**'
       - 'scripts/check-versions.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/release-notes/v0.2.0.md'
       - '.github/workflows/tauri-candidate.yml'
 
 concurrency:
@@ -110,7 +116,7 @@ jobs:
           path: |
             upstream/dist/dsh/*.tgz
             upstream/dist/vendor/*.tgz
-          retention-days: 3
+          retention-days: 7
           if-no-files-found: error
           compression-level: 0
 
@@ -183,7 +189,7 @@ jobs:
         with:
           name: tauri-runtime-${{ matrix.artifact }}
           path: runtime-prepared
-          retention-days: 3
+          retention-days: 7
           if-no-files-found: error
           compression-level: 0
           include-hidden-files: true
@@ -262,7 +268,7 @@ jobs:
         with:
           name: tauri-desktop-${{ matrix.artifact }}
           path: apps/tauri/src-tauri/target/release/bundle/**
-          retention-days: 3
+          retention-days: 7
           if-no-files-found: error
           compression-level: 0
 
@@ -319,7 +325,7 @@ jobs:
         with:
           name: tauri-android-arm64-candidate
           path: apps/tauri/src-tauri/gen/android/app/build/outputs/**
-          retention-days: 3
+          retention-days: 7
           if-no-files-found: error
           compression-level: 0
 
@@ -352,18 +358,23 @@ jobs:
       - name: Build iOS simulator candidate
         working-directory: apps/tauri
         run: cargo tauri ios build --debug --target aarch64-sim --ci
-      - name: Validate iOS native output
+      - name: Package and validate iOS simulator candidate
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(find apps/tauri/src-tauri/gen/apple -type d -name '*.app' -print -quit)"
+          app="$(find apps/tauri/src-tauri/gen/apple -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          version="$(node -p "require('./package.json').version")"
+          mkdir -p mobile-artifacts
+          ditto -c -k --sequesterRsrc --keepParent "$app" "mobile-artifacts/HarnessDock-${version}-ios-arm64-simulator.zip"
+          test -s "mobile-artifacts/HarnessDock-${version}-ios-arm64-simulator.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: tauri-ios-simulator-candidate
           path: |
-            apps/tauri/src-tauri/gen/apple/build/**
+            mobile-artifacts/*.zip
             apps/tauri/src-tauri/gen/apple/*.xcodeproj/**
-          retention-days: 3
+          retention-days: 7
           if-no-files-found: error
           compression-level: 0
 
