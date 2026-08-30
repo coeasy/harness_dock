@@ -15,28 +15,61 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: fix/v0.1.1-runtime-cache-hardening
-      - name: Apply runtime composition hardening
+      - name: Stage permanent runtime hardening
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
+          release = Path('.github/workflows/release.yml')
+          text = release.read_text()
+          text = text.replace(
+              'or $target == (.target_os + "-thin") or $target == (.target_os + "-full")',
+              'or $target == (.target_os + "-full")',
+              1,
+          )
+
+          lines = text.splitlines()
+          out = []
+          skip_restore_value = False
+          for line in lines:
+              if skip_restore_value:
+                  if line.startswith('            dsh-runtime-'):
+                      skip_restore_value = False
+                      continue
+                  skip_restore_value = False
+              if 'key: dsh-runtime-' in line and 'hashFiles(' in line:
+                  line = re.sub(
+                      r"hashFiles\([^\n]+\)",
+                      "hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**/*.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml')",
+                      line,
+                  )
+              if line.strip() == 'restore-keys: |':
+                  skip_restore_value = True
+                  continue
+              out.append(line)
+          hardened_release = '\n'.join(out) + '\n'
+          Path('tmp').mkdir(exist_ok=True)
+          Path('tmp/release-hardened.yml').write_text(hardened_release)
 
           prepare = Path('packages/client-runtime/src/prepare-cli.ts')
           text = prepare.read_text()
-          if 'const RUNTIME_LAYOUT_VERSION = 2' not in text:
-              raise SystemExit('runtime layout version pattern not found')
-          text = text.replace('const RUNTIME_LAYOUT_VERSION = 2', 'const RUNTIME_LAYOUT_VERSION = 3', 1)
+          if 'const RUNTIME_LAYOUT_VERSION = 2' in text:
+              text = text.replace('const RUNTIME_LAYOUT_VERSION = 2', 'const RUNTIME_LAYOUT_VERSION = 3', 1)
           marker = "      '--include=optional',"
-          if marker not in text:
-              raise SystemExit('target-native optional marker not found')
-          text = text.replace(marker, "      '--omit=optional',", 1)
+          if marker in text:
+              text = text.replace(marker, "      '--omit=optional',", 1)
           prepare.write_text(text)
           PY
 
           git diff --check
-          git diff -- packages/client-runtime/src/prepare-cli.ts
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add packages/client-runtime/src/prepare-cli.ts
-          git commit -m "fix: keep target-native repair optional-free"
+          git add packages/client-runtime/src/prepare-cli.ts tmp/release-hardened.yml
+          if git diff --cached --quiet; then
+            echo "runtime hardening already staged"
+            exit 0
+          fi
+          git commit -m "fix: stage runtime cache hardening"
           git push origin HEAD:fix/v0.1.1-runtime-cache-hardening
