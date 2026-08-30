@@ -6,6 +6,7 @@ on:
       - 'packages/docs-sync/origin.json'
       - 'packages/client-runtime/**'
       - 'packages/plugin-embedded-client/**'
+      - 'scripts/select-runtime-packs.mjs'
       - '.github/workflows/upstream-compat.yml'
       - '.github/workflows/release.yml'
   workflow_dispatch:
@@ -79,11 +80,13 @@ jobs:
           npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
           npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
           npx --yes pnpm@11.7.0 exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+      - name: Select required dsh runtime packs
+        run: node scripts/select-runtime-packs.mjs --source upstream/dist/dsh --source upstream/dist/vendor --out upstream/dist/runtime
 
-      - name: Prepare Linux runtime from official source packs
+      - name: Prepare Linux runtime from selected official source packs
         run: pnpm --filter @dsh/client-runtime bundle-runtime
         env:
-          DSH_PACKED_RUNTIME_DIR: upstream/dist
+          DSH_PACKED_RUNTIME_DIR: upstream/dist/runtime
           DSH_RUNTIME_PLATFORM: linux
           DSH_RUNTIME_ARCH: x64
           DSH_RUNTIME_DIR: runtimes/compat-linux-x64
