@@ -17,7 +17,7 @@ jobs:
   publish-update-metadata:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Resolve published version release
+      - name: Resolve published and previous release
         id: release
         shell: bash
         env:
@@ -39,9 +39,15 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > /tmp/releases.json
+          previous=$(jq -r --arg current "$tag" \
+            '[.[] | select(.draft == false and .tag_name != $current)] | sort_by(.published_at) | reverse | .[0].tag_name // ""' \
+            /tmp/releases.json)
           echo "available=true" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$previous" >> "$GITHUB_OUTPUT"
+          echo "Current release: $tag; previous release: ${previous:-none}"
       - name: Download immutable release assets
         if: steps.release.outputs.available == 'true'
         shell: bash
@@ -49,9 +55,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -rf artifacts
-          mkdir -p artifacts
+          rm -rf artifacts previous-runtime
+          mkdir -p artifacts previous-runtime
           gh release download "${{ steps.release.outputs.tag }}" --dir artifacts
+          previous='${{ steps.release.outputs.previous_tag }}'
+          if [ -n "$previous" ]; then
+            gh release download "$previous" --dir previous-runtime --pattern 'HarnessDock-runtime-*.tar.gz' || true
+          fi
+      - name: Generate beneficial Runtime overlay deltas
+        if: steps.release.outputs.available == 'true' && steps.release.outputs.previous_tag != ''
+        run: >-
+          node scripts/generate-runtime-deltas.mjs
+          --current-dir artifacts
+          --previous-dir previous-runtime
+          --out-dir artifacts
+          --max-ratio 0.75
+      - name: Generate Full/Thin Electron channel metadata
+        if: steps.release.outputs.available == 'true'
+        run: >-
+          node scripts/generate-electron-update-metadata.mjs
+          --dir artifacts
+          --version "${{ steps.release.outputs.version }}"
       - name: Generate host/runtime release manifest
         if: steps.release.outputs.available == 'true'
         run: >-
@@ -61,25 +85,29 @@ jobs:
           --tag "${{ steps.release.outputs.tag }}"
           --repository "${{ github.repository }}"
           --host electron
-      - name: Generate Full/Thin Electron channel metadata
-        if: steps.release.outputs.available == 'true'
-        run: >-
-          node scripts/generate-electron-update-metadata.mjs
-          --dir artifacts
-          --version "${{ steps.release.outputs.version }}"
       - name: Validate generated metadata
         if: steps.release.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          node -e "const m=require('./artifacts/release-manifest.json'); if(m.schemaVersion!==2||!m.artifacts.length) process.exit(1)"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const manifest = JSON.parse(readFileSync('./artifacts/release-manifest.json', 'utf8'))
+          if (manifest.schemaVersion !== 2 || !Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) process.exit(1)
+          for (const artifact of manifest.artifacts) {
+            if (!/^[a-f0-9]{64}$/i.test(artifact.sha256)) throw new Error(`invalid sha256: ${artifact.assetName}`)
+            for (const delta of artifact.deltas ?? []) {
+              if (delta.size >= artifact.size) throw new Error(`non-beneficial delta published: ${delta.assetName}`)
+            }
+          }
+          NODE
           test -s artifacts/release-manifest.sha256
           for channel in full thin; do
             test -s "artifacts/${channel}.yml" || true
             test -s "artifacts/${channel}-mac.yml" || true
             test -s "artifacts/${channel}-linux.yml" || true
           done
-      - name: Upload update metadata to the same release
+      - name: Upload update metadata and Runtime deltas to the same release
         if: steps.release.outputs.available == 'true'
         shell: bash
         env:
@@ -87,7 +115,13 @@ jobs:
         run: |
           set -euo pipefail
           files=(artifacts/release-manifest.json artifacts/release-manifest.sha256)
-          for pattern in artifacts/full.yml artifacts/thin.yml artifacts/full-mac.yml artifacts/thin-mac.yml artifacts/full-linux.yml artifacts/thin-linux.yml; do
-            [ -f "$pattern" ] && files+=("$pattern")
+          for candidate in \
+            artifacts/full.yml artifacts/thin.yml \
+            artifacts/full-mac.yml artifacts/thin-mac.yml \
+            artifacts/full-linux.yml artifacts/thin-linux.yml; do
+            [ -f "$candidate" ] && files+=("$candidate")
           done
+          while IFS= read -r delta; do
+            files+=("$delta")
+          done < <(find artifacts -maxdepth 1 -type f -name 'HarnessDock-runtime-delta-*.tar.gz' -print | sort)
           gh release upload "${{ steps.release.outputs.tag }}" "${files[@]}" --clobber
