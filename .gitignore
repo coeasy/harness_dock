@@ -8,6 +8,8 @@ Thumbs.db
 .cache/
 coverage/
 apps/desktop/release/
+apps/perry/release/
+apps/perry/.perry/
 apps/vscode/resources/
 runtimes/
 .tmp/

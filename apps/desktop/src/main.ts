@@ -6,6 +6,7 @@ import { bootFlow } from './boot/boot-flow.ts'
 import { beginShutdown } from './shutdown.ts'
 import { registerSplashIpc, showSplashError } from './splash.ts'
 import { registerDiagnosticsIpc } from './diagnostics/diagnostics-ipc.ts'
+import { registerMobileIpc } from './mobile/mobile-ipc.ts'
 import { fmt, t } from './i18n.ts'
 import { bundledRoot, originPath, pluginPath } from './paths.ts'
 
@@ -51,10 +52,11 @@ if (process.platform === 'win32') {
   }
 }
 
-// Splash + diagnostics windows are sandboxed data: URLs; their preload bridges
-// reach back through these IPC channels, so they must be registered up front.
+// Helper windows are sandboxed data: URLs; their preload bridges reach back
+// through these IPC channels, so they must be registered up front.
 registerSplashIpc()
 registerDiagnosticsIpc()
+registerMobileIpc()
 
 /** Restart the whole app (used by boot-failure retry). */
 function relaunchApp(): void {

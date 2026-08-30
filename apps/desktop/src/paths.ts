@@ -8,9 +8,10 @@ const repoRoot = path.resolve(here, '../../..')
 // bundle 脚本把 preload 编译到 dist/（.cjs：沙箱 preload 用 CJS，且包是 type:module）；
 // main.js 被 esbuild 输出到 dist/，因此 import.meta.url 的目录就是 dist/。
 export const preloadPath = path.join(here, 'preload.cjs')
-// splash / diagnostics 窗口使用各自独立的 preload（同样经 bundle 脚本编译到 dist/）
+// splash / diagnostics / mobile 管理窗口使用各自独立 preload。
 export const splashPreloadPath = path.join(here, 'splash-preload.cjs')
 export const diagnosticsPreloadPath = path.join(here, 'diagnostics-preload.cjs')
+export const mobilePreloadPath = path.join(here, 'mobile-preload.cjs')
 
 export function pluginPath(): string {
   if (app.isPackaged) {
