@@ -1,0 +1,61 @@
+name: verify-v011-mac-arm64-runtime
+
+on:
+  push:
+    branches:
+      - fix/v0.1.1-source-pack-ignore-scripts
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: verify-v011-mac-arm64-runtime
+  cancel-in-progress: true
+
+jobs:
+  mac-arm64-full:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Download official upstream pack family from Release 38
+        uses: actions/download-artifact@v8
+        with:
+          name: upstream-dsh-packed
+          path: upstream-packed
+          repository: coeasy/harness_dock
+          run-id: 33285906988
+          github-token: ${{ github.token }}
+      - name: Prepare fresh macOS arm64 runtime
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_PACKED_RUNTIME_DIR: upstream-packed
+          DSH_RUNTIME_PLATFORM: darwin
+          DSH_RUNTIME_ARCH: arm64
+          DSH_RUNTIME_DIR: runtimes/verify-arm64
+      - name: Verify Koffi under bundled Node 22
+        run: |
+          runtimes/verify-arm64/bin/node -e "require(require('node:path').resolve('runtimes/verify-arm64/node_modules/koffi')); console.log('[verify] koffi loaded with bundled node')"
+      - name: Build macOS arm64 Full package
+        run: node apps/desktop/scripts/pack.mjs --os mac --scenario full --arch arm64
+        env:
+          GH_OWNER: coeasy
+          GH_REPO: harness_dock
+          DSH_SKIP_RUNTIME_PREPARE: '1'
+          DSH_RUNTIME_DIR: runtimes/verify-arm64
+      - name: Smoke packaged runtime
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/dsh-runtime --plugin apps/desktop/release/full/mac-arm64/HarnessDock.app/Contents/Resources/plugin-embedded-client/index.js
+      - name: Enforce existing size budget
+        run: pnpm check:size
