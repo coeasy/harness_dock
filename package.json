@@ -17,6 +17,8 @@
     "check:perry-host": "tsc -p apps/perry/tsconfig.json --noEmit",
     "check:mobile-host": "tsc -p apps/mobile/tsconfig.json --noEmit",
     "generate:release-manifest": "node scripts/generate-release-manifest.mjs",
+    "generate:electron-update-metadata": "node scripts/generate-electron-update-metadata.mjs",
+    "version:set": "node scripts/set-version.mjs",
     "perf:report": "node scripts/perf-report.mjs",
     "mark:released": "node scripts/mark-released.mjs",
     "e2e": "pnpm --filter ./tests/e2e test",
