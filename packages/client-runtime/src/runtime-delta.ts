@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream, type Dirent } from 'node:fs'
 import {
   cp,
   lstat,
@@ -149,9 +149,9 @@ export async function applyRuntimeOverlay(input: {
     await rm(resolveInside(input.stagingDir, relative), { recursive: true, force: true })
   }
 
-  let overlayEntries: Awaited<ReturnType<typeof readdir>> = []
+  let overlayEntries: Dirent<string>[] = []
   try {
-    overlayEntries = await readdir(input.overlayDir, { withFileTypes: true })
+    overlayEntries = await readdir(input.overlayDir, { withFileTypes: true, encoding: 'utf8' })
   } catch (error) {
     const code = (error as NodeJS.ErrnoException | undefined)?.code
     if (code === 'ENOENT') return
