@@ -28,6 +28,7 @@ if (!cargo.includes(`tauri = { version = "=${versions.tauriCore}"`)) {
 for (const required of [
   path.join(appRoot, 'bridge', 'main.ts'),
   path.join(appRoot, 'frontend', 'index.html'),
+  path.join(appRoot, 'src-tauri', 'icons', 'icon.png'),
   path.join(repoRoot, 'packages', 'docs-sync', 'origin.json'),
   path.join(repoRoot, 'packages', 'plugin-embedded-client', 'lib', 'index.js'),
 ]) {
