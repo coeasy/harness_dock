@@ -41,7 +41,14 @@ export interface RuntimeDeltaManifest {
 
 export async function installRuntimeDelta(input: {
   spec: RuntimeDeltaSpec
+  /** Destination Runtime directory for the target version. */
   runtimeDir: string
+  /**
+   * Existing healthy base Runtime. When omitted, runtimeDir is also the base
+   * (legacy in-place mode). Managed auto-updates pass a separate versioned base
+   * so the running Runtime is never replaced while it is in use.
+   */
+  baseRuntimeDir?: string
   targetVersion: string
   platform?: NodeJS.Platform
   arch?: string
@@ -49,6 +56,7 @@ export async function installRuntimeDelta(input: {
 }): Promise<void> {
   const platform = input.platform ?? process.platform
   const arch = input.arch ?? process.arch
+  const baseRuntimeDir = input.baseRuntimeDir ?? input.runtimeDir
   const nonce = `${process.pid}-${Date.now()}`
   const archive = `${input.runtimeDir}.delta-download-${nonce}.tar.gz`
   const deltaDir = `${input.runtimeDir}.delta-${nonce}`
@@ -76,20 +84,20 @@ export async function installRuntimeDelta(input: {
       )
     }
 
-    const installedVersion = bundledRuntimeVersion(input.runtimeDir)
+    const installedVersion = bundledRuntimeVersion(baseRuntimeDir)
     if (installedVersion !== manifest.fromVersion) {
       throw new Error(
         `runtime delta base version ${installedVersion ?? 'unknown'} != required ${manifest.fromVersion}`,
       )
     }
-    const baseDigest = await runtimeTreeDigest(input.runtimeDir)
+    const baseDigest = await runtimeTreeDigest(baseRuntimeDir)
     if (baseDigest !== manifest.fromTreeSha256) {
       throw new Error(
         `runtime delta base tree ${baseDigest} != required ${manifest.fromTreeSha256}`,
       )
     }
 
-    await cp(input.runtimeDir, stagingDir, {
+    await cp(baseRuntimeDir, stagingDir, {
       recursive: true,
       force: true,
       dereference: false,
