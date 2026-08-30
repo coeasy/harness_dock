@@ -65,7 +65,7 @@ jobs:
             {"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"arm64","runtime_dir":"runtimes/pack-arm64"}
           ]'
           build_matrix=$(printf '%s' "$build_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-" + .scenario))]')
-          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-full"))]')
+          runtime_matrix=$(printf '%s' "$runtime_rows" | jq -c --arg target "$RELEASE_TARGET" '[.[] | select($target == "all" or $target == .target_os or $target == (.target_os + "-thin") or $target == (.target_os + "-full"))]')
           if [ "$(printf '%s' "$runtime_matrix" | jq 'length')" -eq 0 ]; then
             runtime_matrix='[{"enabled":false,"runner":"ubuntu-latest","artifact_os":"none","target_os":"none","platform":"linux","arch":"x64","runtime_dir":"runtimes/unused"}]'
           fi

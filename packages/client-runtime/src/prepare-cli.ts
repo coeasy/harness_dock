@@ -100,7 +100,7 @@ async function installTargetNativePackages(): Promise<void> {
       '--no-save',
       '--force',
       '--omit=dev',
-      '--omit=optional',
+      '--include=optional',
       '--ignore-scripts',
       '--no-fund',
       '--no-audit',
@@ -348,7 +348,7 @@ if (packedRuntimeDir) {
         [
           'install',
           '--omit=dev',
-          '--omit=optional',
+          '--include=optional',
           '--no-fund',
           '--no-audit',
           `--os=${platform}`,
