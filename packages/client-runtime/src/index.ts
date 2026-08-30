@@ -8,6 +8,8 @@ export { bundledRuntimeVersion, inspectBundledRuntime, NODE_BUNDLE_VERSION, runt
 export { scrubElectronEnv } from './env.ts'
 export { buildSpawnRequest, isWindowsScriptCommand, quoteForCmd } from './shell.ts'
 export { DshRuntime } from './runtime.ts'
+export { installRuntimeBundle, runtimeBundleKey } from './runtime-bundle.ts'
+export type { RuntimeBundleSpec } from './runtime-bundle.ts'
 export {
   assertBundledRuntimeIntegrity,
   repairKnownRuntimeAssets,
