@@ -12,6 +12,7 @@ apps/perry/release/
 apps/perry/.perry/
 apps/tauri/dist/
 apps/tauri/src-tauri/target/
+apps/tauri/src-tauri/icons/icon.ico
 apps/vscode/resources/
 runtimes/
 .tmp/
