@@ -6,6 +6,8 @@ import { suggestedDownloadPath } from '../downloads.ts'
 import { closeSplash } from '../splash.ts'
 import { fmt, t } from '../i18n.ts'
 import { appIconPath, preloadPath } from '../paths.ts'
+import { createElectronSessionRecoveryService } from '../electron-services.ts'
+import { recoveryRouteFromUrl, recoveryUrlForRoute } from '../client-session-route.ts'
 import {
   isBoundsOnScreen,
   readWindowStateSync,
@@ -86,6 +88,39 @@ export async function createWindow(url: string): Promise<void> {
       event.preventDefault()
     }
   })
+
+  const recovery = createElectronSessionRecoveryService()
+  let recoveryArmed = false
+  let recoveryTimer: NodeJS.Timeout | undefined
+  const persistRecovery = (): void => {
+    if (!recoveryArmed || mainWindow.isDestroyed()) return
+    const route = recoveryRouteFromUrl(mainWindow.webContents.getURL(), allowedOrigin)
+    if (!route) return
+    void recovery
+      .save({
+        schemaVersion: 1,
+        route,
+        runtimeVersion: appState.dshVersion,
+        savedAt: new Date().toISOString(),
+      })
+      .catch((error) => {
+        void bootLog(
+          `session recovery save failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      })
+  }
+  const scheduleRecovery = (): void => {
+    if (!recoveryArmed) return
+    if (recoveryTimer) clearTimeout(recoveryTimer)
+    recoveryTimer = setTimeout(persistRecovery, 250)
+    recoveryTimer.unref()
+  }
+  mainWindow.webContents.on('did-navigate', scheduleRecovery)
+  mainWindow.webContents.on('did-navigate-in-page', scheduleRecovery)
+  mainWindow.on('closed', () => {
+    if (recoveryTimer) clearTimeout(recoveryTimer)
+  })
+
   mainWindow.webContents.session.on('will-download', (_event, item) => {
     const dest = suggestedDownloadPath(app.getPath('downloads'), item.getFilename())
     item.setSavePath(dest)
@@ -112,10 +147,36 @@ export async function createWindow(url: string): Promise<void> {
       `renderer: console level=${level} source=${redactWebAuthTokens(sourceId)}:${line} ${redactWebAuthTokens(detail)}`,
     )
   })
-  // Keep the dsh 0.1.2+ launch token intact for the first navigation. The
-  // server exchanges it for an HttpOnly authority-bound cookie and redirects
-  // to the clean root URL; all persistent logs above redact the token.
+  // Keep the dsh launch token intact for the first navigation. The server
+  // exchanges it for an HttpOnly authority-bound cookie and redirects to the
+  // clean root URL. Recovery is deliberately disabled during this navigation
+  // so that the temporary root cannot overwrite the previous session route.
   await mainWindow.loadURL(url)
+
+  let savedRoute: string | undefined
+  try {
+    savedRoute = (await recovery.load())?.route
+  } catch (error) {
+    await bootLog(
+      `session recovery load failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  const restoreUrl = savedRoute ? recoveryUrlForRoute(savedRoute, allowedOrigin) : null
+  const currentRoute = recoveryRouteFromUrl(mainWindow.webContents.getURL(), allowedOrigin)
+  if (restoreUrl && savedRoute !== currentRoute) {
+    try {
+      await mainWindow.loadURL(restoreUrl)
+      await bootLog(`session recovery restored route: ${savedRoute}`)
+    } catch (error) {
+      await bootLog(
+        `session recovery navigation failed; returning to root: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      await mainWindow.loadURL(`${allowedOrigin}/`).catch(() => undefined)
+    }
+  }
+
+  recoveryArmed = true
+  persistRecovery()
   installRendererRecovery(mainWindow)
 }
 
