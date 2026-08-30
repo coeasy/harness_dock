@@ -21,7 +21,7 @@ describe('network proxy policy', () => {
     })
     expect(
       normalizeNetworkProxyPolicy({ mode: 'socks5', endpoint: 'socks5://127.0.0.1:1080' }),
-    ).toEqual({ mode: 'socks5', endpoint: 'socks5://127.0.0.1:1080/' })
+    ).toEqual({ mode: 'socks5', endpoint: 'socks5://127.0.0.1:1080' })
   })
 
   it('never accepts proxy credentials or ambiguous endpoint paths', () => {

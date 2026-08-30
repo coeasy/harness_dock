@@ -52,7 +52,14 @@ export function normalizeNetworkProxyPolicy(input: NetworkProxyPolicy): NetworkP
   if (endpoint.username || endpoint.password) {
     throw new InvalidNetworkProxyPolicyError('Proxy credentials must not be stored in network policy')
   }
-  if (!endpoint.hostname || endpoint.pathname !== '/' || endpoint.search || endpoint.hash) {
+  // WHATWG URL treats http(s) as special schemes (pathname "/") while
+  // socks5 is non-special (pathname ""). Both forms mean "no endpoint path".
+  if (
+    !endpoint.hostname ||
+    (endpoint.pathname !== '' && endpoint.pathname !== '/') ||
+    endpoint.search ||
+    endpoint.hash
+  ) {
     throw new InvalidNetworkProxyPolicyError('Proxy endpoint must contain only scheme, host and optional port')
   }
   if (endpoint.port) {
