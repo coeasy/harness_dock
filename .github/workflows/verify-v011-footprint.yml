@@ -34,10 +34,12 @@ jobs:
           repository: coeasy/harness_dock
           run-id: 33282687034
           github-token: ${{ github.token }}
+      - name: Select required dsh runtime packs
+        run: node scripts/select-runtime-packs.mjs --source upstream-packed --out upstream-runtime-packed
       - name: Build optimized Linux runtime
         run: pnpm --filter @dsh/client-runtime exec node --import tsx src/prepare-cli.ts --force --runtime-dir runtimes/verify-linux --platform linux --arch x64
         env:
-          DSH_PACKED_RUNTIME_DIR: upstream-packed
+          DSH_PACKED_RUNTIME_DIR: upstream-runtime-packed
       - name: Report runtime footprint
         shell: bash
         run: |
