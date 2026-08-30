@@ -20,28 +20,60 @@
       <div class="card-heading">
         <div>
           <h2>本地 Runtime</h2>
-          <p>桌面端直接启动随应用打包的 DeepSeek Harness Runtime。</p>
+          <p>桌面端托管完整 DeepSeek Harness Runtime；Harness 在独立、无 Tauri IPC 权限的 WebView 中运行。</p>
         </div>
         <span id="runtime-state" class="badge">stopped</span>
       </div>
       <div class="actions">
-        <button id="runtime-start" class="primary">启动并进入 Harness</button>
+        <button id="runtime-start" class="primary">启动并打开 Harness</button>
+        <button id="runtime-open" class="secondary">打开 Harness</button>
         <button id="runtime-stop" class="secondary">停止 Runtime</button>
       </div>
       <p id="runtime-detail" class="status"></p>
     </section>
 
-    <section class="card">
+    <section id="gateway-host-card" class="card hidden">
       <div class="card-heading">
         <div>
-          <h2>移动端 / Remote Gateway</h2>
-          <p>Android 与 iOS 通过 HTTPS Gateway 配对，不在手机内执行桌面 Node Runtime。</p>
+          <h2>Mobile Gateway</h2>
+          <p>Gateway 只监听本机回环地址。真机远程访问请把固定端口通过可信 HTTPS Tunnel / Reverse Proxy 暴露，并填写对应公开 Origin。</p>
+        </div>
+        <span id="gateway-host-state" class="badge">stopped</span>
+      </div>
+      <label>
+        公开 HTTPS Origin（真机远程访问时填写）
+        <input id="gateway-public-url" type="url" autocomplete="url" placeholder="https://dock.example.com" />
+      </label>
+      <label>
+        本地 Gateway 端口
+        <input id="gateway-local-port" type="number" min="1" max="65535" value="43137" />
+      </label>
+      <div class="actions">
+        <button id="gateway-host-start" class="primary">启动 Gateway</button>
+        <button id="gateway-host-refresh" class="secondary">刷新</button>
+        <button id="gateway-host-stop" class="secondary">停止 Gateway</button>
+      </div>
+      <p id="gateway-host-detail" class="status"></p>
+      <div class="divider"></div>
+      <div class="actions">
+        <button id="gateway-create-pairing" class="primary">生成一次性配对码</button>
+        <button id="gateway-revoke-all" class="danger">撤销全部设备</button>
+      </div>
+      <div id="host-pairing" class="pairing"></div>
+      <div id="gateway-devices" class="devices"></div>
+    </section>
+
+    <section id="mobile-remote-card" class="card hidden">
+      <div class="card-heading">
+        <div>
+          <h2>连接 Remote Gateway</h2>
+          <p>Android 与 iOS 不在设备内执行桌面 Node Runtime，只通过 HTTPS Gateway 建立安全会话。</p>
         </div>
         <span id="gateway-state" class="badge">offline</span>
       </div>
       <label>
         Gateway 地址
-        <input id="gateway-url" type="url" autocomplete="url" placeholder="https://harness.example.com" />
+        <input id="gateway-url" type="url" autocomplete="url" placeholder="https://dock.example.com" />
       </label>
       <label>
         设备名称
@@ -58,7 +90,7 @@
       <p id="gateway-detail" class="status"></p>
     </section>
 
-    <footer>HarnessDock v0.2.0 · Tauri Desktop / Android / iOS</footer>
+    <footer>HarnessDock v0.2.0 · Tauri Windows / macOS / Linux / Android / iOS</footer>
   </main>
   <script src="./app.js" defer></script>
 </body>

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-main",
-  "description": "Local bundled HarnessDock launcher capability. No remote URL is granted Tauri IPC access.",
+  "description": "Local bundled HarnessDock control capability. Remote Harness/Gateway documents never receive Tauri IPC permissions.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,7 @@
     "gateway-health",
     "gateway-pair",
     "gateway-host",
+    "harness-window",
     "runtime-status",
     "runtime-start",
     "runtime-stop"

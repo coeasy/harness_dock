@@ -9,6 +9,8 @@ fn main() {
         "gateway_host_revoke",
         "gateway_host_revoke_all",
         "gateway_host_stop",
+        "harness_open",
+        "harness_close",
         "runtime_status",
         "runtime_start",
         "runtime_stop",

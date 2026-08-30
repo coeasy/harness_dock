@@ -19,6 +19,11 @@ description = "Allows the local desktop control window to manage its owned Mobil
 commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_create_pairing", "gateway_host_revoke", "gateway_host_revoke_all", "gateway_host_stop"]
 
 [[permission]]
+identifier = "harness-window"
+description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
+commands.allow = ["harness_open", "harness_close"]
+
+[[permission]]
 identifier = "runtime-status"
 description = "Allows the bundled desktop launcher to read local Runtime state."
 commands.allow = ["runtime_status"]

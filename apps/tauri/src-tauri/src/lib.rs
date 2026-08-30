@@ -1,5 +1,6 @@
 mod gateway;
 mod gateway_host;
+mod harness_window;
 mod platform;
 mod runtime;
 
@@ -26,6 +27,8 @@ pub fn run() {
             gateway_host::gateway_host_revoke,
             gateway_host::gateway_host_revoke_all,
             gateway_host::gateway_host_stop,
+            harness_window::harness_open,
+            harness_window::harness_close,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,
