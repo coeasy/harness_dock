@@ -48,8 +48,12 @@ jobs:
           set -euo pipefail
           test -s packages/plugin-embedded-client/lib/index.js
           test -s /tmp/harnessdock-gateway-sidecar.mjs
-          test "$(node -p "require('./package.json').version")" = "0.2.0"
-          test "$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")" = "0.2.0"
+          root_version="$(node -p "require('./package.json').version")"
+          tauri_version="$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")"
+          test "$tauri_version" = "$root_version" || {
+            echo "Tauri version mismatch: root=$root_version tauri=$tauri_version" >&2
+            exit 1
+          }
 
   pack-upstream:
     needs: validate
@@ -157,12 +161,24 @@ jobs:
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
           DSH_RUNTIME_ARCH: ${{ matrix.arch }}
           DSH_RUNTIME_DIR: runtime-prepared
-      - name: Verify prepared runtime
-        run: pnpm --filter @dsh/client-runtime check-runtime
+      - name: Verify prepared runtime manifest
+        shell: bash
         env:
-          DSH_RUNTIME_DIR: runtime-prepared
-          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
-          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test -s runtime-prepared/manifest.json
+          node <<'NODE'
+          const fs = require('node:fs')
+          const manifest = JSON.parse(fs.readFileSync('runtime-prepared/manifest.json', 'utf8'))
+          if (manifest.platform !== process.env.EXPECTED_PLATFORM || manifest.arch !== process.env.EXPECTED_ARCH) {
+            throw new Error(`runtime manifest mismatch: ${manifest.platform}/${manifest.arch}`)
+          }
+          if (!manifest.dshVersion || manifest.runtimeSource !== 'official-source-pack') {
+            throw new Error('runtime manifest is missing pinned official-source metadata')
+          }
+          NODE
       - uses: actions/upload-artifact@v7
         with:
           name: tauri-runtime-${{ matrix.artifact }}
@@ -230,7 +246,7 @@ jobs:
           set -euo pipefail
           test -s packages/plugin-embedded-client/lib/index.js
           test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
-          node packages/client-runtime/scripts/smoke-packaged.mjs apps/tauri/src-tauri/resources/dsh-runtime packages/plugin-embedded-client/lib/index.js
+          pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
       - name: Build Tauri desktop candidate
