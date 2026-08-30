@@ -95,3 +95,8 @@ export type {
   HostUpdateRecoveryPhase,
   HostUpdateRecoveryRecord,
 } from './update-journal.ts'
+export { applyPlannedRuntimeUpdate } from './runtime-update.ts'
+export type {
+  ApplyPlannedRuntimeUpdateOptions,
+  RuntimeUpdateApplyResult,
+} from './runtime-update.ts'
