@@ -86,11 +86,9 @@ function targetsFor(targetOs, targetArch) {
 }
 const config = scenario === 'full' ? 'electron-builder.full.yml' : 'electron-builder.yml'
 
-// Auto-update feed (Phase A): bake app-update.yml only when a GitHub upstream
-// is configured at build time. electron-builder throws on undefined ${env.*}
-// macros, so we inject via CLI overrides instead of the yml. DSH_PACK_OUTPUT
-// additionally overrides the electron-builder output directory (handy when the
-// default release/<scenario> dir is locked by Windows/AV, or for temp builds).
+// Bake a scenario-specific update channel. Full and Thin are intentionally
+// independent products from an updater perspective: an automatic update must
+// never silently switch a Thin install into Full (or the reverse).
 const extraArgs = []
 const owner = process.env.GH_OWNER
 const repo = process.env.GH_REPO
@@ -99,8 +97,9 @@ if (owner && repo) {
     '-c.publish.provider=github',
     `-c.publish.owner=${owner}`,
     `-c.publish.repo=${repo}`,
+    `-c.publish.channel=${scenario}`,
   )
-  console.log(`[pack] baking update feed for github.com/${owner}/${repo}`)
+  console.log(`[pack] baking ${scenario} update channel for github.com/${owner}/${repo}`)
 } else {
   console.log('[pack] GH_OWNER/GH_REPO not set — no update feed baked; auto-update stays inert')
 }
@@ -149,8 +148,6 @@ function findResourceDirs(root, depth = 0, result = []) {
       result.push(fullPath)
       continue
     }
-    // Avoid walking vendored dependency trees; the app resource directory is
-    // always above them in electron-builder's unpacked output.
     if (entry.name === 'node_modules') continue
     findResourceDirs(fullPath, depth + 1, result)
   }
@@ -210,16 +207,11 @@ async function prepareFullRuntimes() {
 }
 
 try {
-  // 1. keep the embedded client bundle current
   await run('pnpm', ['--filter', '@dsh/plugin-embedded-client', 'bundle'], repoRoot)
-  // 2. bundle the Electron main/preload
   await run('pnpm', ['bundle'], desktopRoot)
-  // Full builds need a matching bundled runtime for every target architecture.
-  // CI can set DSH_SKIP_RUNTIME_PREPARE after downloading prepared runtime artifacts.
   if (scenario === 'full' && process.env.DSH_SKIP_RUNTIME_PREPARE !== '1') {
     await prepareFullRuntimes()
   }
-  // 3. electron-builder with scenario config + OS targets
   await run(
     'pnpm',
     ['exec', 'electron-builder', ...targetsFor(os, arch), '--config', config, '--publish', 'never', ...extraArgs],
