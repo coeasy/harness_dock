@@ -73,7 +73,9 @@ export class EncryptedCredentialFileStore implements CredentialService {
   }
 
   private assertKey(key: string): void {
-    if (!key.trim() || key.length > 256) throw new Error('Credential key must be 1-256 characters')
+    if (!key.trim() || key.length > 256 || /[\u0000-\u001f\u007f]/.test(key)) {
+      throw new Error('Credential key must be 1-256 printable characters')
+    }
   }
 
   async get(key: string): Promise<string | null> {
@@ -105,6 +107,18 @@ export class EncryptedCredentialFileStore implements CredentialService {
         return
       }
       await writeAtomic(this.file, `${JSON.stringify(store, null, 2)}\n`)
+    })
+  }
+
+  async list(prefix = ''): Promise<readonly string[]> {
+    if (prefix.length > 256 || /[\u0000-\u001f\u007f]/.test(prefix)) {
+      throw new Error('Credential prefix must be at most 256 printable characters')
+    }
+    return this.exclusive(async () => {
+      const store = await this.readStore()
+      return Object.keys(store.entries)
+        .filter((key) => key.startsWith(prefix))
+        .sort((a, b) => a.localeCompare(b))
     })
   }
 }

@@ -1,7 +1,7 @@
 import { app, net, safeStorage, session } from 'electron'
 import { gzip } from 'node:zlib'
 import { promisify } from 'node:util'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, statfs, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   redactDiagnostics,
@@ -12,6 +12,7 @@ import {
   type NetworkDiagnostic,
   type NetworkService,
   type NetworkState,
+  type ProxyConfiguration,
   type SessionRecoveryService,
 } from '@dsh/bootstrap/client-core'
 import { appState } from './state.ts'
@@ -103,10 +104,37 @@ function readNetworkState(): NetworkState {
   return 'limited'
 }
 
-export function createElectronNetworkService(pollIntervalMs = 5_000): NetworkService {
+function validateFixedProxy(config: ProxyConfiguration): string {
+  if (!config.host || !/^[a-z0-9._:[\]-]+$/i.test(config.host)) throw new Error('Invalid proxy host')
+  if (!Number.isInteger(config.port) || !config.port || config.port < 1 || config.port > 65535) {
+    throw new Error('Invalid proxy port')
+  }
+  const scheme = config.mode === 'socks5' ? 'socks5' : config.mode
+  return `${scheme}://${config.host}:${config.port}`
+}
+
+export function createElectronNetworkService(
+  credentials?: CredentialService,
+  pollIntervalMs = 5_000,
+): NetworkService {
   const listeners = new Set<(state: NetworkState) => void>()
   let timer: NodeJS.Timeout | undefined
   let previous = readNetworkState()
+  let proxyCredentialKey: string | undefined
+
+  if (credentials) {
+    app.on('login', (event, _webContents, _request, authInfo, callback) => {
+      if (!authInfo.isProxy || !proxyCredentialKey) return
+      event.preventDefault()
+      const prefix = proxyCredentialKey
+      void Promise.all([
+        credentials.get(`${prefix}.username`),
+        credentials.get(`${prefix}.password`),
+      ]).then(([username, password]) => {
+        callback(username ?? '', password ?? '')
+      }).catch(() => callback('', ''))
+    })
+  }
 
   const poll = (): void => {
     const next = readNetworkState()
@@ -209,6 +237,35 @@ export function createElectronNetworkService(pollIntervalMs = 5_000): NetworkSer
       }
     },
     diagnose,
+    async configureProxy(config) {
+      if (!app.isReady()) throw new Error('Electron app must be ready before configuring the proxy')
+      proxyCredentialKey = config.credentialKey?.trim() || undefined
+      const bypass = (config.bypassRules ?? [])
+        .map((rule) => rule.trim())
+        .filter(Boolean)
+        .join(',')
+      if (config.mode === 'system') {
+        await session.defaultSession.setProxy({ mode: 'system' })
+      } else if (config.mode === 'direct') {
+        await session.defaultSession.setProxy({ mode: 'direct' })
+      } else if (config.mode === 'pac') {
+        const pac = config.pacUrl ? safeNetworkTarget(config.pacUrl) : ''
+        if (!pac) throw new Error('PAC proxy mode requires pacUrl')
+        await session.defaultSession.setProxy({ pacScript: pac, proxyBypassRules: bypass })
+      } else {
+        await session.defaultSession.setProxy({
+          proxyRules: validateFixedProxy(config),
+          proxyBypassRules: bypass,
+        })
+      }
+      await session.defaultSession.forceReloadProxyConfig()
+      await bootLogEvent({
+        level: 'info',
+        component: 'network',
+        event: 'proxy_configured',
+        data: { mode: config.mode, credentialBacked: Boolean(proxyCredentialKey), bypassRuleCount: config.bypassRules?.length ?? 0 },
+      })
+    },
   }
 }
 
@@ -222,6 +279,9 @@ export function createElectronDiagnosticsService(
 ): DiagnosticsService {
   const collect = async (): Promise<DiagnosticsSnapshot> => {
     const networkState = await network.state()
+    const hostUpdateState = appState.hostUpdate ? await appState.hostUpdate.state('host').catch(() => null) : null
+    const runtimeUpdateState = appState.updates ? await appState.updates.state('runtime').catch(() => null) : null
+    const disk = await statfs(app.getPath('userData')).catch(() => null)
     const snapshot: DiagnosticsSnapshot = {
       generatedAt: new Date().toISOString(),
       host: 'electron',
@@ -235,18 +295,26 @@ export function createElectronDiagnosticsService(
         electronVersion: process.versions.electron,
         nodeVersion: process.versions.node,
         runtimeMode: appState.mode,
+        runtimeState: appState.runtimeState,
+        runtimeEndpoint: appState.runtimeEndpoint,
+        managedRuntimeVersion: appState.managedRuntimeVersion,
         bundledRuntimeAvailable: appState.bundledAvailable,
         runtimeLease: appState.runtimeLease
           ? {
-              host: appState.runtimeLease.record.host,
-              hostPid: appState.runtimeLease.record.hostPid,
+              ownerHost: appState.runtimeLease.record.ownerHost,
+              ownerPid: appState.runtimeLease.record.ownerPid,
               runtimePid: appState.runtimeLease.record.runtimePid,
               runtimeId: appState.runtimeLease.record.runtimeId,
+              endpoint: appState.runtimeLease.record.endpoint,
               dshVersion: appState.runtimeLease.record.dshVersion,
               protocolVersion: appState.runtimeLease.record.protocolVersion,
+              updatedAt: appState.runtimeLease.record.updatedAt,
             }
           : null,
         gatewayActive: Boolean(appState.gateway),
+        hostUpdateState,
+        runtimeUpdateState,
+        diskFreeBytes: disk ? disk.bavail * disk.bsize : undefined,
         recentEvents: await logs.recent(100),
       },
     }

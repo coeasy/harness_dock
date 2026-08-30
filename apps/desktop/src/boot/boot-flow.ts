@@ -26,46 +26,62 @@ import {
   readVersionOverride,
   runtimeCacheDir,
 } from '../version-override.ts'
+import {
+  createElectronRuntimeService,
+  startRuntimeLeaseHeartbeat,
+  startRuntimeSupervisor,
+  stopRuntimeLeaseHeartbeat,
+} from '../runtime-controller.ts'
+import {
+  createCompositeUpdateService,
+  createElectronRuntimeUpdateService,
+  resolveManagedRuntimeSelection,
+  rollbackManagedRuntimeSelection,
+} from '../runtime-update-service.ts'
 import { BootProgressTracker } from './progress.ts'
 
 let autoUpdate: AutoUpdateHandle | undefined
 
-/**
- * Boot orchestration: splash → cross-host runtime lease → LocalRuntimeProvider
- * (origin → runtime → start, with last-known-good rollback) → optional secure
- * remote gateway → main window → auto-update → tray.
- *
- * The provider boundary is shared with Perry Desktop; iOS/Android implement the
- * same runtime contract through RemoteRuntimeProvider and never spawn dsh.
- */
 export async function bootFlow(): Promise<void> {
   const progress = new BootProgressTracker()
   await createSplash()
   updateSplash(t('splash.loading'))
   showSplashProgress(progress.start())
 
-  const runtimeLease = await acquireRuntimeLease({ host: 'electron' })
+  const runtimeLease = await acquireRuntimeLease({ host: 'electron', protocolVersion: 1 })
   appState.runtimeLease = runtimeLease
+  appState.runtimeState = 'connecting'
   let localProvider: LocalRuntimeProvider | undefined
+  let managedSelection: { version: string; directory: string } | null = null
+  let userDataDir: string | undefined
+  let runtimeConnected = false
 
   try {
-    const userDataDir = app.getPath('userData')
-    const versionOverride = await resolveVersionOverride(userDataDir)
+    const resolvedUserDataDir = app.getPath('userData')
+    userDataDir = resolvedUserDataDir
+    managedSelection = await resolveManagedRuntimeSelection(resolvedUserDataDir)
+    const versionOverride = managedSelection?.version ?? await resolveVersionOverride(resolvedUserDataDir)
+    const activeBundledRoot = managedSelection?.directory ?? bundledRoot()
+    appState.managedRuntimeVersion = managedSelection?.version
 
     localProvider = new LocalRuntimeProvider({
       originPath: originPath(),
       pluginPath: pluginPath(),
       packaged: app.isPackaged,
-      bundledRoot: bundledRoot(),
-      userDataDir,
+      bundledRoot: activeBundledRoot,
+      userDataDir: resolvedUserDataDir,
       versionOverride,
       stopTimeoutMs: 12_000,
+      enableRollback: !managedSelection,
       log: (message) => void bootLog(message),
       onBeforeStart: ({ bundledAvailable }) => {
         showSplashProgress(progress.preparingRuntime(bundledAvailable))
         void bootLog(
           `runtime mode: ${bundledAvailable ? 'bundled (offline)' : 'download (first launch fetches ~300MB over HTTPS)'}`,
         )
+        if (managedSelection) {
+          void bootLog(`runtime source: managed canonical artifact ${managedSelection.version}`)
+        }
         if (bundledAvailable) {
           updateSplash(t('splash.startingRuntime'))
         } else {
@@ -113,18 +129,26 @@ export async function bootFlow(): Promise<void> {
     })
 
     const session = await localProvider.connect()
+    runtimeConnected = true
     const result = localProvider.bootstrapResult
     if (!result) throw new Error('LocalRuntimeProvider connected without a bootstrap result.')
 
     appState.runtime = result.runtime
     appState.dshPid = result.ready.pid
     appState.dshVersion = result.ready.dshVersion
+    appState.runtimeEndpoint = new URL(session.appUrl).origin
+    appState.runtimeState = 'ready'
     appState.mode = result.mode
     appState.bundledAvailable = result.bundledAvailable
     await runtimeLease.updateRuntime({
       runtimePid: result.ready.pid,
+      runtimeId: `dsh:${result.ready.dshVersion}`,
+      endpoint: appState.runtimeEndpoint,
       dshVersion: result.ready.dshVersion,
+      protocolVersion: 1,
     })
+    startRuntimeLeaseHeartbeat()
+    startRuntimeSupervisor()
     await bootLog(`dsh web ready at ${redactWebAuthTokens(session.appUrl)} (pid ${result.ready.pid})`)
     showSplashProgress(progress.runtimeReady())
     await startRemoteGatewayIfEnabled(session.appUrl)
@@ -134,10 +158,14 @@ export async function bootFlow(): Promise<void> {
     showSplashProgress(progress.complete())
     showSplashDone()
 
+    const runtimeService = createElectronRuntimeService()
     try {
       autoUpdate = initAutoUpdate()
+      const runtimeUpdate = createElectronRuntimeUpdateService(runtimeService, resolvedUserDataDir)
+      appState.updates = createCompositeUpdateService(autoUpdate.service, runtimeUpdate)
     } catch (error) {
       await bootLog(`auto-update init failed: ${error instanceof Error ? error.message : String(error)}`)
+      appState.updates = createElectronRuntimeUpdateService(runtimeService, resolvedUserDataDir)
     }
     try {
       appState.tray = createTray({
@@ -148,11 +176,21 @@ export async function bootFlow(): Promise<void> {
         onVersions: () => openDiagnosticsWindow('versions'),
         onQuit: () => app.quit(),
         onCheckUpdate: () => autoUpdate?.checkNow(),
+        onRestartRuntime: () => {
+          void runtimeService.restart().catch((error) => void bootLog(`runtime restart failed: ${String(error)}`))
+        },
+        onStopRuntime: () => {
+          void runtimeService.stop().catch((error) => void bootLog(`runtime stop failed: ${String(error)}`))
+        },
+        getRuntimeStatus: () => ({ state: appState.runtimeState, version: appState.dshVersion }),
       })
     } catch (error) {
       await bootLog(`tray creation failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   } catch (error) {
+    appState.runtimeSupervisorStop?.()
+    appState.runtimeSupervisorStop = undefined
+    stopRuntimeLeaseHeartbeat()
     appState.runtimeLease = undefined
     await appState.gateway?.stop().catch(() => undefined)
     appState.gateway = undefined
@@ -160,9 +198,23 @@ export async function bootFlow(): Promise<void> {
     appState.runtime = undefined
     appState.dshPid = undefined
     appState.dshVersion = undefined
+    appState.runtimeEndpoint = undefined
+    appState.runtimeState = 'stopped'
     appState.mode = undefined
     appState.bundledAvailable = undefined
     await runtimeLease.release().catch(() => undefined)
+
+    if (!runtimeConnected && managedSelection && userDataDir) {
+      const rollbackVersion = await rollbackManagedRuntimeSelection(userDataDir)
+      if (rollbackVersion) {
+        await bootLog(
+          `managed runtime ${managedSelection.version} failed during boot; rolled back to ${rollbackVersion} and relaunching`,
+        )
+        app.relaunch()
+        app.exit(0)
+        return
+      }
+    }
     throw error
   }
 }
@@ -187,8 +239,6 @@ async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
   appState.gateway = gateway
   await bootLog(`remote gateway ready: local=${gateway.localUrl} public=${gateway.publicUrl}`)
 
-  // Compatibility switch for early Preview automation. The tray Mobile Devices
-  // panel is the preferred place to create/revoke one-time pairing codes.
   if (process.env.HARNESSDOCK_GATEWAY_PAIR_ON_START === '1') {
     const ticket = gateway.createPairingTicket()
     try {
@@ -202,12 +252,6 @@ async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
   }
 }
 
-/**
- * Read userData/origin-override.json before booting. Returns the override when
- * it is non-empty and allowed (pinned / seed / cached); logs and ignores
- * anything else so a stray override can never drift the client to an arbitrary
- * version.
- */
 async function resolveVersionOverride(userDataDir: string): Promise<string | undefined> {
   const override = await readVersionOverride(userDataDir)
   if (!override) return undefined
