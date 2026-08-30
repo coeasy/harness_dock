@@ -34,7 +34,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 // Bump whenever the on-disk runtime composition/selection rules change. This
 // prevents an Actions restore-key or a local cache from bypassing new runtime
 // builder logic merely because the pinned dsh version stayed the same.
-const RUNTIME_LAYOUT_VERSION = 3
+const RUNTIME_LAYOUT_VERSION = 4
 
 const { values } = parseArgs({
   options: {
@@ -181,6 +181,7 @@ async function installPackedRuntime(root: string): Promise<void> {
       'install',
       '--omit=dev',
       '--omit=optional',
+      '--ignore-scripts',
       '--no-fund',
       '--no-audit',
       '--package-lock=false',
