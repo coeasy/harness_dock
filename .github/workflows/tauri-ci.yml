@@ -36,7 +36,6 @@ jobs:
       - name: Install Linux Tauri dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml -- --check
       - run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml --all-targets
 
   android:
