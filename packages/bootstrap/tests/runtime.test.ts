@@ -99,6 +99,36 @@ describe('bootstrapRuntime', () => {
   )
 
   it(
+    'can defer last-known-good persistence for a managed candidate until the host UI health gate',
+    async () => {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'bs-'))
+      temps.push(dir)
+      const originPath = path.join(dir, 'origin.json')
+      const prevPath = path.join(dir, 'previous-origin.json')
+      await writeFile(originPath, `${JSON.stringify({ dshVersion: 'good' })}\n`, 'utf8')
+      await writeFile(prevPath, `${JSON.stringify({ dshVersion: 'old-good' })}\n`, 'utf8')
+      const goodScript = await fakeGoodScript(dir)
+      const failScript = await fakeFailScript(dir)
+
+      const result = await bootstrapRuntime({
+        originPath,
+        versionOverride: 'candidate',
+        pluginPath: path.join(dir, 'plugin.js'),
+        packaged: false,
+        userDataDir: dir,
+        deferOriginBackup: true,
+        dshRuntimeFactory: runtimeFactory(dir, goodScript, failScript),
+      })
+
+      expect(result.origin.dshVersion).toBe('candidate')
+      const prev = JSON.parse(await readFile(prevPath, 'utf8'))
+      expect(prev.dshVersion).toBe('old-good')
+      await result.runtime.stop()
+    },
+    25_000,
+  )
+
+  it(
     'rolls back to last-known-good when the pinned version fails to start',
     async () => {
       const dir = await mkdtemp(path.join(os.tmpdir(), 'bs-'))
@@ -125,6 +155,7 @@ describe('bootstrapRuntime', () => {
 
       expect(result.rolledBack).toEqual({ from: 'bad', to: 'good' })
       expect(rolledBackEvent).toEqual({ from: 'bad', to: 'good' })
+      expect(result.origin.dshVersion).toBe('good')
       expect(result.ready.port).toBeGreaterThan(0)
 
       // the failing 'bad' version must NOT have overwritten last-known-good
