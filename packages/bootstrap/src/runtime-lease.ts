@@ -1,21 +1,26 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { defaultSharedStateDir, type DesktopHostKind } from './host.ts'
+import { type HarnessHostId } from './host-capabilities.ts'
+import { defaultSharedStateDir } from './host.ts'
+
+export type RuntimeLeaseHostInput = HarnessHostId | 'perry'
 
 export interface RuntimeLeaseRecord {
-  schemaVersion: 1
+  schemaVersion: 2
   token: string
-  host: DesktopHostKind
+  host: HarnessHostId
   hostPid: number
   runtimePid?: number
+  runtimeId?: string
   dshVersion?: string
+  protocolVersion?: number
   acquiredAt: string
   updatedAt: string
 }
 
 export interface AcquireRuntimeLeaseOptions {
-  host: DesktopHostKind
+  host: RuntimeLeaseHostInput
   hostPid?: number
   leaseRoot?: string
   isPidAlive?: (pid: number) => boolean
@@ -25,10 +30,15 @@ export interface AcquireRuntimeLeaseOptions {
 
 export interface RuntimeLeaseHandle {
   readonly root: string
-  readonly host: DesktopHostKind
+  readonly host: HarnessHostId
   readonly token: string
   readonly record: RuntimeLeaseRecord
-  updateRuntime(info: { runtimePid?: number; dshVersion?: string }): Promise<void>
+  updateRuntime(info: {
+    runtimePid?: number
+    runtimeId?: string
+    dshVersion?: string
+    protocolVersion?: number
+  }): Promise<void>
   release(): Promise<void>
 }
 
@@ -59,18 +69,56 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+function isHarnessHostId(value: unknown): value is HarnessHostId {
+  return (
+    value === 'electron' ||
+    value === 'tauri' ||
+    value === 'perry-desktop' ||
+    value === 'perry-ios' ||
+    value === 'perry-android' ||
+    value === 'vscode'
+  )
+}
+
+export function normalizeRuntimeLeaseHost(host: RuntimeLeaseHostInput): HarnessHostId {
+  return host === 'perry' ? 'perry-desktop' : host
+}
+
+function normalizeRecord(parsed: unknown): RuntimeLeaseRecord | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const record = parsed as Record<string, unknown>
+  if (typeof record.token !== 'string' || !Number.isInteger(record.hostPid)) return null
+
+  let host: HarnessHostId
+  if (record.schemaVersion === 2 && isHarnessHostId(record.host)) {
+    host = record.host
+  } else if (record.schemaVersion === 1 && (record.host === 'electron' || record.host === 'perry')) {
+    host = record.host === 'perry' ? 'perry-desktop' : 'electron'
+  } else {
+    return null
+  }
+
+  if (typeof record.acquiredAt !== 'string' || typeof record.updatedAt !== 'string') return null
+
+  return {
+    schemaVersion: 2,
+    token: record.token,
+    host,
+    hostPid: record.hostPid as number,
+    ...(Number.isInteger(record.runtimePid) ? { runtimePid: record.runtimePid as number } : {}),
+    ...(typeof record.runtimeId === 'string' ? { runtimeId: record.runtimeId } : {}),
+    ...(typeof record.dshVersion === 'string' ? { dshVersion: record.dshVersion } : {}),
+    ...(Number.isInteger(record.protocolVersion)
+      ? { protocolVersion: record.protocolVersion as number }
+      : {}),
+    acquiredAt: record.acquiredAt,
+    updatedAt: record.updatedAt,
+  }
+}
+
 async function readRecord(file: string): Promise<RuntimeLeaseRecord | null> {
   try {
-    const parsed = JSON.parse(await readFile(file, 'utf8')) as RuntimeLeaseRecord
-    if (
-      parsed?.schemaVersion !== 1 ||
-      typeof parsed.token !== 'string' ||
-      (parsed.host !== 'electron' && parsed.host !== 'perry') ||
-      !Number.isInteger(parsed.hostPid)
-    ) {
-      return null
-    }
-    return parsed
+    return normalizeRecord(JSON.parse(await readFile(file, 'utf8')))
   } catch {
     return null
   }
@@ -85,8 +133,8 @@ async function writeActiveAtomic(file: string, record: RuntimeLeaseRecord): Prom
 /**
  * runtime.lock is the ownership source of truth. active.json is richer status
  * for diagnostics, but is only trusted when its token matches the lock owner.
- * This ordering closes the tiny acquire race where a new owner has created the
- * lock but has not yet replaced a stale active.json from a crashed process.
+ * Version-1 Electron/Perry records are normalized on read so v0.2 upgrades can
+ * safely recover or report locks left by v0.1 clients.
  */
 export async function inspectRuntimeLease(
   leaseRoot = defaultRuntimeLeaseRoot(),
@@ -104,6 +152,7 @@ export async function acquireRuntimeLease(
   const root = path.resolve(options.leaseRoot ?? defaultRuntimeLeaseRoot())
   const lockPath = path.join(root, 'runtime.lock')
   const activePath = path.join(root, 'active.json')
+  const host = normalizeRuntimeLeaseHost(options.host)
   const hostPid = options.hostPid ?? process.pid
   const pidAlive = options.isPidAlive ?? isProcessAlive
   const now = options.now ?? (() => new Date())
@@ -114,9 +163,9 @@ export async function acquireRuntimeLease(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const timestamp = now().toISOString()
     const record: RuntimeLeaseRecord = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       token,
-      host: options.host,
+      host,
       hostPid,
       acquiredAt: timestamp,
       updatedAt: timestamp,
@@ -135,7 +184,7 @@ export async function acquireRuntimeLease(
       let released = false
       return {
         root,
-        host: options.host,
+        host,
         token,
         get record() {
           return current
@@ -149,7 +198,11 @@ export async function acquireRuntimeLease(
           current = {
             ...current,
             ...(info.runtimePid === undefined ? {} : { runtimePid: info.runtimePid }),
+            ...(info.runtimeId === undefined ? {} : { runtimeId: info.runtimeId }),
             ...(info.dshVersion === undefined ? {} : { dshVersion: info.dshVersion }),
+            ...(info.protocolVersion === undefined
+              ? {}
+              : { protocolVersion: info.protocolVersion }),
             updatedAt: now().toISOString(),
           }
           await writeActiveAtomic(activePath, current)

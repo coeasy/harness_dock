@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./gateway": "./src/gateway.ts",
     "./runtime-provider": "./src/runtime-provider.ts",
-    "./host-capabilities": "./src/host-capabilities.ts"
+    "./host-capabilities": "./src/host-capabilities.ts",
+    "./client-core": "./src/client-core.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

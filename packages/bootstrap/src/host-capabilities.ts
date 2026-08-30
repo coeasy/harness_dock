@@ -1,10 +1,12 @@
 export type HarnessHostId =
   | 'electron'
+  | 'tauri'
   | 'perry-desktop'
   | 'perry-ios'
   | 'perry-android'
   | 'vscode'
 
+export type HarnessHostChannel = 'stable' | 'lts' | 'preview' | 'experimental'
 export type RuntimeAccessMode = 'local' | 'remote'
 
 export interface HarnessHostCapabilities {
@@ -26,7 +28,7 @@ export interface HarnessHostCapabilities {
 export interface HarnessHostProfile {
   id: HarnessHostId
   productName: string
-  channel: 'stable' | 'preview'
+  channel: HarnessHostChannel
   appId: string
   capabilities: HarnessHostCapabilities
 }
@@ -53,10 +55,38 @@ export const ELECTRON_HOST_PROFILE: HarnessHostProfile = {
   },
 }
 
+/**
+ * Tauri is registered in the shared Host Contract before the native adapter is
+ * promoted. Capability flags remain pessimistic until the v0.2 adapter and
+ * parity tests prove each service. This prevents the UI from exposing native
+ * actions that are only theoretically supported by Tauri.
+ */
+export const TAURI_HOST_PROFILE: HarnessHostProfile = {
+  id: 'tauri',
+  productName: 'HarnessDock Next-Gen Preview',
+  channel: 'preview',
+  appId: 'com.dsh.client.tauri.preview',
+  capabilities: {
+    runtimes: [],
+    downloads: false,
+    filePicker: false,
+    clipboardPermission: false,
+    nativeJsBridge: false,
+    serviceWorkers: false,
+    autoUpdate: false,
+    tray: false,
+    notifications: false,
+    pushNotifications: false,
+    deepLinks: false,
+    secureCredentials: false,
+    backgroundExecution: false,
+  },
+}
+
 export const PERRY_DESKTOP_HOST_PROFILE: HarnessHostProfile = {
   id: 'perry-desktop',
   productName: 'HarnessDock Native Preview',
-  channel: 'preview',
+  channel: 'experimental',
   appId: 'com.dsh.client.perry.preview',
   capabilities: {
     runtimes: ['local'],
@@ -125,6 +155,7 @@ export const PERRY_ANDROID_HOST_PROFILE: HarnessHostProfile = {
 
 export const HOST_PROFILES = {
   electron: ELECTRON_HOST_PROFILE,
+  tauri: TAURI_HOST_PROFILE,
   'perry-desktop': PERRY_DESKTOP_HOST_PROFILE,
   'perry-ios': PERRY_IOS_HOST_PROFILE,
   'perry-android': PERRY_ANDROID_HOST_PROFILE,
