@@ -1,0 +1,52 @@
+name: patch-release-macos-intel
+
+on:
+  push:
+    branches:
+      - fix/release-macos-intel
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/release-macos-intel
+      - name: Move macOS x64 release jobs to Intel runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/release.yml')
+          text = path.read_text()
+          build_old = '{"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64"'
+          build_new = '{"runner":"macos-15-intel","artifact_os":"mac","target_os":"mac","platform":"darwin","scenario":"full","arch":"x64"'
+          runtime_old = '{"enabled":true,"runner":"macos-latest","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64"'
+          runtime_new = '{"enabled":true,"runner":"macos-15-intel","artifact_os":"mac","target_os":"mac","platform":"darwin","arch":"x64"'
+          if text.count(build_old) != 1:
+              raise SystemExit(f'expected exactly one mac x64 build row, found {text.count(build_old)}')
+          if text.count(runtime_old) != 1:
+              raise SystemExit(f'expected exactly one mac x64 runtime row, found {text.count(runtime_old)}')
+          text = text.replace(build_old, build_new).replace(runtime_old, runtime_new)
+          path.write_text(text)
+          PY
+          rm .github/workflows/patch-release-macos-intel.yml
+          git diff --check
+          git diff -- .github/workflows/release.yml
+      - name: Commit release runner fix
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/release.yml .github/workflows/patch-release-macos-intel.yml
+          git commit -m "fix: build macOS x64 release on Intel runner"
+          git push origin HEAD:fix/release-macos-intel
