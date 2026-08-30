@@ -1,8 +1,8 @@
 [project]
 name = "HarnessDock Native Preview"
-version = "0.1.0"
+version = "0.2.0"
 bundle_id = "com.dsh.client.perry.preview"
-description = "Perry native preview host for HarnessDock"
+description = "Perry native experimental host for HarnessDock"
 entry = "src/main.ts"
 
 [build]
@@ -16,4 +16,4 @@ minimum_os = "13.0"
 [linux]
 format = "deb"
 category = "Development"
-description = "HarnessDock Perry native preview host"
+description = "HarnessDock Perry native experimental host"

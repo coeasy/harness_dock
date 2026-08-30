@@ -59,13 +59,17 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+function isDesktopHostKind(value: unknown): value is DesktopHostKind {
+  return value === 'electron' || value === 'tauri' || value === 'perry'
+}
+
 async function readRecord(file: string): Promise<RuntimeLeaseRecord | null> {
   try {
     const parsed = JSON.parse(await readFile(file, 'utf8')) as RuntimeLeaseRecord
     if (
       parsed?.schemaVersion !== 1 ||
       typeof parsed.token !== 'string' ||
-      (parsed.host !== 'electron' && parsed.host !== 'perry') ||
+      !isDesktopHostKind(parsed.host) ||
       !Number.isInteger(parsed.hostPid)
     ) {
       return null
@@ -85,8 +89,6 @@ async function writeActiveAtomic(file: string, record: RuntimeLeaseRecord): Prom
 /**
  * runtime.lock is the ownership source of truth. active.json is richer status
  * for diagnostics, but is only trusted when its token matches the lock owner.
- * This ordering closes the tiny acquire race where a new owner has created the
- * lock but has not yet replaced a stale active.json from a crashed process.
  */
 export async function inspectRuntimeLease(
   leaseRoot = defaultRuntimeLeaseRoot(),

@@ -1,8 +1,8 @@
 [project]
-name = "HarnessDock Mobile Preview"
-version = "0.1.0"
+name = "HarnessDock Mobile Experimental"
+version = "0.2.0"
 bundle_id = "com.dsh.client.mobile.preview"
-description = "Perry iOS/Android remote client for HarnessDock"
+description = "Perry iOS/Android remote experimental client for HarnessDock"
 entry = "src/main.ts"
 
 [build]

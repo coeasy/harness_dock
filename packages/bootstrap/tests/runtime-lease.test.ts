@@ -21,7 +21,7 @@ afterEach(async () => {
 })
 
 describe('runtime lease', () => {
-  it('blocks a second live desktop host and exposes the holder', async () => {
+  it('blocks another live desktop host and exposes the holder', async () => {
     const root = await tempRoot()
     const first = await acquireRuntimeLease({
       host: 'electron',
@@ -34,10 +34,10 @@ describe('runtime lease', () => {
 
     await expect(
       acquireRuntimeLease({
-        host: 'perry',
+        host: 'tauri',
         hostPid: 303,
         leaseRoot: root,
-        token: 'perry-token',
+        token: 'tauri-token',
         isPidAlive: (pid) => pid === 101,
       }),
     ).rejects.toMatchObject({
@@ -47,6 +47,25 @@ describe('runtime lease', () => {
 
     await first.release()
     expect(await inspectRuntimeLease(root)).toBeNull()
+  })
+
+  it('allows Tauri to own the same cross-host lease contract', async () => {
+    const root = await tempRoot()
+    const tauri = await acquireRuntimeLease({
+      host: 'tauri',
+      hostPid: 404,
+      leaseRoot: root,
+      token: 'tauri-token',
+      isPidAlive: (pid) => pid === 404,
+    })
+    await tauri.updateRuntime({ runtimePid: 505, dshVersion: '0.2.0-test' })
+    expect(await inspectRuntimeLease(root)).toMatchObject({
+      host: 'tauri',
+      hostPid: 404,
+      runtimePid: 505,
+      dshVersion: '0.2.0-test',
+    })
+    await tauri.release()
   })
 
   it('reclaims a stale lease without letting an old handle delete the new owner', async () => {
