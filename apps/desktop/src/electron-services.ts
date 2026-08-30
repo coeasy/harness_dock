@@ -1,4 +1,4 @@
-import { app, net, safeStorage } from 'electron'
+import { app, net, safeStorage, session } from 'electron'
 import { gzip } from 'node:zlib'
 import { promisify } from 'node:util'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -8,6 +8,8 @@ import {
   type CredentialService,
   type DiagnosticsService,
   type DiagnosticsSnapshot,
+  type LogService,
+  type NetworkDiagnostic,
   type NetworkService,
   type NetworkState,
   type SessionRecoveryService,
@@ -18,6 +20,12 @@ import {
   JsonSessionRecoveryService,
   type SecretCodec,
 } from './client-persistence.ts'
+import { bootLogEvent, recentLogEvents } from './boot-log.ts'
+import {
+  networkStateFromError,
+  proxyModeFromRules,
+  safeNetworkTarget,
+} from './log-redaction.ts'
 
 const gzipAsync = promisify(gzip)
 
@@ -69,6 +77,13 @@ export function createElectronSessionRecoveryService(): SessionRecoveryService {
   return new JsonSessionRecoveryService(recoveryFile())
 }
 
+export function createElectronLogService(): LogService {
+  return {
+    write: bootLogEvent,
+    recent: recentLogEvents,
+  }
+}
+
 function readNetworkState(): NetworkState {
   if (!app.isReady()) return 'limited'
   const compatibleNet = net as typeof net & {
@@ -112,6 +127,73 @@ export function createElectronNetworkService(pollIntervalMs = 5_000): NetworkSer
     }
   }
 
+  const diagnose = async (target: string, timeoutMs = 10_000): Promise<NetworkDiagnostic> => {
+    const safeTarget = safeNetworkTarget(target)
+    const checkedAt = new Date().toISOString()
+    const baseline = readNetworkState()
+    if (!app.isReady() || baseline === 'offline') {
+      return {
+        target: safeTarget,
+        state: baseline === 'offline' ? 'offline' : 'limited',
+        reachable: false,
+        proxyMode: 'unknown',
+        checkedAt,
+      }
+    }
+
+    let proxyMode: NetworkDiagnostic['proxyMode'] = 'unknown'
+    try {
+      proxyMode = proxyModeFromRules(await session.defaultSession.resolveProxy(safeTarget))
+    } catch (error) {
+      const classified = networkStateFromError(error)
+      if (classified.state === 'proxy-error') {
+        return {
+          target: safeTarget,
+          state: classified.state,
+          reachable: false,
+          proxyMode,
+          ...(classified.errorCode ? { errorCode: classified.errorCode } : {}),
+          checkedAt,
+        }
+      }
+    }
+
+    const boundedTimeout = Math.max(1_000, Math.min(60_000, Math.floor(timeoutMs)))
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), boundedTimeout)
+    timeout.unref()
+    const started = Date.now()
+    try {
+      const response = await net.fetch(safeTarget, {
+        method: 'HEAD',
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+      return {
+        target: safeTarget,
+        state: 'online',
+        reachable: true,
+        proxyMode,
+        latencyMs: Date.now() - started,
+        httpStatus: response.status,
+        checkedAt,
+      }
+    } catch (error) {
+      const classified = networkStateFromError(error)
+      return {
+        target: safeTarget,
+        state: classified.state,
+        reachable: false,
+        proxyMode,
+        latencyMs: Date.now() - started,
+        ...(classified.errorCode ? { errorCode: classified.errorCode } : {}),
+        checkedAt,
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
   return {
     async state() {
       previous = readNetworkState()
@@ -126,6 +208,7 @@ export function createElectronNetworkService(pollIntervalMs = 5_000): NetworkSer
         syncTimer()
       }
     },
+    diagnose,
   }
 }
 
@@ -133,7 +216,10 @@ function diagnosticFileName(): string {
   return `harnessdock-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json.gz`
 }
 
-export function createElectronDiagnosticsService(network: NetworkService): DiagnosticsService {
+export function createElectronDiagnosticsService(
+  network: NetworkService,
+  logs: LogService,
+): DiagnosticsService {
   const collect = async (): Promise<DiagnosticsSnapshot> => {
     const networkState = await network.state()
     const snapshot: DiagnosticsSnapshot = {
@@ -161,6 +247,7 @@ export function createElectronDiagnosticsService(network: NetworkService): Diagn
             }
           : null,
         gatewayActive: Boolean(appState.gateway),
+        recentEvents: await logs.recent(100),
       },
     }
     return redactDiagnostics(snapshot)

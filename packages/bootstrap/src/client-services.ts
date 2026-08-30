@@ -1,6 +1,8 @@
 import type { UpdateSnapshot, UpdateTarget } from './update-state.ts'
 
 export type NetworkState = 'online' | 'offline' | 'limited' | 'proxy-error' | 'dns-error' | 'tls-error'
+export type ProxyMode = 'direct' | 'proxy' | 'pac' | 'unknown'
+export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface FilePickerOptions {
   multiple?: boolean
@@ -64,6 +66,34 @@ export interface SessionRecoveryService {
   clear(): Promise<void>
 }
 
+export interface NetworkDiagnostic {
+  target: string
+  state: NetworkState
+  reachable: boolean
+  proxyMode: ProxyMode
+  latencyMs?: number
+  httpStatus?: number
+  errorCode?: string
+  checkedAt: string
+}
+
+export interface ClientLogEvent {
+  level: ClientLogLevel
+  component: string
+  event: string
+  message?: string
+  data?: Record<string, unknown>
+}
+
+export interface ClientLogRecord extends ClientLogEvent {
+  timestamp: string
+}
+
+export interface LogService {
+  write(event: ClientLogEvent): Promise<void>
+  recent(limit?: number): Promise<readonly ClientLogRecord[]>
+}
+
 export interface DiagnosticsSnapshot {
   generatedAt: string
   host: string
@@ -84,6 +114,7 @@ export interface DiagnosticsService {
 export interface NetworkService {
   state(): Promise<NetworkState>
   subscribe(listener: (state: NetworkState) => void): () => void
+  diagnose(target: string, timeoutMs?: number): Promise<NetworkDiagnostic>
 }
 
 export interface DeepLinkService {
@@ -99,5 +130,6 @@ export interface ClientServices {
   recovery: SessionRecoveryService
   diagnostics: DiagnosticsService
   network: NetworkService
+  logs: LogService
   deepLinks: DeepLinkService
 }
