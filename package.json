@@ -22,6 +22,7 @@
     "setup": "node scripts/bootstrap.mjs",
     "sync:dsh": "pnpm --filter @dsh/docs-sync start",
     "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
+    "tauri": "npx --yes @tauri-apps/cli@2.11.0",
     "build:tauri": "cd apps/tauri && npx --yes @tauri-apps/cli@2.11.0 build",
     "build:tauri:android": "cd apps/tauri && npx --yes @tauri-apps/cli@2.11.0 android build --debug --apk --target aarch64",
     "build:tauri:ios-sim": "cd apps/tauri && npx --yes @tauri-apps/cli@2.11.0 ios build --debug --target aarch64-sim --no-sign",
