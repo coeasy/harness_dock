@@ -18,7 +18,10 @@ export interface RuntimeUpdateApplyResult {
 export interface ApplyPlannedRuntimeUpdateOptions {
   manifest: ReleaseManifestV2
   delivery: PlannedDelivery
+  /** Destination directory for the target Runtime version. */
   runtimeDir: string
+  /** Healthy base Runtime used by an overlay delta; target remains separate. */
+  baseRuntimeDir?: string
   platform?: NodeJS.Platform
   arch?: string
   gitTag?: string
@@ -34,6 +37,8 @@ export interface ApplyPlannedRuntimeUpdateOptions {
  * Apply a Runtime delivery selected by createUpdatePlan(). Delta application is
  * always opportunistic: any download, base-tree, extraction or final-integrity
  * failure automatically falls back to the canonical full Runtime artifact.
+ * Managed auto-updates use a separate target runtimeDir and baseRuntimeDir, so
+ * the currently running version is never replaced while it is in use.
  */
 export async function applyPlannedRuntimeUpdate(
   options: ApplyPlannedRuntimeUpdateOptions,
@@ -67,6 +72,7 @@ export async function applyPlannedRuntimeUpdate(
           size: delivery.delta.size,
         },
         runtimeDir: options.runtimeDir,
+        baseRuntimeDir: options.baseRuntimeDir,
         targetVersion,
         platform,
         arch,
