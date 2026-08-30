@@ -1,155 +1,303 @@
 import { app, dialog, Notification, shell } from 'electron'
-import { autoUpdater } from 'electron-updater'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { autoUpdater } from 'electron-updater'
+import type {
+  HostUpdateInfo,
+  UpdateService,
+  UpdateSnapshot,
+  UpdateTarget,
+} from '@dsh/bootstrap/client-core'
 import { bootLog } from './boot-log.ts'
 import { fmt, t } from './i18n.ts'
+import { appState } from './state.ts'
+import { HostUpdateStateMachine } from './host-update-state.ts'
 
-/**
- * Auto-update (assessment Phase A).
- *
- *  - Windows NSIS installs: check the GitHub Releases feed (resources/app-update.yml)
- *    generated from the `publish` config, download the new NSIS installer in the
- *    background (blockmap differential), install on quit.
- *  - Portable single-file exe: cannot replace itself; auto-update is disabled and
- *    "check for updates" degrades to opening the GitHub Releases page.
- *  - Development / un-packaged builds: inert.
- *
- * All events go to the boot log and are surfaced with native Notification /
- * dialog (the embedded Web UI is the official SPA and is never modified).
- */
+export interface AutoUpdateHandle {
+  service: UpdateService
+  checkNow(): void
+  openReleasesPage(): void
+}
 
-export function isPortable(): boolean {
+export class UnsupportedElectronUpdateTargetError extends Error {
+  constructor(readonly target: UpdateTarget) {
+    super(`Electron host updater only manages the host application, not ${target} updates`)
+    this.name = 'UnsupportedElectronUpdateTargetError'
+  }
+}
+
+export class HostUpdateUnavailableError extends Error {
+  constructor(readonly reason: string) {
+    super(`Host auto-update is unavailable: ${reason}`)
+    this.name = 'HostUpdateUnavailableError'
+  }
+}
+
+function assertHostTarget(target: UpdateTarget): void {
+  if (target !== 'host') throw new UnsupportedElectronUpdateTargetError(target)
+}
+
+function appUpdateYmlPath(): string {
+  return path.join(process.resourcesPath, 'app-update.yml')
+}
+
+export function hasUpdateFeed(): boolean {
+  return existsSync(appUpdateYmlPath())
+}
+
+function portableBuild(): boolean {
   return Boolean(process.env.PORTABLE_EXECUTABLE_FILE)
 }
 
-/** true when a publish feed was baked into this build (resources/app-update.yml). */
-export function hasUpdateFeed(): boolean {
-  try {
-    return existsSync(path.join(process.resourcesPath, 'app-update.yml'))
-  } catch {
-    return false
-  }
-}
-
-/**
- * Derive the GitHub Releases URL from the baked feed (owner/repo), so even the
- * portable build can point the user at the manual download page without any
- * hard-coded repo. `DSH_RELEASES_URL` wins when set explicitly.
- */
-export function releasesUrl(): string | null {
-  const override = process.env.DSH_RELEASES_URL
+function releasesUrl(): string {
+  const override = process.env.DSH_RELEASES_URL?.trim()
   if (override) return override
   try {
-    const raw = readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8')
-    const owner = /(?:^|\n)\s*owner:\s*["']?([^"'\s]+)/.exec(raw)?.[1]
-    const repo = /(?:^|\n)\s*repo:\s*["']?([^"'\s]+)/.exec(raw)?.[1]
-    if (owner && repo) return `https://github.com/${owner}/${repo}/releases`
+    const raw = readFileSync(appUpdateYmlPath(), 'utf8')
+    const owner = raw.match(/^owner:\s*['"]?([^'"\r\n]+)['"]?\s*$/m)?.[1]?.trim()
+    const repo = raw.match(/^repo:\s*['"]?([^'"\r\n]+)['"]?\s*$/m)?.[1]?.trim()
+    if (owner && repo) return `https://github.com/${owner}/${repo}/releases/latest`
   } catch {
-    // no feed baked in
+    // fall through
   }
-  return null
+  return 'https://github.com/coeasy/harness_dock/releases/latest'
 }
 
-export interface AutoUpdateHandle {
-  /** Manual "check for updates" (tray menu). Handles portable / dev / no-feed degrade. */
-  checkNow(): void
-  /** Open the project's GitHub Releases page (used by the portable degrade path). */
-  openReleasesPage(): void
+async function openReleasesPage(): Promise<void> {
+  await shell.openExternal(releasesUrl())
 }
 
 function notify(title: string, body: string): void {
   try {
-    const n = new Notification({ title, body })
-    n.show()
+    if (Notification.isSupported()) new Notification({ title, body }).show()
   } catch {
-    // notifications unavailable
+    // optional integration
   }
 }
 
-export function initAutoUpdate(): AutoUpdateHandle {
-  const disabledReason = !app.isPackaged
-    ? 'not packaged'
-    : isPortable()
-      ? 'portable single-file exe'
-      : !hasUpdateFeed()
-        ? 'no publish feed (set GH_OWNER/GH_REPO at build time)'
-        : null
+function releaseNotes(info: { releaseNotes?: unknown }): string | undefined {
+  return typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined
+}
 
-  if (disabledReason) {
-    void bootLog(`auto-update disabled (${disabledReason})`)
-    return { checkNow: openReleasesPage, openReleasesPage }
+class ElectronHostUpdateService implements UpdateService {
+  private readonly machine = new HostUpdateStateMachine()
+  private available: HostUpdateInfo | null = null
+
+  constructor(private readonly disabledReason?: string) {}
+
+  async state(target: UpdateTarget): Promise<UpdateSnapshot> {
+    assertHostTarget(target)
+    return this.machine.state()
   }
 
-  void bootLog(`auto-update enabled (feed: ${releasesUrl() ?? 'unknown'})`)
+  async check(target: UpdateTarget): Promise<HostUpdateInfo | null> {
+    assertHostTarget(target)
+    this.assertEnabled()
+
+    const current = this.machine.state()
+    if (current.phase === 'checking') return this.available
+    this.machine.beginCheck(app.getVersion())
+
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      // electron-updater normally emits update-available/not-available before
+      // resolving. Keep a defensive fallback so a provider that resolves
+      // without either event cannot leave the shared state stuck in checking.
+      if (this.machine.state().phase === 'checking') {
+        const nextVersion = result?.updateInfo?.version
+        if (nextVersion && nextVersion !== app.getVersion()) {
+          this.onAvailable(result.updateInfo)
+        } else {
+          this.onNotAvailable()
+        }
+      }
+      return this.available
+    } catch (error) {
+      this.onError(error)
+      throw error
+    }
+  }
+
+  async download(target: UpdateTarget): Promise<void> {
+    assertHostTarget(target)
+    this.assertEnabled()
+    const phase = this.machine.state().phase
+    if (phase === 'ready') return
+    if (phase !== 'available' && phase !== 'downloading') {
+      throw new Error(`Host update is not ready to download (state=${phase})`)
+    }
+    this.machine.markDownloadStarted()
+    try {
+      await autoUpdater.downloadUpdate()
+      this.machine.markDownloaded()
+    } catch (error) {
+      this.onError(error)
+      throw error
+    }
+  }
+
+  async install(target: UpdateTarget): Promise<void> {
+    assertHostTarget(target)
+    this.assertEnabled()
+    if (this.machine.state().phase !== 'ready') {
+      throw new Error(`Host update is not ready to install (state=${this.machine.state().phase})`)
+    }
+    this.machine.beginInstall()
+    autoUpdater.quitAndInstall()
+  }
+
+  async rollback(target: UpdateTarget): Promise<void> {
+    assertHostTarget(target)
+    throw new Error('Automatic host rollback is not implemented for Electron; use the LTS installer fallback')
+  }
+
+  onChecking(): void {
+    try {
+      this.machine.beginCheck(app.getVersion())
+    } catch {
+      // A duplicate native checking event must not disrupt an active download.
+    }
+  }
+
+  onAvailable(info: { version: string; releaseNotes?: unknown }): void {
+    this.available = {
+      target: 'host',
+      currentVersion: app.getVersion(),
+      nextVersion: info.version,
+      notes: releaseNotes(info),
+    }
+    try {
+      this.machine.markAvailable(info.version)
+    } catch (error) {
+      this.machine.markFailure(error)
+    }
+  }
+
+  onNotAvailable(): void {
+    this.available = null
+    this.machine.markNoUpdate()
+  }
+
+  onDownloadProgress(percent: number): void {
+    try {
+      this.machine.markDownloadProgress(percent)
+    } catch (error) {
+      this.machine.markFailure(error)
+    }
+  }
+
+  onDownloaded(): void {
+    try {
+      this.machine.markDownloaded()
+    } catch (error) {
+      this.machine.markFailure(error)
+    }
+  }
+
+  onError(error: unknown): void {
+    this.machine.markFailure(error)
+  }
+
+  private assertEnabled(): void {
+    if (this.disabledReason) throw new HostUpdateUnavailableError(this.disabledReason)
+  }
+}
+
+function disabledHandle(reason: string): AutoUpdateHandle {
+  const service = new ElectronHostUpdateService(reason)
+  appState.hostUpdate = service
+  return {
+    service,
+    checkNow: () => {
+      void bootLog(`auto-update disabled: ${reason}; opening releases page`)
+      void openReleasesPage()
+    },
+    openReleasesPage: () => void openReleasesPage(),
+  }
+}
+
+/**
+ * Configure Electron's existing updater as an adapter behind the shared v0.2
+ * UpdateService. Runtime and plugin upgrades intentionally remain separate
+ * managers; this service owns only the desktop host application.
+ */
+export function initAutoUpdate(): AutoUpdateHandle {
+  if (!app.isPackaged) return disabledHandle('development build')
+  if (portableBuild()) return disabledHandle('portable build cannot replace its running executable')
+  if (!hasUpdateFeed() && !process.env.DSH_UPDATE_FEED_URL?.trim()) {
+    return disabledHandle('package has no update feed')
+  }
+
+  const service = new ElectronHostUpdateService()
+  appState.hostUpdate = service
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
-  if (process.env.DSH_UPDATE_FEED_URL) {
-    // Unofficial/self-hosted feed override for testing.
-    autoUpdater.setFeedURL({ provider: 'generic', url: process.env.DSH_UPDATE_FEED_URL })
+  autoUpdater.allowPrerelease = app.getVersion().includes('-')
+
+  const genericFeed = process.env.DSH_UPDATE_FEED_URL?.trim()
+  if (genericFeed) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: genericFeed })
   }
 
-  autoUpdater.on('checking-for-update', () => void bootLog('auto-update: checking for updates'))
+  autoUpdater.on('checking-for-update', () => {
+    service.onChecking()
+    void bootLog('auto-update: checking')
+  })
   autoUpdater.on('update-available', (info) => {
-    void bootLog(`auto-update: update available ${info.version}`)
+    service.onAvailable(info)
+    void bootLog(`auto-update: available ${info.version}`)
     notify(t('update.available.title'), fmt(t('update.available.body'), { version: info.version }))
   })
-  autoUpdater.on('update-not-available', () => void bootLog('auto-update: up to date'))
-  autoUpdater.on('error', (error) => {
-    void bootLog(`auto-update: error: ${error instanceof Error ? error.message : String(error)}`)
+  autoUpdater.on('update-not-available', (info) => {
+    service.onNotAvailable()
+    void bootLog(`auto-update: no update (${info.version})`)
   })
-
-  let lastLoggedPercent = 0
   autoUpdater.on('download-progress', (progress) => {
-    const percent = Math.floor(progress.percent)
-    if (percent >= lastLoggedPercent + 10) {
-      lastLoggedPercent = percent
-      void bootLog(
-        `auto-update: download ${percent}% (${Math.round(progress.transferred / 1024)}/${Math.round(progress.total / 1024)} KB)`,
-      )
-    }
+    service.onDownloadProgress(progress.percent)
+    void bootLog(
+      `auto-update: downloading ${Math.floor(progress.percent)}% (${progress.transferred}/${progress.total})`,
+    )
   })
-
   autoUpdater.on('update-downloaded', (info) => {
-    void bootLog(`auto-update: update downloaded (${info.version}), ready to install`)
+    service.onDownloaded()
+    void bootLog(`auto-update: downloaded ${info.version}; waiting for restart`)
     notify(t('update.downloaded.title'), fmt(t('update.downloaded.body'), { version: info.version }))
     void dialog
       .showMessageBox({
         type: 'info',
-        title: t('common.appTitle'),
-        message: fmt(t('update.restart.title'), { version: info.version }),
+        title: t('update.downloaded.title'),
+        message: fmt(t('update.downloaded.body'), { version: info.version }),
         detail: t('update.restart.detail'),
         buttons: [t('update.restart.now'), t('update.restart.later')],
         defaultId: 0,
         cancelId: 1,
       })
       .then(({ response }) => {
-        if (response === 0) autoUpdater.quitAndInstall()
+        if (response === 0) {
+          void service.install('host').catch((error) => {
+            void bootLog(`auto-update install failed: ${error instanceof Error ? error.message : String(error)}`)
+          })
+        }
       })
-      .catch(() => undefined)
+  })
+  autoUpdater.on('error', (error) => {
+    service.onError(error)
+    void bootLog(`auto-update error: ${error instanceof Error ? error.message : String(error)}`)
   })
 
   const checkNow = (): void => {
-    void autoUpdater
-      .checkForUpdates()
-      .then((result) => void bootLog(`auto-update: checkForUpdates resolved (${result?.updateInfo.version ?? 'n/a'})`))
-      .catch((error) => void bootLog(`auto-update: check failed: ${error instanceof Error ? error.message : String(error)}`))
+    void service.check('host').catch((error) => {
+      void bootLog(`auto-update check failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
-  // First check shortly after startup so it never delays boot.
-  const first = setTimeout(() => checkNow(), 5_000)
-  first.unref()
+  const firstCheck = setTimeout(checkNow, 5_000)
+  firstCheck.unref()
 
-  return { checkNow, openReleasesPage }
-}
-
-export function openReleasesPage(): void {
-  const url = releasesUrl()
-  if (url) {
-    void shell.openExternal(url)
-    return
+  return {
+    service,
+    checkNow,
+    openReleasesPage: () => void openReleasesPage(),
   }
-  void bootLog('auto-update: no releases URL available (feed missing); cannot open page')
-  notify(t('update.available.title'), t('update.noFeed.body'))
 }
