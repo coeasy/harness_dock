@@ -3,7 +3,7 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import * as http from 'node:http'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { openWebUiSession } from '../../client-runtime/src/web-auth.ts'
+import { openWebUiSession } from '@dsh/client-runtime'
 import { startHarnessGateway, type HarnessGatewayHandle } from './gateway.ts'
 
 const ADMIN_BODY_LIMIT = 8 * 1024
