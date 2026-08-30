@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const args = parseArgs(process.argv.slice(2))
@@ -46,6 +46,7 @@ function writeChannel(output, fileNames, primaryName, legacyAlias) {
       name,
       sha512: sha512File(file),
       size: statSync(file).size,
+      blockMapSize: differentialBlockMapSize(file),
     }
   })
   const primary = files.find((file) => file.name === primaryName)
@@ -54,11 +55,15 @@ function writeChannel(output, fileNames, primaryName, legacyAlias) {
   let yml = `version: ${version}\nfiles:\n`
   for (const file of files) {
     yml += `  - url: ${file.name}\n    sha512: ${file.sha512}\n    size: ${file.size}\n`
+    if (file.blockMapSize !== undefined) yml += `    blockMapSize: ${file.blockMapSize}\n`
   }
   // path/sha512 remain for compatibility with older electron-updater readers.
   yml += `path: ${primary.name}\nsha512: ${primary.sha512}\nreleaseDate: '${releaseDate}'\n`
   writeFileSync(path.join(dir, output), yml, 'utf8')
-  console.log(`electron update metadata: ${output} -> ${primary.name}`)
+  console.log(
+    `electron update metadata: ${output} -> ${primary.name}` +
+      `${primary.blockMapSize ? ` (blockMapSize=${primary.blockMapSize})` : ' (full-download fallback)'}`,
+  )
 
   // v0.1.1 baked the default `latest` channel into both Full and Thin. The
   // first v0.2 release keeps a legacy alias pointing at the reliable Full
@@ -67,6 +72,43 @@ function writeChannel(output, fileNames, primaryName, legacyAlias) {
   if (legacyAlias) {
     writeFileSync(path.join(dir, legacyAlias), yml, 'utf8')
     console.log(`legacy update alias: ${legacyAlias} -> ${output}`)
+  }
+}
+
+/**
+ * electron-updater uses two different differential layouts:
+ * - NSIS: a `<installer>.blockmap` sidecar;
+ * - AppImage: a deflated blockmap embedded at the end of the AppImage followed
+ *   by a 4-byte big-endian blockmap length.
+ *
+ * macOS remains full-download fallback here. Its updater can use zip sidecars,
+ * but the v0.2 migration intentionally prioritizes signed/reliable replacement
+ * over a second binary-delta path while Tauri is being introduced.
+ */
+function differentialBlockMapSize(file) {
+  if (file.endsWith('.exe')) {
+    const sidecar = `${file}.blockmap`
+    return existsSync(sidecar) ? statSync(sidecar).size : undefined
+  }
+  if (file.endsWith('.AppImage')) return embeddedAppImageBlockMapSize(file)
+  return undefined
+}
+
+function embeddedAppImageBlockMapSize(file) {
+  const size = statSync(file).size
+  if (size < 4) throw new Error(`AppImage is too small to contain an embedded blockmap: ${file}`)
+  const fd = openSync(file, 'r')
+  try {
+    const trailer = Buffer.alloc(4)
+    const bytes = readSync(fd, trailer, 0, 4, size - 4)
+    if (bytes !== 4) throw new Error(`short read while reading AppImage blockmap trailer: ${file}`)
+    const blockMapSize = trailer.readUInt32BE(0)
+    if (blockMapSize <= 0 || blockMapSize + 4 >= size) {
+      throw new Error(`invalid embedded AppImage blockmap size ${blockMapSize}: ${file}`)
+    }
+    return blockMapSize
+  } finally {
+    closeSync(fd)
   }
 }
 
