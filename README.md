@@ -1,187 +1,221 @@
 <div align="center">
 
-<img src="apps/desktop/build/icon-256.png" width="88" alt="HarnessDock icon" />
+<img src="apps/tauri/src-tauri/icons/icon.png" width="88" alt="HarnessDock icon" />
 
 # HarnessDock
 
-**深潜工作台 —— DeepSeek Harness 的一键桌面停靠入口**
+**DeepSeek Harness 的 Tauri 2 桌面 / 移动客户端**
 
-*薄壳客户端 · 原生加载官方 Web UI · 不 fork、不重写*
+*官方 Harness Web UI · 桌面本地 Runtime · 移动端安全远程 Gateway · 不 fork 上游 SPA*
 
-> **免责声明**：HarnessDock 为独立的第三方客户端，仅嵌入官方 DeepSeek Harness Web UI，与 DeepSeek 官方无隶属或背书关系；DeepSeek 及相关标识为 DeepSeek 官方商标。
+> **免责声明**：HarnessDock 是独立第三方客户端，与 DeepSeek 官方无隶属或背书关系；DeepSeek 及相关标识属于其权利人。
 
-![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
-![runtime](https://img.shields.io/badge/runtime-pinned%20dsh%20%7C%20offline%20bundled-8A2BE2)
+![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-blue)
+![host](https://img.shields.io/badge/host-Tauri%202-24C8DB)
+![runtime](https://img.shields.io/badge/dsh-pinned%20official%20runtime-8A2BE2)
 ![license](https://img.shields.io/badge/license-MIT-green)
-
-![HarnessDock hero](docs/images/hero-banner.png)
 
 </div>
 
-HarnessDock 拉起官方 `dsh web` 并加载官方 Web UI，**Web 端全部操作**（模型、工作区、会话、审批、插件、导出）原样可用。不 fork 上游，不重写 SPA。
+## 当前版本
 
-> 命名释义：**Dock** = 码头 / 停靠台 / 任务栏 Dock —— 官方 Harness 的一键停靠入口。
-> 备选名（弃用存档）：HarnessDeck、DSH Console、NovaShell。
+- **HarnessDock v0.2.0**：Tauri 2 主线。
+- **HarnessDock v0.1.2**：最后一个 Electron 稳定基线，仅保留兼容与历史参考。
+- 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
 
-## 目录
+HarnessDock 不重写 DeepSeek Harness SPA。桌面端启动固定版本的官方 `dsh` Runtime，并把官方 Harness UI 放在隔离的 WebView 中；Android/iOS 不在手机内运行桌面 Node/dsh，而是通过 HarnessDock Gateway 连接桌面或服务器 Runtime。
 
-- [特性一览](#特性一览)
-- [架构](#架构)
-- [一键构建（裸机可用）](#一键构建裸机可用)
-- [独立运行 exe（Portable）](#独立运行-exeportable)
-- [多种安装包](#多种安装包)
-- [版本对齐](#版本对齐)
-- [命令与环境变量](#命令与环境变量)
+## v0.2.0 平台矩阵
 
-## 特性一览
+| 平台 | Host | Runtime 模式 | CI 产物 |
+| --- | --- | --- | --- |
+| Windows x64 | Tauri 2 | 本地 + Remote Gateway | NSIS `.exe` |
+| Linux x64 | Tauri 2 | 本地 + Remote Gateway | `.deb` + AppImage |
+| macOS x64 | Tauri 2 | 本地 + Remote Gateway | `.dmg` |
+| macOS arm64 | Tauri 2 | 本地 + Remote Gateway | `.dmg` |
+| Android arm64 | Tauri 2 | Remote-only | debug `.apk` + `.aab` |
+| iOS Simulator arm64 | Tauri 2 | Remote-only | Simulator `.app` 压缩包 |
+| VS Code / Cursor | Extension | Host Runtime | `.vsix`（仓库继续维护） |
 
-- **薄壳零劫持**：嵌入官方 Web UI，功能 100% 原样，升级只需对齐版本号
-- **双场景交付**：thin（小体积，首启拉取钉版 dsh）/ full（完全离线，内置 Node + dsh 运行时）
-- **免安装运行**：Windows 双场景均产出单文件 Portable exe，U 盘即插即用
-- **裸机一键构建**：无 Node / pnpm / dsh 的第三方电脑直接跑构建脚本，工具链自动引导
-- **三端同构**：桌面 + VS Code / Cursor 扩展共用一套运行时代码
+> Android/iOS v0.2.0 是原生构建通过的 developer preview。Android 尚未使用 Google Play 正式签名；iOS 当前是 Simulator 构建，不是 App Store/TestFlight IPA。
 
 ## 架构
 
-![HarnessDock architecture](docs/images/architecture.png)
+```text
+                         HarnessDock v0.2.0
 
-`docs-sync` 钉版本 → `client-runtime` spawn `dsh web --host 127.0.0.1 --port 0 --no-open --patch` → `plugin-embedded-client` 写 ready 文件 → Electron / VS Code 加载官方 URL。
-
-数据与凭证仍走官方 `~/.dsh/`。
-
-## 一键构建（裸机可用）
-
-一键脚本可在**第三方电脑**上直接运行，无需预装 Node / pnpm / dsh：
-
-- 检测到无 Node 或版本低于 `^22.19.0` 时，自动下载便携版 Node 22.19 到 `.rundata/toolchain/`（不改系统环境）；
-- 自动经 corepack 激活 pnpm 10；若 corepack 不可用，仅使用 npm 安装 pnpm 作为兜底；
-- `node_modules` 缺失时自动 `pnpm install --frozen-lockfile --prefer-offline`，优先复用本机缓存；
-- 全程只需系统具备网络与解压能力（Windows 用内置 `curl.exe` + PowerShell，macOS / Linux 用 `curl` + `tar`）。
-
-```sh
-# Windows
-scripts\build.bat                    # 当前系统，thin
-scripts\build.bat win full           # Windows 完整包（离线内置运行时）
-scripts\build.bat win both           # thin + full 一次全出
-
-# macOS / Linux
-./scripts/build.sh                   # 当前系统，thin
-./scripts/build.sh mac full
-./scripts/build.sh linux both --skip-tests
+ Desktop                                             Mobile
+ Windows / macOS / Linux                            Android / iOS
+          |                                              |
+          v                                              v
+   Tauri local main UI                           Tauri pairing UI
+          |                                              |
+          | local IPC only                               | HTTPS / WSS
+          v                                              v
+ Runtime Controller -------- HarnessDock Gateway <--- paired session
+          |
+          +---- Gateway sidecar
+          |
+          +---- pinned official dsh Runtime
+          |       |
+          |       v
+          |   dsh web on loopback
+          |       |
+          v       v
+       isolated Harness WebView
+       (no local Tauri capability)
 ```
 
-等价的直接调用：`node scripts/bootstrap.mjs && node scripts/build.mjs --os win --scenario both`，或 `pnpm setup` + `pnpm build:desktop`。
+### 桌面端
 
-> 安装方式说明：下载并安装 `HarnessDock-Setup-*.exe` 的终端用户不需要 Node、pnpm 或 npm。pnpm/npm 只影响源码构建：本仓库使用 `pnpm-workspace.yaml`、`workspace:*` 和 `pnpm-lock.yaml`，依赖安装应使用 pnpm；npm 仅作为自动安装 pnpm 的备用工具，不能直接替代 `pnpm install`。
+桌面 Tauri Host 负责：
 
-## 独立运行 exe（Portable）
+- 启动 / 停止固定版本的本地 DeepSeek Harness Runtime；
+- 建立官方 dsh launch-token → HttpOnly Web Session；
+- 打开独立 `harness` WebView 展示官方 Harness UI；
+- 启动受控 Gateway sidecar；
+- 生成一次性配对码、列出设备、撤销设备 Session；
+- 保持远程 Harness 页面与本地 Tauri IPC 权限隔离。
 
-**thin 与 full 两种场景的 Windows 构建均产出免安装单文件 exe**，双击即用：
+### Android / iOS
 
-| 场景 | 产物（apps/desktop/release/ 下） | 说明 |
-| --- | --- | --- |
-| thin | `HarnessDock-Portable-*--thin.exe` | 体积小，首启经 npx 拉取钉版 dsh（需联网） |
-| full | `HarnessDock-Portable-*--full.exe` | 内置 Node + dsh 运行时，完全离线可用 |
+移动端只实现 Remote Runtime：
 
-另有 NSIS 安装包（`HarnessDock-Setup-*`）与免安装 zip 目录。
+1. 校验 HTTPS HarnessDock Gateway；
+2. 使用一次性 pairing code 完成显式配对；
+3. 获得 Gateway HttpOnly Session；
+4. 通过同一 Gateway 代理 HTTP / WebSocket 到桌面 dsh；
+5. 手机端不能覆盖或读取桌面 dsh 的上游认证 Cookie。
 
-## 多种安装包
+这种设计避免在 iOS/Android 内嵌桌面 Node Runtime，同时保持官方 Harness Web UI 的行为一致。
 
-![HarnessDock platforms](docs/images/platforms.png)
+## 安全边界
 
-| 种类 | 命令 | 依赖 | 说明 |
-| --- | --- | --- | --- |
-| 精简 thin 包 | `pnpm pack:desktop` | 本机需 Node，首次 `npx` 拉精确版 dsh | 包体小，含 Windows Portable exe |
-| **完整 full 包（免 Node、免预装 dsh）** | `pnpm pack:desktop:full` | 无 | 内置 Node 22.19 + `@deepseek-ai/dsh@origin` |
-| Windows thin / full 一键 | `scripts\build.bat win both` | 无（自动引导） | thin + full 全产物 |
-| VS Code / Cursor | `pnpm pack:vscode` | 扩展宿主自带 Node | VSIX |
+v0.2.0 明确区分三类认证 / 权限：
 
-完整包会先执行 `pnpm prepare:runtime`：下载官方 `node.exe`（或 posix `bin/node`），再 `npm install @deepseek-ai/dsh@<origin 精确版本>` 到 `runtimes/pack/`，打进 `resources/dsh-runtime`。启动时若检测到该目录，自动使用 `DSH_RUNTIME=bundled`。
+- **Tauri local IPC**：只授权本地 `main` 管理窗口；
+- **Gateway Session**：用于已配对移动设备；
+- **dsh upstream Web Session**：由桌面 Host 持有并转发，移动端不能注入或替换。
 
-运行时、VS Code / Cursor 扩展在 Windows、macOS、Linux 上共用同一套代码。桌面安装包按**构建主机**打对应产物，不要跨机交叉编译 macOS（Windows 产物可在任意主机交叉构建）。
+`apps/tauri/src-tauri/capabilities/local-main.json` 不配置 remote origin，因此远程 Harness/Gateway 页面不会获得本地 Tauri command 权限。
 
-| 平台 | 本地命令 | 产物 |
-| --- | --- | --- |
-| 当前系统 | `pnpm pack:desktop` | 本机默认安装包 |
-| Windows | `pnpm pack:desktop:win` | NSIS `.exe` + Portable `.exe` + `.zip` |
-| macOS（需在 Mac 上） | `pnpm pack:desktop:mac` | `.dmg` / `.zip`（x64 + arm64） |
-| Linux（需在 Linux 上） | `pnpm pack:desktop:linux` | `.AppImage` / `.deb` |
-| 编辑器 | `pnpm pack:vscode` | `.vsix`（三端通用） |
+## 仓库结构
 
-## 版本对齐
+```text
+apps/
+  tauri/                         v0.2.0 Windows/macOS/Linux/Android/iOS Host
+  desktop/                       v0.1.x Electron legacy baseline
+  vscode/                        VS Code / Cursor extension
 
-文档、运行时、前端 SPA 钉在同一精确版本。禁止使用 npm `latest` / `next` dist-tag。
+packages/
+  bootstrap/                     Host contract + Gateway + pairing/session
+  client-runtime/                pinned dsh Runtime lifecycle
+  plugin-embedded-client/        embedded client plugin
+  docs-sync/                     upstream pin / origin metadata
 
-```sh
-pnpm sync:dsh                 # git tag ∩ npm 的最新可用版本
-pnpm sync:dsh --pin 0.1.1-rc.2
-pnpm sync:dsh --check         # origin 是否过期（CI）
+.github/workflows/
+  tauri-ci.yml                   快速五端编译 / parity gate
+  tauri-candidate.yml            正式候选构建：Runtime + Desktop + Android + iOS
+  release.yml                    仅发布 exact-main 已全绿 candidate
 ```
 
-产物：
+## 开发环境
 
-- `packages/docs-sync/origin.json`
-- `packages/docs-sync/capability-matrix.yaml`
-- `packages/docs-sync/capability-summary.md` —— 能力矩阵的 Markdown 摘要（`dshVersion` / `gitTag` / `hostMounts` 表 / `operations` 列表），随矩阵同步生成，用于 GitHub Release notes 与项目 docs；parity 测试会告警其与矩阵的漂移
+基础开发需要：
 
-## 自动更新（Phase A）
+- Node.js 22+
+- pnpm 10
+- Rust stable
+- 对应平台的 Tauri 2 原生依赖
 
-- **Windows NSIS 安装版**：内置 `electron-updater`，从 GitHub Releases 做 **blockmap 差分自动更新**（后台下载、退出时安装，只替换安装目录、不影响 `~/.dsh` 数据）。
-- **Portable 单文件 exe 不支持自更**：检测到即禁用自动更新，托盘「检查更新…」降级为打开 GitHub Releases 页手动下载替换。
-- **更新源需在构建时注入**：`apps/desktop/scripts/pack.mjs` 根据 `GH_OWNER` / `GH_REPO` 环境变量注入 `-c.publish.*`，生成 `resources/app-update.yml`；未设置则不生成 feed，自动更新保持静默不激活：
-
-  ```sh
-  GH_OWNER=<owner> GH_REPO=<repo> pnpm pack:desktop:win     # Windows
-  ```
-
-- **发布纪律**：一次发版 = 新客户端版本 + 新钉版 `origin.json`（自动更新以客户端版本为推进单元）。`pnpm check:release` 会拒绝"origin 已变更但客户端版本未 +1"的发版；发版后 `pnpm mark:released` 记录基线。
-- **last-known-good 回滚**：每次启动前把当前钉版备份到 `userData/previous-origin.json`；若新版 dsh 启动失败，自动回退到上一钉版并提示（thin / full 均生效）。
-- 详细评估与分阶段计划见 `docs/auto-update-assessment.md`（含签名、多 channel 等后续阶段与待核验项）。
-
-## 运行时解耦与体积（Phase B）
-
-- **full 场景运行时与客户端解耦**：内置 `resources/dsh-runtime` 作为**离线种子**。启动时若 `origin.json` 钉的 dsh 版本与种子不同且联网，则用既有下载管线（按版本缓存 / 续传 / integrity 校验）把钉版拉进 `userData/runtime-cache` 运行——客户端升级（electron-updater，小）与 dsh 升级（增量）分离，full 用户升级 dsh 不再全量重下；离线时回退种子运行。可用 `DSH_BUNDLED_FETCH=0` 关闭（始终用种子）。
-- **运行时体积裁剪**：`prepare:runtime` 与新增 `--prune-only` 会清理跨平台原生变体（`@img/sharp-*`、`node-pty` 非宿主 prebuild）、dev/调试文件（`.map` / `.pdb` / `.d.ts`）、SDK 开发目录（包顶层 `test`/`tests`/`__tests__`/`examples`/`coverage`/`.yarn`，不碰 `@types/*` 与 `src` 下目录）以及文档/声明文件（`*.md` 仅删非 `LICENSE*`/`CHANGELOG*`/`NOTICE*` 的，另含 `.d.mts`/`.d.cts`）。实测 win-x64 运行时 **289.3 MB → 210.1 MB（−79 MB）→ 195.0 MB（二次裁剪 −15.1 MB）**。
-- **体积预算门禁**：`pnpm check:size` 扫描 `apps/desktop/release`（含 `thin`/`full`/`full-pruned`）下的 `HarnessDock-*.exe/.zip`，按 `-thin`/`-full` 与 Portable/Setup/zip 比对预算（thin ≤ 90/90/125 MB，full ≤ 165/165/230 MB）；超标 exit 1，无产物提示并 exit 0（纯源码构建不阻塞）。`scripts/build.mjs` 打包后会自动 best-effort 跑一次。
-- **启动性能基线**：`pnpm perf:report [logFile]` 解析 boot 日志中 `[ISO] boot start` → `boot ok`/`boot FAILED` 的耗时（默认 `%TEMP%/harnessdock-logs/boot-YYYY-MM-DD.log`，可用 `DSH_BOOT_LOG` 覆盖；best-effort，无日志/无标记均 exit 0）。
-- 解耦与裁剪均有单测覆盖；全仓 `tsc --noEmit` 通过。
-
-## 桌面端体验增强（D3 i18n / E1 诊断 / E2 版本管理 / E4 Splash）
-
-桌面客户端的体验补强，全部位于 `apps/desktop/src/`：
-
-- **i18n（D3）**：所有用户可见文案（崩溃 / 无响应 / 下载失败对话框、托盘菜单、auto-update 通知与「重启安装」对话框、boot 失败对话框、splash 文案、回滚通知）走 `apps/desktop/src/i18n.ts` 极简 key-value 表（zh-CN / en），按 `app.getLocale()`（`zh*` → zh-CN，否则 en）自动取文案；缺失 key 回退 key 本身。不引入 i18n 框架。
-- **诊断面板（E1）**：托盘「诊断」打开独立窗口（`apps/desktop/src/diagnostics/`，内嵌深色 HTML，sandbox + contextIsolation）。展示当前 dsh 版本 / origin 钉版 / 本地覆盖 / 运行时模式 / 种子版本 / 缓存目录与占用 / PID；一键清理旧版本缓存（保留钉版 / 种子 / 当前 / 覆盖版本）；boot 日志尾部查看；「导出诊断包」将 origin.json + boot log + 版本信息打包为 `userData/diagnostics-<时间戳>.zip`（Windows 用 PowerShell `Compress-Archive`，posix 用 `tar`）。零遥测：仅用户主动导出。
-- **运行时版本管理（E2）**：托盘「版本管理…」打开同一诊断窗口的「版本管理」区。列出钉版 / 种子 / 已缓存版本，可「切换到 X」（写入 `userData/origin-override.json`，仅允许钉版 / 种子 / 已缓存版本，杜绝任意版本漂移；重启后生效）与「恢复钉版」（清除 override），均提供「立即重启」；boot 时读取 override 并校验，非法 override 忽略并记入 boot log。
-- **Splash 升级（E4）**：内嵌模板维持 `data:` URL 加载，新增下载进度条（`onProgress` 的 `fetch` 阶段驱动百分比）与错误态 UI（错误摘要 + 重试 / 打开日志 / 复制错误）。错误操作经 `apps/desktop/src/splash-preload.ts`（`contextBridge` → `ipcRenderer.send`）到达主进程：重试 = `app.relaunch(); app.exit(0)`，打开日志 = `openLogDir()`，复制错误 = `clipboard.writeText`。
-- 新增单测：`apps/desktop/tests/version-override.test.ts`、`i18n.test.ts`、`diagnostics.test.ts`。
-
-## 命令与环境变量
-
-```sh
-pnpm install
+```bash
+pnpm install --frozen-lockfile
+pnpm check:versions
+pnpm check:release
 pnpm test
-pnpm setup                 # 引导 pnpm + 依赖（裸机）
-pnpm --filter @dsh/desktop start
-pnpm build:desktop         # 跨平台一键构建入口
-pnpm pack:vscode
-pnpm check:versions        # 校验全仓版本一致
-pnpm check:release         # 发版门禁：origin 变更必须伴随客户端版本 +1
-pnpm check:size            # 产物体积预算门禁（thin/full × Portable/Setup/zip）
-pnpm perf:report           # 启动耗时汇总（解析 boot 日志 boot start → ok）
-pnpm mark:released         # 记录已发布基线（发版后执行）
+
+cd apps/tauri
+cargo check
 ```
 
-| 变量 | 含义 |
-| --- | --- |
-| `DSH_RUNTIME` | `local`（默认开发）/ `download`（发行，npx 精确版本）/ `bundled` |
-| `DSH_RUNTIME_VERSION` | 覆盖 origin 中的精确版本；不可为 `latest` |
-| `DSH_BIN` | 本地 dsh 可执行文件路径 |
-| `DSH_TRAY` | 设为 `0` 时关闭窗口直接退出（默认关窗隐藏到托盘） |
-| `DSH_BUNDLED_FETCH` | 设为 `0` 时 full 场景始终用内置种子运行时（关闭运行时解耦） |
-| `DSH_PACK_OUTPUT` | 打包时覆盖 electron-builder 输出目录（目录被占用/临时构建时用） |
-| `GH_OWNER` / `GH_REPO` | 构建时注入，生成自动更新 feed（`app-update.yml`） |
-| `DSH_RELEASES_URL` | 覆盖「检查更新 → 打开 GitHub Releases 页」的地址 |
-| `DSH_UPDATE_FEED_URL` | 覆盖自动更新源（自建/测试用 generic feed） |
-| `DSH_BOOT_LOG` | `perf:report` 指向的 boot 日志文件（默认 `%TEMP%/harnessdock-logs/boot-YYYY-MM-DD.log`） |
-| `DSH_RELEASE_ROOT` | `check:size` 覆盖产物扫描目录（CI / staging 用，默认 `apps/desktop/release`） |
+完整桌面安装包包含官方固定 Runtime，构建过程还需要准备上游 dsh runtime closure。**`.github/workflows/tauri-candidate.yml` 是正式发布构建的参考实现**，它会固定上游 Git commit、构建 official profile、生成四个平台 Runtime、做真实 Runtime smoke，再执行 Tauri bundling。
+
+## Tauri 原生构建
+
+在已经准备好 Tauri resources / Runtime 的环境中：
+
+```bash
+cd apps/tauri
+
+# Windows
+cargo tauri build --bundles nsis
+
+# Linux
+cargo tauri build --bundles deb,appimage
+
+# macOS
+cargo tauri build --bundles dmg
+```
+
+移动端：
+
+```bash
+cd apps/tauri
+
+cargo tauri android init --ci
+cargo tauri android build --debug --apk --aab --target aarch64 --ci
+
+cargo tauri ios init --ci
+cargo tauri ios build --debug --target aarch64-sim --ci
+```
+
+详见 `apps/tauri/README.md`。
+
+## Release 纪律
+
+v0.2.0 的正式发布采用两阶段 gate：
+
+```text
+exact main SHA
+    |
+    v
+Tauri Candidate
+    |-- version / release contract
+    |-- full tests
+    |-- pinned upstream official build
+    |-- 4 runtime bundles
+    |-- 4 desktop runtime smoke tests
+    |-- Windows / Linux / macOS Tauri packages
+    |-- Android APK + AAB
+    |-- iOS Simulator build
+    v
+candidate-gate = success
+    |
+    v
+release.yml verifies candidate SHA == main SHA == tag SHA
+    |
+    v
+GitHub Release + SHA256SUMS
+```
+
+`release.yml` 不重新走另一套 Electron 构建链，也不会接受其他 commit 的 artifact。
+
+## 签名状态
+
+当前公开 CI：
+
+- 尚未启用 Windows Authenticode；
+- 尚未启用 Apple Developer ID / notarization；
+- Android 为 debug developer preview；
+- iOS 为 Simulator developer preview；
+- GitHub Release 会提供 `SHA256SUMS`，同时 GitHub Assets 提供 SHA-256 digest。
+
+生产商店分发需要在后续接入对应开发者证书与签名密钥。
+
+## 数据目录
+
+DeepSeek Harness 数据与凭证仍遵循上游规则，默认使用官方 `~/.dsh/` 数据目录。HarnessDock 不迁移、不复制用户模型凭据到移动端。
+
+## License
+
+MIT. 具体第三方依赖、DeepSeek Harness 与商标使用遵循各自许可证和权利声明。
