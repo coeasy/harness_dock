@@ -348,7 +348,7 @@ if (packedRuntimeDir) {
         [
           'install',
           '--omit=dev',
-          '--include=optional',
+          '--omit=optional',
           '--no-fund',
           '--no-audit',
           `--os=${platform}`,
