@@ -19,14 +19,17 @@ export {
   PERRY_ANDROID_HOST_PROFILE,
   PERRY_DESKTOP_HOST_PROFILE,
   PERRY_IOS_HOST_PROFILE,
+  TAURI_HOST_PROFILE,
   supportsRuntime,
 } from './host-capabilities.ts'
 export type {
   HarnessHostCapabilities,
+  HarnessHostChannel,
   HarnessHostId,
   HarnessHostProfile,
   RuntimeAccessMode,
 } from './host-capabilities.ts'
+export * from './client-core.ts'
 export { backupOrigin, defaultPreviousOriginPath, readPreviousOrigin } from './rollback.ts'
 export {
   ELECTRON_HOST,
@@ -46,9 +49,11 @@ export {
   defaultRuntimeLeaseRoot,
   inspectRuntimeLease,
   isProcessAlive,
+  normalizeRuntimeLeaseHost,
 } from './runtime-lease.ts'
 export type {
   AcquireRuntimeLeaseOptions,
   RuntimeLeaseHandle,
+  RuntimeLeaseHostInput,
   RuntimeLeaseRecord,
 } from './runtime-lease.ts'
