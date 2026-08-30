@@ -52,3 +52,29 @@ export type {
   RuntimeLeaseHandle,
   RuntimeLeaseRecord,
 } from './runtime-lease.ts'
+export {
+  DEFAULT_UPDATE_POLICY,
+  assertReleaseManifestV2,
+  compareVersions,
+  createUpdatePlan,
+  createUpdateTransaction,
+  selectDelivery,
+  shouldInstallAutomatically,
+  shouldRestartAutomatically,
+  transitionUpdateTransaction,
+} from './update-orchestrator.ts'
+export type {
+  InstalledUpdateContext,
+  PackageRuntimeMode,
+  PlannedDelivery,
+  ReleaseArtifactV2,
+  ReleaseManifestV2,
+  UpdateChannel,
+  UpdateComponent,
+  UpdateDeltaArtifact,
+  UpdatePhase,
+  UpdatePlan,
+  UpdatePolicy,
+  UpdateRestartScope,
+  UpdateTransaction,
+} from './update-orchestrator.ts'
