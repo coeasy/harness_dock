@@ -139,12 +139,17 @@ async function installPackedRuntime(root: string): Promise<void> {
 
   const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   console.log(`installing ${entries.length} official packed upstream tarballs for dsh ${origin.dshVersion}`)
+  // Match upstream's clean packed-install verification: optional platform
+  // packages must not be required for the CLI to start. HarnessDock installs
+  // only the target-native optional packages it actually needs immediately
+  // afterwards via installTargetNativePackages(), avoiding a large cross-feature
+  // optional dependency payload in Full/Thin runtimes.
   await execFileAsync(
     npmBin,
     [
       'install',
       '--omit=dev',
-      '--include=optional',
+      '--omit=optional',
       '--no-fund',
       '--no-audit',
       '--package-lock=false',
