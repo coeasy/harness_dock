@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ClientCommandAbortedError,
   ClientCommandBus,
   ClientCommandHandlerConflictError,
+  ClientCommandTimeoutError,
+  ClientCommandValidationError,
   UnsupportedClientCommandError,
 } from '../src/client-command-bus.ts'
 import { REDACTED, redactDiagnostics } from '../src/diagnostics-redaction.ts'
@@ -43,6 +46,45 @@ describe('client command bus', () => {
     await expect(
       bus.dispatch({ name: 'runtime.restart', source: 'ui', payload: {} }),
     ).rejects.toBeInstanceOf(UnsupportedClientCommandError)
+  })
+
+  it('validates payloads before invoking privileged handlers', async () => {
+    const bus = new ClientCommandBus()
+    const handler = vi.fn(() => 'installed')
+    bus.register('plugin.install', handler, {
+      validate: (payload) => {
+        const record = payload as Record<string, unknown>
+        return typeof record?.pluginId === 'string' && record.pluginId.length > 0
+      },
+    })
+
+    await expect(
+      bus.dispatch({ name: 'plugin.install', source: 'deep-link', payload: {} }),
+    ).rejects.toBeInstanceOf(ClientCommandValidationError)
+    expect(handler).not.toHaveBeenCalled()
+
+    await expect(
+      bus.dispatch({
+        name: 'plugin.install',
+        source: 'deep-link',
+        payload: { pluginId: 'demo.plugin' },
+      }),
+    ).resolves.toBe('installed')
+  })
+
+  it('supports cooperative cancellation and bounded command execution', async () => {
+    const aborted = new AbortController()
+    aborted.abort()
+    const bus = new ClientCommandBus()
+    bus.register('runtime.stop', async () => new Promise<never>(() => undefined), { timeoutMs: 5 })
+
+    await expect(
+      bus.dispatch({ name: 'runtime.stop', source: 'ui', payload: {}, signal: aborted.signal }),
+    ).rejects.toBeInstanceOf(ClientCommandAbortedError)
+
+    await expect(
+      bus.dispatch({ name: 'runtime.stop', source: 'ui', payload: {} }),
+    ).rejects.toBeInstanceOf(ClientCommandTimeoutError)
   })
 })
 

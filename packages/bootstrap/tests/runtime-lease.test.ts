@@ -21,7 +21,7 @@ afterEach(async () => {
 })
 
 describe('runtime lease v2', () => {
-  it('blocks a second live host and exposes normalized v2 ownership', async () => {
+  it('blocks a second live host and exposes canonical v2 ownership', async () => {
     const root = await tempRoot()
     const first = await acquireRuntimeLease({
       host: 'electron',
@@ -33,6 +33,7 @@ describe('runtime lease v2', () => {
     await first.updateRuntime({
       runtimePid: 202,
       runtimeId: 'runtime-1',
+      endpoint: 'http://127.0.0.1:43123',
       dshVersion: '0.1.1',
       protocolVersion: 2,
     })
@@ -49,10 +50,13 @@ describe('runtime lease v2', () => {
       name: 'RuntimeLeaseConflictError',
       holder: expect.objectContaining({
         schemaVersion: 2,
+        ownerHost: 'electron',
+        ownerPid: 101,
         host: 'electron',
         hostPid: 101,
         runtimePid: 202,
         runtimeId: 'runtime-1',
+        endpoint: 'http://127.0.0.1:43123',
         protocolVersion: 2,
       }),
     } satisfies Partial<RuntimeLeaseConflictError>)
@@ -80,12 +84,16 @@ describe('runtime lease v2', () => {
     })
 
     expect(replacement.host).toBe('perry-desktop')
+    expect(replacement.ownerHost).toBe('perry-desktop')
     await stale.release()
     expect(await inspectRuntimeLease(root)).toMatchObject({
       schemaVersion: 2,
       token: 'new-token',
+      ownerHost: 'perry-desktop',
+      ownerPid: 222,
       host: 'perry-desktop',
       hostPid: 222,
+      protocolVersion: 1,
     })
 
     await replacement.release()
@@ -111,12 +119,42 @@ describe('runtime lease v2', () => {
     expect(await inspectRuntimeLease(root)).toEqual({
       schemaVersion: 2,
       token: 'legacy-token',
+      ownerHost: 'perry-desktop',
+      ownerPid: 333,
       host: 'perry-desktop',
       hostPid: 333,
       runtimePid: 444,
       dshVersion: '0.1.1',
+      protocolVersion: 1,
       acquiredAt: '2026-08-29T00:00:00.000Z',
       updatedAt: '2026-08-29T00:00:01.000Z',
     })
+  })
+
+  it('heartbeats active ownership without weakening token-safe release', async () => {
+    const root = await tempRoot()
+    let now = new Date('2026-08-30T00:00:00.000Z')
+    const lease = await acquireRuntimeLease({
+      host: 'tauri',
+      hostPid: 555,
+      leaseRoot: root,
+      token: 'tauri-token',
+      now: () => now,
+      protocolVersion: 3,
+      isPidAlive: () => true,
+    })
+
+    now = new Date('2026-08-30T00:00:10.000Z')
+    await lease.heartbeat({ endpoint: 'http://127.0.0.1:43210' })
+    expect(await inspectRuntimeLease(root)).toMatchObject({
+      ownerHost: 'tauri',
+      ownerPid: 555,
+      endpoint: 'http://127.0.0.1:43210',
+      protocolVersion: 3,
+      updatedAt: '2026-08-30T00:00:10.000Z',
+    })
+
+    await lease.release()
+    expect(await inspectRuntimeLease(root)).toBeNull()
   })
 })

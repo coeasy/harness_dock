@@ -1,8 +1,22 @@
+import type { ClientCommandName, ClientCommandSource } from './client-command-bus.ts'
+import type {
+  RuntimeHealth,
+  RuntimeProviderKind,
+  RuntimeSession,
+} from './runtime-provider.ts'
 import type { UpdateSnapshot, UpdateTarget } from './update-state.ts'
 
 export type NetworkState = 'online' | 'offline' | 'limited' | 'proxy-error' | 'dns-error' | 'tls-error'
 export type ProxyMode = 'direct' | 'proxy' | 'pac' | 'unknown'
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type RuntimeLifecycleState =
+  | 'disconnected'
+  | 'connecting'
+  | 'ready'
+  | 'degraded'
+  | 'restarting'
+  | 'stopping'
+  | 'stopped'
 
 export interface FilePickerOptions {
   multiple?: boolean
@@ -20,6 +34,23 @@ export interface AppLifecycleService {
   focus(): Promise<void>
   quit(): Promise<void>
   relaunch(): Promise<void>
+}
+
+export interface RuntimeStatus {
+  state: RuntimeLifecycleState
+  provider: RuntimeProviderKind
+  session?: RuntimeSession
+  health?: RuntimeHealth
+  updatedAt: string
+}
+
+export interface RuntimeService {
+  status(): Promise<RuntimeStatus>
+  connect(): Promise<RuntimeSession>
+  health(): Promise<RuntimeHealth>
+  restart(): Promise<RuntimeSession>
+  stop(): Promise<void>
+  disconnect(): Promise<void>
 }
 
 export interface FileService {
@@ -122,6 +153,55 @@ export interface DeepLinkService {
   subscribe(listener: (url: string) => void): () => void
 }
 
+export type NotificationLevel = 'info' | 'success' | 'warning' | 'error'
+
+export interface ClientNotification {
+  title: string
+  body?: string
+  level?: NotificationLevel
+  silent?: boolean
+}
+
+export interface NotificationService {
+  notify(notification: ClientNotification): Promise<void>
+}
+
+export interface ClientWindowState {
+  visible: boolean
+  focused: boolean
+  minimized: boolean
+  maximized: boolean
+  fullscreen: boolean
+}
+
+export interface WindowService {
+  focusMain(): Promise<void>
+  showMain(): Promise<void>
+  hideMain(): Promise<void>
+  state(): Promise<ClientWindowState>
+}
+
+export interface ClientPolicyRequest {
+  action: ClientCommandName | string
+  source?: ClientCommandSource
+  capability?: string
+  context?: Readonly<Record<string, unknown>>
+}
+
+export interface ClientPolicyDecision {
+  allowed: boolean
+  reason?: string
+}
+
+export interface PolicyService {
+  evaluate(request: ClientPolicyRequest): Promise<ClientPolicyDecision>
+  assertAllowed(request: ClientPolicyRequest): Promise<void>
+}
+
+/**
+ * Compatibility aggregate used by the Electron v0.1 -> v0.2 migration.
+ * New hosts should implement ClientServiceContract instead.
+ */
 export interface ClientServices {
   lifecycle: AppLifecycleService
   files: FileService
@@ -132,4 +212,21 @@ export interface ClientServices {
   network: NetworkService
   logs: LogService
   deepLinks: DeepLinkService
+}
+
+/** Full host-neutral service contract required by the v0.2 Stable architecture. */
+export interface ClientServiceContract {
+  app: AppLifecycleService
+  runtime: RuntimeService
+  files: FileService
+  credentials: CredentialService
+  updates: UpdateService
+  recovery: SessionRecoveryService
+  diagnostics: DiagnosticsService
+  network: NetworkService
+  logs: LogService
+  notifications: NotificationService
+  deepLinks: DeepLinkService
+  windows: WindowService
+  policy: PolicyService
 }
