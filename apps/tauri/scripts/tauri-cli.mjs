@@ -12,12 +12,15 @@ if (args.length === 0) {
   process.exit(2)
 }
 
-const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-const child = spawn(command, ['dlx', `@tauri-apps/cli@${versions.tauriCli}`, ...args], {
+// On Windows pnpm is exposed through a .cmd shim. Node spawn cannot execute
+// .cmd files directly without a command shell, so keep the logical command
+// name stable and enable shell resolution only on Windows.
+const child = spawn('pnpm', ['dlx', `@tauri-apps/cli@${versions.tauriCli}`, ...args], {
   cwd: appRoot,
   stdio: 'inherit',
   env: process.env,
   windowsHide: true,
+  shell: process.platform === 'win32',
 })
 child.once('error', (error) => {
   console.error(`[tauri-cli] failed: ${error instanceof Error ? error.message : String(error)}`)
