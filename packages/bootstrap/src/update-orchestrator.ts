@@ -307,7 +307,9 @@ export function compareVersions(left: string, right: string): number {
   const a = parseVersion(left)
   const b = parseVersion(right)
   for (let index = 0; index < 3; index += 1) {
-    if (a.core[index] !== b.core[index]) return a.core[index] > b.core[index] ? 1 : -1
+    const av = a.core[index] ?? 0
+    const bv = b.core[index] ?? 0
+    if (av !== bv) return av > bv ? 1 : -1
   }
   if (a.pre.length === 0 && b.pre.length === 0) return 0
   if (a.pre.length === 0) return 1
@@ -330,10 +332,17 @@ export function compareVersions(left: string, right: string): number {
 }
 
 function parseVersion(value: string): { core: [number, number, number]; pre: string[] } {
-  const normalized = value.trim().replace(/^v/, '').split('+', 1)[0]
-  const [coreText, preText = ''] = normalized.split('-', 2)
+  const withoutBuild = value.trim().replace(/^v/, '').split('+', 1)[0] ?? ''
+  const separator = withoutBuild.indexOf('-')
+  const coreText = separator >= 0 ? withoutBuild.slice(0, separator) : withoutBuild
+  const preText = separator >= 0 ? withoutBuild.slice(separator + 1) : ''
   const parts = coreText.split('.')
-  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) {
+  if (
+    coreText.length === 0 ||
+    parts.length < 1 ||
+    parts.length > 3 ||
+    parts.some((part) => !/^\d+$/.test(part))
+  ) {
     throw new Error(`invalid semantic version: ${value}`)
   }
   return {
