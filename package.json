@@ -16,7 +16,7 @@
     "check:size": "node scripts/check-size.mjs",
     "check:perry-host": "tsc -p apps/perry/tsconfig.json --noEmit",
     "check:mobile-host": "tsc -p apps/mobile/tsconfig.json --noEmit",
-    "check:update-core": "pnpm --filter @dsh/client-runtime build && pnpm --filter @dsh/bootstrap build && node --check scripts/generate-release-manifest.mjs && node --check scripts/generate-electron-update-metadata.mjs && node --check scripts/generate-runtime-deltas.mjs && node --check scripts/set-version.mjs",
+    "check:update-core": "pnpm --filter @dsh/client-runtime build && pnpm --filter @dsh/bootstrap build && pnpm exec tsc -p apps/desktop/tsconfig.json --noEmit && node --check scripts/generate-release-manifest.mjs && node --check scripts/generate-electron-update-metadata.mjs && node --check scripts/generate-runtime-deltas.mjs && node --check scripts/set-version.mjs",
     "generate:release-manifest": "node scripts/generate-release-manifest.mjs",
     "generate:electron-update-metadata": "node scripts/generate-electron-update-metadata.mjs",
     "version:set": "node scripts/set-version.mjs",
