@@ -2,9 +2,11 @@ import { app, Notification } from 'electron'
 import { bundledRuntimeVersion, redactWebAuthTokens } from '@dsh/client-runtime'
 import {
   acquireRuntimeLease,
+  backupOrigin,
   commitManagedRuntimeCandidate,
   compareVersions,
   defaultManagedRuntimeStatePath,
+  defaultPreviousOriginPath,
   failManagedRuntimeCandidate,
   LocalRuntimeProvider,
   markManagedRuntimeVerifying,
@@ -82,6 +84,10 @@ export async function bootFlow(): Promise<void> {
       bundledRoot: bundledRoot(),
       userDataDir,
       versionOverride: selection.version,
+      // Managed candidates are not last-known-good merely because `dsh web`
+      // reports ready. Defer persistence until the official Harness UI also
+      // loads below; this avoids promoting a backend-compatible/UI-broken build.
+      deferOriginBackup: Boolean(managedCandidate),
       stopTimeoutMs: 12_000,
       log: (message) => void bootLog(message),
       onBeforeStart: ({ bundledAvailable }) => {
@@ -168,10 +174,28 @@ export async function bootFlow(): Promise<void> {
     await createWindow(session.appUrl)
 
     // The candidate is not active merely because dsh spawned. Commit only after
-    // the official Harness UI window also loaded successfully.
+    // the official Harness UI window also loaded and the effective origin can
+    // be persisted as the new last-known-good rollback target.
     if (managedCandidate && managedStatePath && result.ready.dshVersion === managedCandidate) {
-      await commitManagedRuntimeCandidate(managedStatePath, managedCandidate)
-      await bootLog(`runtime auto-update: candidate ${managedCandidate} passed health gate and is now active`)
+      const backedUp = await backupOrigin(
+        originPath(),
+        defaultPreviousOriginPath(userDataDir),
+        (message) => void bootLog(message),
+        result.origin as unknown as Record<string, unknown>,
+      )
+      if (backedUp) {
+        await commitManagedRuntimeCandidate(managedStatePath, managedCandidate)
+        await bootLog(`runtime auto-update: candidate ${managedCandidate} passed full health gate and is now active`)
+      } else {
+        await failManagedRuntimeCandidate(
+          managedStatePath,
+          managedCandidate,
+          new Error('candidate passed UI health but last-known-good state could not be persisted'),
+        )
+        await bootLog(
+          `runtime auto-update: candidate ${managedCandidate} remains uncommitted because LKG persistence failed; next launch will use the previous healthy Runtime`,
+        )
+      }
       managedCandidate = undefined
     }
 
