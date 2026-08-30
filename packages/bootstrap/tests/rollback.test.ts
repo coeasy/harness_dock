@@ -20,6 +20,19 @@ describe('backupOrigin / readPreviousOrigin (last-known-good)', () => {
     expect(JSON.parse(await readFile(prev, 'utf8')).dshVersion).toBe('v2')
   })
 
+  it('records the effective overridden Runtime rather than the older packaged origin', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'bkp-'))
+    temps.push(dir)
+    const origin = path.join(dir, 'origin.json')
+    const prev = path.join(dir, 'previous-origin.json')
+    await writeFile(origin, `${JSON.stringify({ dshVersion: 'v1', gitCommit: 'old' })}\n`, 'utf8')
+    await backupOrigin(origin, prev, undefined, { dshVersion: 'v2', gitCommit: 'managed' })
+    expect(JSON.parse(await readFile(prev, 'utf8'))).toMatchObject({
+      dshVersion: 'v2',
+      gitCommit: 'managed',
+    })
+  })
+
   it('keeps the existing backup when the version is unchanged', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'bkp-'))
     temps.push(dir)
