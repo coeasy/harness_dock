@@ -35,7 +35,7 @@ jobs:
           run-id: 33282687034
           github-token: ${{ github.token }}
       - name: Build optimized Linux runtime
-        run: pnpm --filter @dsh/client-runtime bundle-runtime -- --force --runtime-dir runtimes/verify-linux --platform linux --arch x64
+        run: pnpm --filter @dsh/client-runtime exec node --import tsx src/prepare-cli.ts --force --runtime-dir ../../../runtimes/verify-linux --platform linux --arch x64
         env:
           DSH_PACKED_RUNTIME_DIR: upstream-packed
       - name: Report runtime footprint
