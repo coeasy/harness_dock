@@ -2,7 +2,7 @@
   "name": "harnessdock",
   "version": "0.2.0",
   "private": true,
-  "description": "DeepSeek Harness full-capability client: embed official Web UI, pin docs+runtime to the same exact version.",
+  "description": "Tauri 2 client for the official DeepSeek Harness Web UI: local desktop runtime plus paired Android/iOS remote runtime.",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "check:versions": "node scripts/check-versions.mjs",
     "check:release": "node scripts/check-release.mjs",
+    "check:tauri": "node scripts/check-tauri-host.mjs",
     "check:size": "node scripts/check-size.mjs",
     "perf:report": "node scripts/perf-report.mjs",
     "mark:released": "node scripts/mark-released.mjs",
@@ -21,7 +22,12 @@
     "setup": "node scripts/bootstrap.mjs",
     "sync:dsh": "pnpm --filter @dsh/docs-sync start",
     "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
-    "build:desktop": "node scripts/build.mjs",
+    "build:tauri": "cd apps/tauri && npx --yes @tauri-apps/cli@2.11.0 build",
+    "build:tauri:android": "cd apps/tauri && npx --yes @tauri-apps/cli@2.11.0 android build --debug --apk --target aarch64",
+    "build:tauri:ios-sim": "cd apps/tauri && npx --yes @tauri-apps/cli@2.11.0 ios build --debug --target aarch64-sim --no-sign",
+    "build:electron-lts": "node scripts/build.mjs",
+    "pack:electron-lts": "pnpm --filter @dsh/desktop pack:current",
+    "pack:electron-lts:full": "pnpm --filter @dsh/desktop pack:current:full",
     "pack:desktop": "pnpm --filter @dsh/desktop pack:current",
     "pack:desktop:full": "pnpm --filter @dsh/desktop pack:current:full",
     "pack:desktop:win": "pnpm --filter @dsh/desktop pack:win",
@@ -33,7 +39,7 @@
     "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
     "parity": "pnpm --filter @dsh/parity-tests test",
     "dev:dsh": "node --import tsx scripts/dev-dsh.mjs",
-    "start:desktop": "pnpm --filter @dsh/desktop start"
+    "start:electron-lts": "pnpm --filter @dsh/desktop start"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
