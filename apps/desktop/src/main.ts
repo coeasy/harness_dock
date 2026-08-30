@@ -1,4 +1,10 @@
 import { app, dialog, Menu } from 'electron'
+import {
+  commitHostUpdateHealth,
+  defaultUpdateJournalPath,
+  markHostUpdateVerifying,
+  recordHostUpdateFailure,
+} from '@dsh/bootstrap'
 import { bootLog, getLogDir, getLogFile, pruneOldLogs } from './boot-log.ts'
 import { appState } from './state.ts'
 import { installCrashGuard } from './boot/crash-guard.ts'
@@ -15,7 +21,6 @@ import { bundledRoot, originPath, pluginPath } from './paths.ts'
 // a second dsh process tree (which would race on the same port / data dir).
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
-  // Another instance is already running. Hand the focus over and exit.
   app.quit()
 }
 
@@ -28,9 +33,6 @@ app.on('second-instance', () => {
 })
 
 app.on('window-all-closed', () => {
-  // macOS convention: a Dock app stays alive (and reachable via the tray) when
-  // all windows close; quit happens through the tray menu / Cmd+Q. Elsewhere
-  // closing the window quits (or hides to tray via the close handler above).
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -43,7 +45,6 @@ app.on('before-quit', (event) => {
 
 installCrashGuard()
 
-// Windows: proper app identity for notifications / toast and taskbar grouping.
 if (process.platform === 'win32') {
   try {
     app.setAppUserModelId('com.dsh.client')
@@ -52,8 +53,6 @@ if (process.platform === 'win32') {
   }
 }
 
-// Helper windows are sandboxed data: URLs; their preload bridges reach back
-// through these IPC channels, so they must be registered up front.
 registerSplashIpc()
 registerDiagnosticsIpc()
 registerMobileIpc()
@@ -72,20 +71,56 @@ if (gotSingleInstanceLock) {
   void app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     await bootLog(
-      `boot start | packaged=${app.isPackaged} resources=${process.resourcesPath ?? '?'} electron=${process.versions.electron}`,
+      `boot start | version=${app.getVersion()} packaged=${app.isPackaged} resources=${process.resourcesPath ?? '?'} electron=${process.versions.electron}`,
     )
     await pruneOldLogs()
     await bootLog(`log dir: ${getLogDir()}`)
+
+    const updateJournal = defaultUpdateJournalPath(app.getPath('userData'))
+    try {
+      const verifying = await markHostUpdateVerifying(updateJournal, app.getVersion())
+      if (verifying?.phase === 'verifying') {
+        await bootLog(
+          `auto-update: post-restart health gate started ${verifying.previousHostVersion} -> ${verifying.targetHostVersion} (attempt ${verifying.attempt})`,
+        )
+      }
+    } catch (error) {
+      // A malformed journal must never block a known-good installed Host from
+      // booting. Log it and leave recovery inspection to diagnostics.
+      await bootLog(
+        `auto-update: recovery journal read failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
     try {
       await bootLog(`plugin=${pluginPath()} | bundled=${bundledRoot()} | origin=${originPath()}`)
       await bootFlow()
       await bootLog('boot ok')
+      try {
+        if (await commitHostUpdateHealth(updateJournal, app.getVersion())) {
+          await bootLog(`auto-update: host ${app.getVersion()} passed post-restart health gate; update committed`)
+        }
+      } catch (error) {
+        await bootLog(
+          `auto-update: failed to commit health journal: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
     } catch (error) {
       const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error)
       await bootLog(`boot FAILED: ${message}`)
-      // Keep the native dialog, but also surface the error on the splash with
-      // actionable buttons (retry / open log / copy). Quit only after the
-      // dialog is dismissed so the splash retry stays usable while it is open.
+      try {
+        const failed = await recordHostUpdateFailure(updateJournal, app.getVersion(), error)
+        if (failed?.phase === 'failed') {
+          await bootLog(
+            `auto-update: new host ${failed.targetHostVersion} failed health gate (attempt ${failed.attempt}); previous=${failed.previousHostVersion}`,
+          )
+        }
+      } catch (journalError) {
+        await bootLog(
+          `auto-update: failed to record health failure: ${journalError instanceof Error ? journalError.message : String(journalError)}`,
+        )
+      }
+
       showSplashError({ message, onRetry: relaunchApp })
       const { response } = await dialog
         .showMessageBox({
