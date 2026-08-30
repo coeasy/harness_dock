@@ -12,6 +12,7 @@ interface SidecarReady {
   schemaVersion: 1
   pid: number
   adminUrl: string
+  adminToken: string
   localUrl: string
   publicUrl: string
 }
@@ -82,7 +83,7 @@ async function stopServer(server: http.Server): Promise<void> {
 export async function runGatewaySidecar(): Promise<void> {
   const upstreamLaunchUrl = requiredEnv('HARNESSDOCK_SIDECAR_UPSTREAM_URL')
   const readyFile = requiredEnv('HARNESSDOCK_SIDECAR_READY_FILE')
-  const adminToken = requiredEnv('HARNESSDOCK_SIDECAR_ADMIN_TOKEN')
+  const adminToken = randomBytes(32).toString('base64url')
   const upstream = await openWebUiSession(upstreamLaunchUrl, { timeoutMs: 8_000 })
   if (!upstream) throw new Error('failed to establish the authenticated dsh browser session')
 
@@ -154,7 +155,7 @@ export async function runGatewaySidecar(): Promise<void> {
       upstreamUrl: upstream.url,
       upstreamCookie: upstream.cookie,
       bindHost: process.env.HARNESSDOCK_GATEWAY_BIND?.trim() || '127.0.0.1',
-      port: Number.parseInt(process.env.HARNESSDOCK_GATEWAY_PORT?.trim() || '0', 10),
+      port: Number.parseInt(process.env.HARNESSDOCK_GATEWAY_PORT?.trim() || '43137', 10),
       publicBaseUrl: process.env.HARNESSDOCK_GATEWAY_PUBLIC_URL?.trim() || undefined,
       allowInsecurePublicUrl: process.env.HARNESSDOCK_GATEWAY_ALLOW_INSECURE === '1',
     })
@@ -163,6 +164,7 @@ export async function runGatewaySidecar(): Promise<void> {
       schemaVersion: 1,
       pid: process.pid,
       adminUrl,
+      adminToken,
       localUrl: gateway.localUrl,
       publicUrl: gateway.publicUrl,
     }

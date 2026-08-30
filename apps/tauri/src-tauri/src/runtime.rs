@@ -40,6 +40,7 @@ struct OriginInfo {
 pub(crate) struct RuntimeProcess {
     child: Child,
     work_dir: PathBuf,
+    runtime_root: PathBuf,
     ready: ReadyInfo,
 }
 
@@ -51,6 +52,10 @@ impl RuntimeProcess {
             dsh_version: Some(self.ready.dsh_version.clone()),
             pid: Some(self.ready.pid),
         }
+    }
+
+    pub(crate) fn gateway_inputs(&self) -> (PathBuf, String) {
+        (node_path(&self.runtime_root), self.ready.url.clone())
     }
 
     fn stop(&mut self) {
@@ -157,7 +162,7 @@ fn start_blocking(runtime_root: PathBuf, plugin_path: PathBuf, origin_path: Path
                 Ok(ready) => {
                     thread::sleep(Duration::from_millis(750));
                     if child.try_wait().map_err(|error| error.to_string())?.is_none() {
-                        return Ok(RuntimeProcess { child, work_dir: dir, ready });
+                        return Ok(RuntimeProcess { child, work_dir: dir, runtime_root, ready });
                     }
                 }
                 Err(error) if deadline <= Instant::now() => {

@@ -8,6 +8,7 @@
     "platform-info",
     "gateway-health",
     "gateway-pair",
+    "gateway-host",
     "runtime-status",
     "runtime-start",
     "runtime-stop"

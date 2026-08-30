@@ -1,4 +1,5 @@
 mod gateway;
+mod gateway_host;
 mod platform;
 mod runtime;
 
@@ -8,6 +9,7 @@ use tauri::Manager;
 #[derive(Default)]
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
+    pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +20,12 @@ pub fn run() {
             platform::platform_info,
             gateway::gateway_health,
             gateway::pair_gateway,
+            gateway_host::gateway_host_status,
+            gateway_host::gateway_host_start,
+            gateway_host::gateway_host_create_pairing,
+            gateway_host::gateway_host_revoke,
+            gateway_host::gateway_host_revoke_all,
+            gateway_host::gateway_host_stop,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,
@@ -28,6 +36,7 @@ pub fn run() {
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
             let state = app_handle.state::<AppState>();
+            gateway_host::stop_managed(&state.gateway);
             runtime::stop_managed(&state.runtime);
         }
     });
