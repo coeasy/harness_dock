@@ -1,0 +1,67 @@
+name: linux-appimage-probe
+
+on:
+  push:
+    branches:
+      - integrate/tauri-v0.2.0
+    paths:
+      - '.github/workflows/linux-appimage-probe.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: integrate/tauri-v0.2.0
+      - name: Install official Tauri Linux/AppImage dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm --filter @dsh/plugin-embedded-client build
+      - name: Bundle Gateway sidecar
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apps/tauri/src-tauri/resources
+          pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=../tauri/src-tauri/resources/gateway-sidecar.mjs
+      - uses: actions/download-artifact@v8
+        with:
+          name: tauri-runtime-linux-x64
+          path: apps/tauri/src-tauri/resources/dsh-runtime
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33325528614
+      - name: Verify reused Linux runtime
+        shell: bash
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Build Linux AppImage with verbose bundler diagnostics
+        working-directory: apps/tauri
+        run: cargo tauri build --verbose --bundles appimage
+      - name: Validate AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(find apps/tauri/src-tauri/target/release/bundle/appimage -type f -name '*.AppImage' -print -quit)"
+          test -n "$image"
+          test -s "$image"
+          file "$image"
