@@ -1,0 +1,44 @@
+name: apply-source-pack-ignore-scripts
+
+on:
+  push:
+    branches:
+      - fix/v0.1.1-source-pack-ignore-scripts
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/v0.1.1-source-pack-ignore-scripts
+      - name: Patch source-pack runtime installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('packages/client-runtime/src/prepare-cli.ts')
+          text = path.read_text()
+          if 'const RUNTIME_LAYOUT_VERSION = 3' in text:
+              text = text.replace('const RUNTIME_LAYOUT_VERSION = 3', 'const RUNTIME_LAYOUT_VERSION = 4', 1)
+          old = "      '--omit=optional',\n      '--no-fund',"
+          new = "      '--omit=optional',\n      '--ignore-scripts',\n      '--no-fund',"
+          if old in text:
+              text = text.replace(old, new, 1)
+          if "const RUNTIME_LAYOUT_VERSION = 4" not in text or new not in text:
+              raise SystemExit('expected runtime patch was not applied')
+          path.write_text(text)
+          PY
+          git diff --check
+          if git diff --quiet -- packages/client-runtime/src/prepare-cli.ts; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/client-runtime/src/prepare-cli.ts
+          git commit -m "fix: skip source-pack install scripts"
+          git push origin HEAD:fix/v0.1.1-source-pack-ignore-scripts
