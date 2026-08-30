@@ -1,8 +1,8 @@
 import os from 'node:os'
 import path from 'node:path'
 
-export type DesktopHostKind = 'electron' | 'perry'
-export type DesktopHostChannel = 'stable' | 'preview'
+export type DesktopHostKind = 'electron' | 'tauri' | 'perry'
+export type DesktopHostChannel = 'stable' | 'lts' | 'preview'
 
 export interface DesktopHostCapabilities {
   downloads: boolean
@@ -25,8 +25,8 @@ export interface DesktopHostDescriptor {
 
 export const ELECTRON_HOST: DesktopHostDescriptor = {
   kind: 'electron',
-  channel: 'stable',
-  productName: 'HarnessDock',
+  channel: 'lts',
+  productName: 'HarnessDock Legacy Electron',
   appId: 'com.dsh.client',
   capabilities: {
     downloads: true,
@@ -40,26 +40,30 @@ export const ELECTRON_HOST: DesktopHostDescriptor = {
   },
 }
 
-/**
- * Perry is intentionally a Preview host while Perry WebView keeps file
- * downloads, service workers and a general native<->JS RPC bridge out of scope.
- * Keep these capability flags pessimistic until parity tests prove otherwise.
- */
+export const TAURI_HOST: DesktopHostDescriptor = {
+  kind: 'tauri',
+  channel: 'stable',
+  productName: 'HarnessDock',
+  appId: 'com.harnessdock.client',
+  capabilities: {
+    downloads: true,
+    filePicker: true,
+    clipboardPermission: true,
+    nativeJsBridge: true,
+    serviceWorkers: true,
+    autoUpdate: true,
+    tray: true,
+    notifications: true,
+  },
+}
+
+/** @deprecated Read/upgrade compatibility only. Perry is not an active v0.2 build target. */
 export const PERRY_HOST: DesktopHostDescriptor = {
+  ...TAURI_HOST,
   kind: 'perry',
   channel: 'preview',
-  productName: 'HarnessDock Native Preview',
+  productName: 'HarnessDock Legacy Perry',
   appId: 'com.dsh.client.perry.preview',
-  capabilities: {
-    downloads: false,
-    filePicker: false,
-    clipboardPermission: false,
-    nativeJsBridge: false,
-    serviceWorkers: false,
-    autoUpdate: false,
-    tray: false,
-    notifications: false,
-  },
 }
 
 export function defaultSharedStateDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -67,18 +71,14 @@ export function defaultSharedStateDir(env: NodeJS.ProcessEnv = process.env): str
   return path.join(os.homedir(), '.harnessdock')
 }
 
-/**
- * Host-owned data must not collide during the Electron -> Perry transition.
- * Official Harness state remains in ~/.dsh and is intentionally not handled
- * here.
- */
+/** Official Harness state remains in ~/.dsh; host-owned data is isolated by native shell. */
 export function defaultHostUserDataDir(
   host: DesktopHostKind,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   if (env.HARNESSDOCK_HOST_DATA_DIR) return path.resolve(env.HARNESSDOCK_HOST_DATA_DIR)
 
-  const leaf = host === 'electron' ? 'Electron' : 'PerryPreview'
+  const leaf = host === 'electron' ? 'ElectronLegacy' : host === 'tauri' ? 'Tauri' : 'PerryLegacy'
   if (process.platform === 'win32') {
     const base = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
     return path.join(base, 'HarnessDock', leaf)

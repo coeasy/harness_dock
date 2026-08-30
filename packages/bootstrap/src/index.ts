@@ -16,10 +16,9 @@ export type {
 export {
   ELECTRON_HOST_PROFILE,
   HOST_PROFILES,
-  PERRY_ANDROID_HOST_PROFILE,
-  PERRY_DESKTOP_HOST_PROFILE,
-  PERRY_IOS_HOST_PROFILE,
+  TAURI_ANDROID_HOST_PROFILE,
   TAURI_HOST_PROFILE,
+  TAURI_IOS_HOST_PROFILE,
   supportsRuntime,
 } from './host-capabilities.ts'
 export type {
@@ -30,6 +29,25 @@ export type {
   RuntimeAccessMode,
 } from './host-capabilities.ts'
 export * from './client-core.ts'
+export type {
+  HarnessHostAdapter,
+  HarnessSurface,
+  RemoteGatewayPairInput,
+  RemoteGatewayPairResult,
+} from './host-adapter.ts'
+export {
+  HARNESS_GATEWAY_CONNECT_PATH,
+  HARNESS_GATEWAY_HEALTH_PATH,
+  HARNESS_GATEWAY_PAIR_PATH,
+  HARNESS_GATEWAY_PROTOCOL_VERSION,
+  assertGatewayConnectUrl,
+  normalizeHarnessGatewayOrigin,
+} from './mobile-gateway-contract.ts'
+export type {
+  HarnessGatewayHealthPayload,
+  HarnessGatewayPairRequest,
+  HarnessGatewayPairResponse,
+} from './mobile-gateway-contract.ts'
 export {
   InvalidRuntimeManifestError,
   RuntimeArtifactIntegrityError,
@@ -52,7 +70,7 @@ export type {
 export { backupOrigin, defaultPreviousOriginPath, readPreviousOrigin } from './rollback.ts'
 export {
   ELECTRON_HOST,
-  PERRY_HOST,
+  TAURI_HOST,
   defaultHostUserDataDir,
   defaultSharedStateDir,
 } from './host.ts'
