@@ -35,7 +35,7 @@ export interface HarnessHostProfile {
   capabilities: HarnessHostCapabilities
 }
 
-/** Legacy v0.1/v0.2 migration host. It remains readable until Tauri parity is green. */
+/** Legacy v0.1 desktop baseline retained for compatibility, not the v0.2 release host. */
 export const ELECTRON_HOST_PROFILE: HarnessHostProfile = {
   id: 'electron',
   productName: 'HarnessDock Legacy Electron',
@@ -58,7 +58,7 @@ export const ELECTRON_HOST_PROFILE: HarnessHostProfile = {
   },
 }
 
-/** v0.2 target desktop host. The release gate promotes this implementation, not Electron. */
+/** v0.2 stable desktop host. Capability flags describe implemented Tauri features only. */
 export const TAURI_HOST_PROFILE: HarnessHostProfile = {
   id: 'tauri',
   productName: 'HarnessDock',
@@ -71,17 +71,17 @@ export const TAURI_HOST_PROFILE: HarnessHostProfile = {
     clipboardPermission: true,
     nativeJsBridge: true,
     serviceWorkers: true,
-    autoUpdate: true,
-    tray: true,
-    notifications: true,
+    autoUpdate: false,
+    tray: false,
+    notifications: false,
     pushNotifications: false,
-    deepLinks: true,
-    secureCredentials: true,
-    backgroundExecution: true,
+    deepLinks: false,
+    secureCredentials: false,
+    backgroundExecution: false,
   },
 }
 
-/** Mobile hosts deliberately expose only the remote runtime mode. */
+/** Mobile v0.2 hosts are remote-runtime-only and expose no unimplemented native services. */
 export const TAURI_IOS_HOST_PROFILE: HarnessHostProfile = {
   id: 'tauri-ios',
   productName: 'HarnessDock',
@@ -94,12 +94,12 @@ export const TAURI_IOS_HOST_PROFILE: HarnessHostProfile = {
     clipboardPermission: true,
     nativeJsBridge: true,
     serviceWorkers: true,
-    autoUpdate: true,
+    autoUpdate: false,
     tray: false,
-    notifications: true,
-    pushNotifications: true,
-    deepLinks: true,
-    secureCredentials: true,
+    notifications: false,
+    pushNotifications: false,
+    deepLinks: false,
+    secureCredentials: false,
     backgroundExecution: false,
   },
 }
@@ -116,12 +116,12 @@ export const TAURI_ANDROID_HOST_PROFILE: HarnessHostProfile = {
     clipboardPermission: true,
     nativeJsBridge: true,
     serviceWorkers: true,
-    autoUpdate: true,
+    autoUpdate: false,
     tray: false,
-    notifications: true,
-    pushNotifications: true,
-    deepLinks: true,
-    secureCredentials: true,
+    notifications: false,
+    pushNotifications: false,
+    deepLinks: false,
+    secureCredentials: false,
     backgroundExecution: false,
   },
 }
@@ -153,7 +153,7 @@ export const PERRY_ANDROID_HOST_PROFILE: HarnessHostProfile = {
   appId: 'com.dsh.client.mobile.preview',
 }
 
-/** Active v0.2 product hosts. Legacy Perry profiles are intentionally excluded. */
+/** Supported host profiles. Electron remains readable as the v0.1 LTS baseline. */
 export const HOST_PROFILES = {
   electron: ELECTRON_HOST_PROFILE,
   tauri: TAURI_HOST_PROFILE,
