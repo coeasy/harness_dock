@@ -1,11 +1,22 @@
 export type RuntimeProviderKind = 'local' | 'remote'
 
+/**
+ * Host-private upstream authentication context. This value must never be
+ * rendered, logged, persisted to client-visible state, or sent to mobile
+ * callers. It exists only so a trusted Gateway host can authenticate to dsh.
+ */
+export interface RuntimeUpstreamSession {
+  url: string
+  cookie?: string
+}
+
 export interface RuntimeSession {
   provider: RuntimeProviderKind
   appUrl: string
   connectedAt: string
   dshVersion?: string
   runtimePid?: number
+  upstream?: RuntimeUpstreamSession
   metadata?: Readonly<Record<string, string | number | boolean | null>>
 }
 
