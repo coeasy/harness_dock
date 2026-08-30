@@ -8,6 +8,13 @@ executableName: HarnessDock
 icon: build/icon.ico
 copyright: MIT
 compression: maximum
+# Register the stable application protocol at install time. Runtime handling is
+# routed through the v0.2 Client Command Bus; unsupported business commands are
+# never auto-executed by the shell.
+protocols:
+  - name: HarnessDock
+    schemes:
+      - harnessdock
 # Auto-update feed (electron-updater Phase A) is intentionally NOT declared here:
 # electron-builder throws on an undefined ${env.*} macro, so a build without a
 # configured upstream would fail. Instead apps/desktop/scripts/pack.mjs injects
