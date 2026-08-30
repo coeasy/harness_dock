@@ -81,3 +81,17 @@ export type {
   UpdateRestartScope,
   UpdateTransaction,
 } from './update-orchestrator.ts'
+export {
+  clearHostUpdateRecovery,
+  commitHostUpdateHealth,
+  defaultUpdateJournalPath,
+  markHostUpdateInstalling,
+  markHostUpdateVerifying,
+  readHostUpdateRecovery,
+  recordHostUpdateFailure,
+  stageHostUpdateRecovery,
+} from './update-journal.ts'
+export type {
+  HostUpdateRecoveryPhase,
+  HostUpdateRecoveryRecord,
+} from './update-journal.ts'
