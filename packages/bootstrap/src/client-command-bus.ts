@@ -11,6 +11,7 @@ export type ClientCommandName =
   | 'plugin.install'
   | 'mcp.install'
   | 'device.pair'
+  | 'auth.callback'
   | 'diagnostics.export'
 
 export type ClientCommandSource = 'ui' | 'cli' | 'deep-link' | 'system' | 'update'

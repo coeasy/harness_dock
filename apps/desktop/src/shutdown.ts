@@ -2,6 +2,8 @@ import { app } from 'electron'
 import { appState } from './state.ts'
 import { bootLog } from './boot-log.ts'
 import { scheduleClosingHint } from './closing.ts'
+import { captureCurrentSessionSnapshot } from './session-snapshot.ts'
+import { stopRuntimeLeaseHeartbeat } from './runtime-controller.ts'
 
 /** Last-resort cleanup: force-kill the whole dsh tree by pid. */
 export async function forceKillTree(pid: number | undefined): Promise<void> {
@@ -13,9 +15,7 @@ export async function forceKillTree(pid: number | undefined): Promise<void> {
     try {
       const { execFile } = await import('node:child_process')
       const { promisify } = await import('node:util')
-      await promisify(execFile)(bin, ['/PID', String(pid), '/T', '/F'], {
-        windowsHide: true,
-      })
+      await promisify(execFile)(bin, ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
       return
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
@@ -32,6 +32,7 @@ let quitting = false
 let exiting = false
 
 async function releaseRuntimeLease(): Promise<void> {
+  stopRuntimeLeaseHeartbeat()
   const lease = appState.runtimeLease
   appState.runtimeLease = undefined
   if (!lease) return
@@ -55,17 +56,23 @@ async function stopGateway(): Promise<void> {
 }
 
 /**
- * Graceful-but-bounded shutdown: stop accepting remote/mobile traffic first,
- * then give the dsh process tree a chance to stop cleanly. The whole sequence
- * is capped at 15s; afterwards app.exit() runs unconditionally.
+ * Graceful-but-bounded shutdown: snapshot navigation state, stop monitoring,
+ * stop remote traffic, stop the dsh process tree, then release the cross-host
+ * lease. The whole sequence is capped at 15s and force-cleans survivors.
  */
 export function beginShutdown(event?: Electron.Event): void {
   const runtime = appState.runtime
   const gateway = appState.gateway
-  if (!runtime && !gateway) return
+  if (!runtime && !gateway && !appState.runtimeLease) return
   if (quitting) return
   if (event) event.preventDefault()
   quitting = true
+  appState.quitting = true
+  appState.runtimeState = 'stopping'
+  appState.runtimeSupervisorStop?.()
+  appState.runtimeSupervisorStop = undefined
+  appState.networkUnsubscribe?.()
+  appState.networkUnsubscribe = undefined
   appState.runtime = undefined
 
   scheduleClosingHint()
@@ -77,6 +84,7 @@ export function beginShutdown(event?: Electron.Event): void {
       await stopGateway()
       await releaseRuntimeLease()
       await bootLog(`quit: ${reason}; calling app.exit(0)`)
+      appState.runtimeState = 'stopped'
       app.exit(0)
     })()
   }
@@ -86,7 +94,9 @@ export function beginShutdown(event?: Electron.Event): void {
   }, 15_000)
   watchdog.unref()
 
-  void stopGateway()
+  void captureCurrentSessionSnapshot()
+    .catch((error) => bootLog(`quit: session snapshot failed: ${error instanceof Error ? error.message : String(error)}`))
+    .then(stopGateway)
     .then(async () => {
       if (!runtime) return
       await runtime.stop()
@@ -94,7 +104,7 @@ export function beginShutdown(event?: Electron.Event): void {
     .then(async () => {
       clearTimeout(watchdog)
       if (!runtime) {
-        hardExit('gateway-only clean exit')
+        hardExit('gateway/lease-only clean exit')
         return
       }
       const outcome = runtime.lastStopOutcome

@@ -29,6 +29,7 @@ export {
 } from './update-state.ts'
 export type { UpdatePhase, UpdateSnapshot, UpdateTarget } from './update-state.ts'
 export { REDACTED, redactDiagnostics } from './diagnostics-redaction.ts'
+export { ClientPolicyDeniedError } from './client-services.ts'
 export type {
   AppLifecycleService,
   ClientLogEvent,
@@ -45,8 +46,11 @@ export type {
   DeepLinkService,
   DiagnosticsService,
   DiagnosticsSnapshot,
+  DownloadFileInput,
+  DownloadFileResult,
   FilePickerOptions,
   FileService,
+  FileTransferProgress,
   HostUpdateInfo,
   LogService,
   NetworkDiagnostic,
@@ -55,6 +59,7 @@ export type {
   NotificationLevel,
   NotificationService,
   PolicyService,
+  ProxyConfiguration,
   ProxyMode,
   RuntimeLifecycleState,
   RuntimeService,
@@ -62,5 +67,8 @@ export type {
   SaveFileOptions,
   SessionRecoveryService,
   UpdateService,
+  UploadFileInput,
+  UploadFileResult,
   WindowService,
 } from './client-services.ts'
+export type { RuntimeHealth, RuntimeProviderKind, RuntimeSession } from './runtime-provider.ts'

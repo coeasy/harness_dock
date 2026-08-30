@@ -33,22 +33,38 @@ const codec: SecretCodec = {
 }
 
 describe('encrypted credential file store', () => {
-  it('persists only codec output and supports atomic replace/get/delete', async () => {
+  it('persists only codec output and supports atomic replace/get/list/delete', async () => {
     const root = await tempRoot()
     const file = path.join(root, 'secure', 'credentials.json')
     const store = new EncryptedCredentialFileStore(file, codec)
 
     await store.set('provider-token', 'super-secret-value')
     await store.set('provider-token', 'rotated-secret-value')
+    await store.set('proxy.main.username', 'alice')
+    await store.set('proxy.main.password', 'secret')
     expect(await store.get('provider-token')).toBe('rotated-secret-value')
+    expect(await store.list('proxy.main.')).toEqual(['proxy.main.password', 'proxy.main.username'])
 
     const onDisk = await readFile(file, 'utf8')
     expect(onDisk).not.toContain('super-secret-value')
     expect(onDisk).not.toContain('rotated-secret-value')
+    expect(onDisk).not.toContain('alice')
     expect(onDisk).toContain('schemaVersion')
 
     await store.delete('provider-token')
     expect(await store.get('provider-token')).toBeNull()
+  })
+
+  it('expires OAuth pending state and removes invalid legacy values fail-closed', async () => {
+    const root = await tempRoot()
+    const file = path.join(root, 'secure', 'credentials.json')
+    let now = 1_000
+    const store = new EncryptedCredentialFileStore(file, codec, () => now, 500)
+    await store.set('oauth.pending.nonce-1', '/session/1')
+    expect(await store.get('oauth.pending.nonce-1')).toBe('/session/1')
+    now = 1_501
+    expect(await store.get('oauth.pending.nonce-1')).toBeNull()
+    expect(await store.list('oauth.pending.')).toEqual([])
   })
 
   it('fails closed on corrupt credential metadata', async () => {
@@ -56,7 +72,6 @@ describe('encrypted credential file store', () => {
     const file = path.join(root, 'credentials.json')
     await writeFile(file, '{"schemaVersion":99,"entries":{}}\n', 'utf8')
     const store = new EncryptedCredentialFileStore(file, codec)
-
     await expect(store.get('token')).rejects.toBeInstanceOf(CredentialStoreCorruptError)
   })
 })

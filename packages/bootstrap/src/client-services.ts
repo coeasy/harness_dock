@@ -7,14 +7,25 @@ import type {
 import type { UpdateSnapshot, UpdateTarget } from './update-state.ts'
 
 export type NetworkState = 'online' | 'offline' | 'limited' | 'proxy-error' | 'dns-error' | 'tls-error'
-export type ProxyMode = 'direct' | 'proxy' | 'pac' | 'unknown'
+export type ProxyMode =
+  | 'system'
+  | 'direct'
+  | 'http'
+  | 'https'
+  | 'socks5'
+  | 'proxy'
+  | 'pac'
+  | 'unknown'
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 export type RuntimeLifecycleState =
   | 'disconnected'
   | 'connecting'
   | 'ready'
   | 'degraded'
+  | 'crashed'
   | 'restarting'
+  | 'updating'
+  | 'rolling-back'
   | 'stopping'
   | 'stopped'
 
@@ -28,6 +39,45 @@ export interface SaveFileOptions {
   title?: string
   suggestedName?: string
   filters?: ReadonlyArray<{ name: string; extensions: readonly string[] }>
+}
+
+export interface FileTransferProgress {
+  transferredBytes: number
+  totalBytes?: number
+}
+
+export interface DownloadFileInput {
+  url: string
+  destination?: string
+  suggestedName?: string
+  workspaceRoot?: string
+  headers?: Readonly<Record<string, string>>
+  expectedSha256?: string
+  resume?: boolean
+  signal?: AbortSignal
+  onProgress?: (progress: FileTransferProgress) => void
+}
+
+export interface DownloadFileResult {
+  path: string
+  bytes: number
+  sha256: string
+  resumed: boolean
+}
+
+export interface UploadFileInput {
+  sourcePath: string
+  destinationUrl: string
+  workspaceRoot?: string
+  method?: 'POST' | 'PUT'
+  headers?: Readonly<Record<string, string>>
+  signal?: AbortSignal
+  onProgress?: (progress: FileTransferProgress) => void
+}
+
+export interface UploadFileResult {
+  statusCode: number
+  bytes: number
 }
 
 export interface AppLifecycleService {
@@ -57,13 +107,17 @@ export interface FileService {
   pickFiles(options?: FilePickerOptions): Promise<readonly string[]>
   pickDirectory(options?: { title?: string }): Promise<string | null>
   saveFile(options?: SaveFileOptions): Promise<string | null>
-  revealPath(path: string): Promise<void>
+  openPath(path: string, workspaceRoot?: string): Promise<void>
+  revealPath(path: string, workspaceRoot?: string): Promise<void>
+  downloadFile(input: DownloadFileInput): Promise<DownloadFileResult>
+  uploadFile(input: UploadFileInput): Promise<UploadFileResult>
 }
 
 export interface CredentialService {
   get(key: string): Promise<string | null>
   set(key: string, value: string): Promise<void>
   delete(key: string): Promise<void>
+  list(prefix?: string): Promise<readonly string[]>
 }
 
 export interface HostUpdateInfo {
@@ -108,6 +162,16 @@ export interface NetworkDiagnostic {
   checkedAt: string
 }
 
+export interface ProxyConfiguration {
+  mode: 'system' | 'direct' | 'http' | 'https' | 'socks5' | 'pac'
+  host?: string
+  port?: number
+  pacUrl?: string
+  bypassRules?: readonly string[]
+  /** CredentialService prefix containing `.username` and `.password`. */
+  credentialKey?: string
+}
+
 export interface ClientLogEvent {
   level: ClientLogLevel
   component: string
@@ -146,6 +210,7 @@ export interface NetworkService {
   state(): Promise<NetworkState>
   subscribe(listener: (state: NetworkState) => void): () => void
   diagnose(target: string, timeoutMs?: number): Promise<NetworkDiagnostic>
+  configureProxy(config: ProxyConfiguration): Promise<void>
 }
 
 export interface DeepLinkService {
@@ -191,6 +256,16 @@ export interface ClientPolicyRequest {
 export interface ClientPolicyDecision {
   allowed: boolean
   reason?: string
+}
+
+export class ClientPolicyDeniedError extends Error {
+  constructor(
+    readonly action: string,
+    readonly reason = 'client policy denied this operation',
+  ) {
+    super(`Client policy denied ${action}: ${reason}`)
+    this.name = 'ClientPolicyDeniedError'
+  }
 }
 
 export interface PolicyService {

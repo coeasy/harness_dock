@@ -6,13 +6,9 @@ import { redactDiagnostics, type ClientLogEvent, type ClientLogRecord } from '@d
 import { redactLogText } from './log-redaction.ts'
 
 let logDirCache: string | undefined
+const MAX_EVENT_DATA_CHARS = 32_000
+const DEFAULT_LOG_TOTAL_LIMIT = 32 * 1024 * 1024
 
-/**
- * Log directory, resolved lazily on first use so `app.getPath('userData')` is
- * available (after app ready). Falls back to the OS temp dir when the app is
- * not ready yet or the path cannot be resolved; the fallback is not cached so
- * a later call after app ready can still resolve the real directory.
- */
 export function getLogDir(): string {
   if (logDirCache) return logDirCache
   if (!app.isReady()) return path.join(os.tmpdir(), 'harnessdock-logs')
@@ -24,14 +20,23 @@ export function getLogDir(): string {
   return logDirCache
 }
 
-/** Current human boot log file (boot-YYYY-MM-DD.log). */
 export function getLogFile(): string {
   return path.join(getLogDir(), `boot-${new Date().toISOString().slice(0, 10)}.log`)
 }
 
-/** Current structured event file (events-YYYY-MM-DD.jsonl). */
 export function getStructuredLogFile(): string {
   return path.join(getLogDir(), `events-${new Date().toISOString().slice(0, 10)}.jsonl`)
+}
+
+function boundedData(data: Record<string, unknown>): Record<string, unknown> {
+  const redacted = redactDiagnostics(data)
+  const encoded = JSON.stringify(redacted)
+  if (encoded.length <= MAX_EVENT_DATA_CHARS) return redacted
+  return {
+    truncated: true,
+    originalCharacters: encoded.length,
+    preview: encoded.slice(0, MAX_EVENT_DATA_CHARS),
+  }
 }
 
 function safeEvent(input: ClientLogEvent): ClientLogRecord {
@@ -41,11 +46,10 @@ function safeEvent(input: ClientLogEvent): ClientLogRecord {
     component: input.component.slice(0, 80),
     event: input.event.slice(0, 120),
     ...(input.message ? { message: redactLogText(input.message).slice(0, 4000) } : {}),
-    ...(input.data ? { data: redactDiagnostics(input.data) } : {}),
+    ...(input.data ? { data: boundedData(input.data) } : {}),
   }
 }
 
-/** Best-effort structured event log. Secret-bearing keys and text are redacted. */
 export async function bootLogEvent(event: ClientLogEvent): Promise<void> {
   try {
     await mkdir(getLogDir(), { recursive: true })
@@ -55,7 +59,6 @@ export async function bootLogEvent(event: ClientLogEvent): Promise<void> {
   }
 }
 
-/** Best-effort timestamped human log plus structured compatibility event. */
 export async function bootLog(message: string): Promise<void> {
   const safeMessage = redactLogText(message)
   const line = `[${new Date().toISOString()}] ${safeMessage}\n`
@@ -73,7 +76,6 @@ export async function bootLog(message: string): Promise<void> {
   })
 }
 
-/** Read the newest structured events from today's JSONL file. */
 export async function recentLogEvents(limit = 100): Promise<readonly ClientLogRecord[]> {
   const bounded = Math.max(1, Math.min(500, Math.floor(limit)))
   try {
@@ -101,27 +103,44 @@ export async function recentLogEvents(limit = 100): Promise<readonly ClientLogRe
   }
 }
 
-/** Delete HarnessDock daily log files older than `days`. */
-export async function pruneOldLogs(days = 7): Promise<void> {
+function managedLogName(name: string): boolean {
+  return (
+    (name.startsWith('boot-') && name.endsWith('.log')) ||
+    (name.startsWith('events-') && name.endsWith('.jsonl'))
+  )
+}
+
+/** Enforce both retention days and a hard aggregate log-size ceiling. */
+export async function pruneOldLogs(days = 7, maxTotalBytes = DEFAULT_LOG_TOTAL_LIMIT): Promise<void> {
   const dir = getLogDir()
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
   try {
-    const entries = await readdir(dir)
+    const entries = (await readdir(dir)).filter(managedLogName)
     for (const name of entries) {
-      const managed =
-        (name.startsWith('boot-') && name.endsWith('.log')) ||
-        (name.startsWith('events-') && name.endsWith('.jsonl'))
-      if (!managed) continue
       const full = path.join(dir, name)
       const info = await stat(full)
       if (info.mtimeMs < cutoff) await rm(full, { force: true })
+    }
+
+    const survivors = await Promise.all(
+      (await readdir(dir)).filter(managedLogName).map(async (name) => {
+        const full = path.join(dir, name)
+        const info = await stat(full)
+        return { full, size: info.size, mtimeMs: info.mtimeMs }
+      }),
+    )
+    survivors.sort((a, b) => a.mtimeMs - b.mtimeMs)
+    let total = survivors.reduce((sum, entry) => sum + entry.size, 0)
+    for (const entry of survivors) {
+      if (total <= maxTotalBytes) break
+      await rm(entry.full, { force: true })
+      total -= entry.size
     }
   } catch {
     // best-effort; directory may not exist yet
   }
 }
 
-/** Open the log directory in the system file manager; failures are ignored. */
 export async function openLogDir(): Promise<void> {
   try {
     await shell.openPath(getLogDir())

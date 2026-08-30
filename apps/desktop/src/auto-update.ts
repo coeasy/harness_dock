@@ -12,6 +12,7 @@ import { bootLog } from './boot-log.ts'
 import { fmt, t } from './i18n.ts'
 import { appState } from './state.ts'
 import { HostUpdateStateMachine } from './host-update-state.ts'
+import { captureCurrentSessionSnapshot } from './session-snapshot.ts'
 
 export interface AutoUpdateHandle {
   service: UpdateService
@@ -93,23 +94,15 @@ class ElectronHostUpdateService implements UpdateService {
   async check(target: UpdateTarget): Promise<HostUpdateInfo | null> {
     assertHostTarget(target)
     this.assertEnabled()
-
     const current = this.machine.state()
     if (current.phase === 'checking') return this.available
     this.machine.beginCheck(app.getVersion())
-
     try {
       const result = await autoUpdater.checkForUpdates()
-      // electron-updater normally emits update-available/not-available before
-      // resolving. Keep a defensive fallback so a provider that resolves
-      // without either event cannot leave the shared state stuck in checking.
       if (this.machine.state().phase === 'checking') {
         const nextVersion = result?.updateInfo?.version
-        if (nextVersion && nextVersion !== app.getVersion()) {
-          this.onAvailable(result.updateInfo)
-        } else {
-          this.onNotAvailable()
-        }
+        if (nextVersion && nextVersion !== app.getVersion()) this.onAvailable(result.updateInfo)
+        else this.onNotAvailable()
       }
       return this.available
     } catch (error) {
@@ -142,6 +135,9 @@ class ElectronHostUpdateService implements UpdateService {
     if (this.machine.state().phase !== 'ready') {
       throw new Error(`Host update is not ready to install (state=${this.machine.state().phase})`)
     }
+    await captureCurrentSessionSnapshot().catch((error) => {
+      void bootLog(`auto-update snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
     this.machine.beginInstall()
     autoUpdater.quitAndInstall()
   }
@@ -155,7 +151,7 @@ class ElectronHostUpdateService implements UpdateService {
     try {
       this.machine.beginCheck(app.getVersion())
     } catch {
-      // A duplicate native checking event must not disrupt an active download.
+      // duplicate native checking event
     }
   }
 
@@ -216,11 +212,6 @@ function disabledHandle(reason: string): AutoUpdateHandle {
   }
 }
 
-/**
- * Configure Electron's existing updater as an adapter behind the shared v0.2
- * UpdateService. Runtime and plugin upgrades intentionally remain separate
- * managers; this service owns only the desktop host application.
- */
 export function initAutoUpdate(): AutoUpdateHandle {
   if (!app.isPackaged) return disabledHandle('development build')
   if (portableBuild()) return disabledHandle('portable build cannot replace its running executable')
@@ -236,9 +227,7 @@ export function initAutoUpdate(): AutoUpdateHandle {
   autoUpdater.allowPrerelease = app.getVersion().includes('-')
 
   const genericFeed = process.env.DSH_UPDATE_FEED_URL?.trim()
-  if (genericFeed) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: genericFeed })
-  }
+  if (genericFeed) autoUpdater.setFeedURL({ provider: 'generic', url: genericFeed })
 
   autoUpdater.on('checking-for-update', () => {
     service.onChecking()
@@ -255,9 +244,7 @@ export function initAutoUpdate(): AutoUpdateHandle {
   })
   autoUpdater.on('download-progress', (progress) => {
     service.onDownloadProgress(progress.percent)
-    void bootLog(
-      `auto-update: downloading ${Math.floor(progress.percent)}% (${progress.transferred}/${progress.total})`,
-    )
+    void bootLog(`auto-update: downloading ${Math.floor(progress.percent)}% (${progress.transferred}/${progress.total})`)
   })
   autoUpdater.on('update-downloaded', (info) => {
     service.onDownloaded()
