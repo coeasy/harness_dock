@@ -1,7 +1,8 @@
 import type { BrowserWindow, Tray } from 'electron'
 import type { DshRuntime, RuntimeMode } from '@dsh/client-runtime'
-import type { RuntimeLeaseHandle } from '@dsh/bootstrap'
+import type { LocalRuntimeProvider, RuntimeLeaseHandle, UpdatePhase } from '@dsh/bootstrap'
 import type {
+  NetworkState,
   RuntimeLifecycleState,
   UpdateService,
 } from '@dsh/bootstrap/client-core'
@@ -14,8 +15,10 @@ import type { HarnessGatewayHandle } from '@dsh/bootstrap/gateway'
  */
 export const appState: {
   runtime: DshRuntime | undefined
+  runtimeProvider: LocalRuntimeProvider | undefined
   runtimeLease: RuntimeLeaseHandle | undefined
   runtimeEndpoint: string | undefined
+  runtimeAppUrl: string | undefined
   runtimeState: RuntimeLifecycleState
   managedRuntimeVersion: string | undefined
   gateway: HarnessGatewayHandle | undefined
@@ -28,14 +31,18 @@ export const appState: {
   leaseHeartbeat: NodeJS.Timeout | undefined
   runtimeSupervisorStop: (() => void) | undefined
   networkUnsubscribe: (() => void) | undefined
+  networkState: NetworkState
+  runtimeUpdatePhase: UpdatePhase | undefined
   /** dsh version that actually started (after rollback, if any) — for diagnostics */
   dshVersion: string | undefined
   mode: RuntimeMode | undefined
   bundledAvailable: boolean | undefined
 } = {
   runtime: undefined,
+  runtimeProvider: undefined,
   runtimeLease: undefined,
   runtimeEndpoint: undefined,
+  runtimeAppUrl: undefined,
   runtimeState: 'disconnected',
   managedRuntimeVersion: undefined,
   gateway: undefined,
@@ -48,6 +55,8 @@ export const appState: {
   leaseHeartbeat: undefined,
   runtimeSupervisorStop: undefined,
   networkUnsubscribe: undefined,
+  networkState: 'limited',
+  runtimeUpdatePhase: undefined,
   dshVersion: undefined,
   mode: undefined,
   bundledAvailable: undefined,

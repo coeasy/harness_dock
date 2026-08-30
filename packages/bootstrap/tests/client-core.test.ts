@@ -62,14 +62,21 @@ describe('client command bus', () => {
 })
 
 describe('HarnessDock deep links', () => {
-  it('parses install, session and workspace routes into shared client commands', () => {
+  it('parses install, session and workspace-id routes into shared client commands', () => {
     const plugin = parseHarnessDockDeepLink('harnessdock://plugin/install?id=demo.plugin')
     expect(plugin).toEqual({ type: 'plugin-install', pluginId: 'demo.plugin' })
     expect(deepLinkIntentToCommand(plugin)).toEqual({ name: 'plugin.install', payload: { pluginId: 'demo.plugin' } })
     expect(parseHarnessDockDeepLink('harnessdock://session/session-1')).toEqual({ type: 'session-open', sessionId: 'session-1' })
-    expect(parseHarnessDockDeepLink('harnessdock://workspace/open?path=%2Ftmp%2Fdemo')).toEqual({
-      type: 'workspace-path-open', path: '/tmp/demo',
+    expect(parseHarnessDockDeepLink('harnessdock://workspace/workspace-1')).toEqual({
+      type: 'workspace-open', workspaceId: 'workspace-1',
     })
+  })
+
+  it('rejects filesystem workspace paths from deep links', () => {
+    expect(() => parseHarnessDockDeepLink('harnessdock://workspace/open?path=%2Ftmp%2Fdemo'))
+      .toThrow(InvalidHarnessDockDeepLinkError)
+    expect(() => parseHarnessDockDeepLink('harnessdock://workspace/open?path=C%3A%5CUsers%5Cdemo'))
+      .toThrow(InvalidHarnessDockDeepLinkError)
   })
 
   it('requires one-time OAuth state and exactly one terminal result', () => {

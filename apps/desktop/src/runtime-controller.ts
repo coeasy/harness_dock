@@ -1,5 +1,11 @@
 import { app, net, Notification } from 'electron'
 import { isProcessAlive } from '@dsh/client-runtime'
+import {
+  acquireRuntimeLease,
+  LocalRuntimeProvider,
+  RuntimeLeaseConflictError,
+} from '@dsh/bootstrap'
+import { startHarnessGateway } from '@dsh/bootstrap/gateway'
 import type {
   RuntimeHealth,
   RuntimeService,
@@ -9,15 +15,19 @@ import type {
 import { bootLogEvent } from './boot-log.ts'
 import { captureCurrentSessionSnapshot } from './session-snapshot.ts'
 import { recordRuntimeCrash, clearRuntimeCrashHistory } from './runtime-recovery.ts'
+import { resolveManagedRuntimeSelection } from './runtime-update-service.ts'
+import { bundledRoot, originPath, pluginPath } from './paths.ts'
+import { createWindow } from './window/main-window.ts'
 import { appState } from './state.ts'
 import { refreshTray } from './tray.ts'
 import path from 'node:path'
 
 function currentSession(): RuntimeSession {
-  if (!appState.runtimeEndpoint) throw new Error('Local runtime is not connected')
+  const appUrl = appState.runtimeAppUrl ?? appState.runtimeEndpoint
+  if (!appUrl) throw new Error('Local runtime is not connected')
   return {
     provider: 'local',
-    appUrl: appState.runtimeEndpoint,
+    appUrl,
     connectedAt: new Date().toISOString(),
     ...(appState.dshVersion ? { dshVersion: appState.dshVersion } : {}),
     ...(appState.dshPid ? { runtimePid: appState.dshPid } : {}),
@@ -66,50 +76,178 @@ async function runtimeHealth(): Promise<RuntimeHealth> {
   }
 }
 
-async function relaunchRuntime(): Promise<RuntimeSession> {
-  let session: RuntimeSession
-  try {
-    session = currentSession()
-  } catch {
-    session = { provider: 'local', appUrl: 'http://127.0.0.1/', connectedAt: new Date().toISOString() }
+async function createRuntimeProvider(preferredVersion?: string): Promise<LocalRuntimeProvider> {
+  const userDataDir = app.getPath('userData')
+  const managed = await resolveManagedRuntimeSelection(userDataDir)
+  appState.managedRuntimeVersion = managed?.version
+  const versionOverride = managed?.version ?? preferredVersion
+  return new LocalRuntimeProvider({
+    originPath: originPath(),
+    pluginPath: pluginPath(),
+    packaged: app.isPackaged,
+    bundledRoot: managed?.directory ?? bundledRoot(),
+    userDataDir,
+    ...(versionOverride ? { versionOverride } : {}),
+    stopTimeoutMs: 12_000,
+    enableRollback: !managed,
+    log: (message) => void bootLogEvent({ level: 'info', component: 'runtime', event: 'runtime_log', message }),
+    onRollback: (info) => {
+      void bootLogEvent({
+        level: 'warn',
+        component: 'runtime',
+        event: 'runtime_rolled_back',
+        data: info,
+      })
+    },
+  })
+}
+
+async function restartRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
+  if (process.env.HARNESSDOCK_GATEWAY_ENABLE !== '1') return
+  const rawPort = process.env.HARNESSDOCK_GATEWAY_PORT?.trim()
+  const port = rawPort ? Number.parseInt(rawPort, 10) : 0
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid HARNESSDOCK_GATEWAY_PORT: ${rawPort}`)
   }
-  await captureCurrentSessionSnapshot().catch(() => undefined)
-  setRuntimeState('restarting')
+  const gateway = await startHarnessGateway({
+    upstreamUrl,
+    bindHost: process.env.HARNESSDOCK_GATEWAY_BIND?.trim() || '127.0.0.1',
+    port,
+    publicBaseUrl: process.env.HARNESSDOCK_GATEWAY_PUBLIC_URL?.trim() || undefined,
+    allowInsecurePublicUrl: process.env.HARNESSDOCK_GATEWAY_ALLOW_INSECURE === '1',
+    log: (message) => void bootLogEvent({ level: 'info', component: 'gateway', event: 'gateway_log', message }),
+  })
+  appState.gateway = gateway
+}
+
+async function rebindWindow(appUrl: string): Promise<void> {
+  const current = appState.mainWindow
+  if (!current || current.isDestroyed()) return
+  const wasVisible = current.isVisible()
+  current.destroy()
+  appState.mainWindow = undefined
+  await createWindow(appUrl)
+  if (!wasVisible) appState.mainWindow?.hide()
+}
+
+async function bindProvider(provider: LocalRuntimeProvider, session: RuntimeSession): Promise<void> {
+  const result = provider.bootstrapResult
+  if (!result) throw new Error('LocalRuntimeProvider connected without a bootstrap result.')
+  appState.runtimeProvider = provider
+  appState.runtime = result.runtime
+  appState.dshPid = result.ready.pid
+  appState.dshVersion = result.ready.dshVersion
+  appState.runtimeAppUrl = session.appUrl
+  appState.runtimeEndpoint = new URL(session.appUrl).origin
+  appState.mode = result.mode
+  appState.bundledAvailable = result.bundledAvailable
+  appState.managedRuntimeVersion = (await resolveManagedRuntimeSelection(app.getPath('userData')))?.version
+  const lease = appState.runtimeLease
+  if (!lease) throw new Error('Runtime started without an owned runtime lease')
+  await lease.updateRuntime({
+    runtimePid: result.ready.pid,
+    runtimeId: `dsh:${result.ready.dshVersion}`,
+    endpoint: appState.runtimeEndpoint,
+    dshVersion: result.ready.dshVersion,
+    protocolVersion: 1,
+  })
+  startRuntimeLeaseHeartbeat()
+  startRuntimeSupervisor()
+}
+
+async function stopRuntimeProcess(releaseLease: boolean): Promise<void> {
+  if (!appState.runtime && !appState.runtimeProvider && !appState.gateway) {
+    if (releaseLease) {
+      stopRuntimeLeaseHeartbeat()
+      const lease = appState.runtimeLease
+      appState.runtimeLease = undefined
+      await lease?.release().catch(() => undefined)
+    }
+    setRuntimeState('stopped')
+    return
+  }
+
+  setRuntimeState('stopping')
+  appState.runtimeSupervisorStop?.()
+  appState.runtimeSupervisorStop = undefined
+
+  const gateway = appState.gateway
+  appState.gateway = undefined
+  await gateway?.stop().catch(() => undefined)
+
+  const provider = appState.runtimeProvider
+  const runtime = appState.runtime
+  appState.runtimeProvider = undefined
+  appState.runtime = undefined
+  if (provider) await provider.disconnect()
+  else await runtime?.stop()
+
+  appState.dshPid = undefined
+  appState.dshVersion = undefined
+  appState.runtimeEndpoint = undefined
+  appState.runtimeAppUrl = undefined
+  appState.mode = undefined
+  appState.bundledAvailable = undefined
+
+  if (releaseLease) {
+    stopRuntimeLeaseHeartbeat()
+    const lease = appState.runtimeLease
+    appState.runtimeLease = undefined
+    await lease?.release().catch(() => undefined)
+  }
+
+  setRuntimeState('stopped')
+  await bootLogEvent({ level: 'info', component: 'runtime', event: 'runtime_stopped' })
+}
+
+async function startRuntimeProcess(
+  preferredVersion: string | undefined,
+  lifecycleState: 'connecting' | 'restarting',
+  reloadWindow = true,
+): Promise<RuntimeSession> {
+  if (!appState.runtimeLease) {
+    appState.runtimeLease = await acquireRuntimeLease({ host: 'electron', protocolVersion: 1 })
+  }
+  setRuntimeState(lifecycleState)
+  const provider = await createRuntimeProvider(preferredVersion)
+  appState.runtimeProvider = provider
+  try {
+    const session = await provider.connect()
+    await bindProvider(provider, session)
+    await restartRemoteGatewayIfEnabled(session.appUrl)
+    setRuntimeState('ready')
+    if (reloadWindow) await rebindWindow(session.appUrl)
+    await bootLogEvent({
+      level: 'info',
+      component: 'runtime',
+      event: lifecycleState === 'restarting' ? 'runtime_restarted' : 'runtime_connected',
+      data: { version: appState.dshVersion, pid: appState.dshPid },
+    })
+    return currentSession()
+  } catch (error) {
+    await provider.disconnect().catch(() => undefined)
+    if (appState.runtimeProvider === provider) appState.runtimeProvider = undefined
+    appState.runtime = undefined
+    appState.dshPid = undefined
+    appState.runtimeEndpoint = undefined
+    appState.runtimeAppUrl = undefined
+    setRuntimeState('degraded')
+    throw error
+  }
+}
+
+async function restartRuntime(captureSnapshot = true): Promise<RuntimeSession> {
+  const preferredVersion = appState.dshVersion
+  if (captureSnapshot) await captureCurrentSessionSnapshot().catch(() => undefined)
   await bootLogEvent({ level: 'info', component: 'runtime', event: 'runtime_restart_requested' })
-  app.relaunch()
-  app.quit()
+  await stopRuntimeProcess(false)
+  const session = await startRuntimeProcess(preferredVersion, 'restarting')
+  const health = await runtimeHealth()
+  if (!health.ok) throw new Error(health.message || 'Runtime restart failed health verification')
   return session
 }
 
 export function createElectronRuntimeService(): RuntimeService {
-  const stop = async (): Promise<void> => {
-    if (!appState.runtime && !appState.gateway) {
-      setRuntimeState('stopped')
-      return
-    }
-    setRuntimeState('stopping')
-    appState.runtimeSupervisorStop?.()
-    appState.runtimeSupervisorStop = undefined
-    if (appState.leaseHeartbeat) {
-      clearInterval(appState.leaseHeartbeat)
-      appState.leaseHeartbeat = undefined
-    }
-    const gateway = appState.gateway
-    appState.gateway = undefined
-    await gateway?.stop().catch(() => undefined)
-    const runtime = appState.runtime
-    appState.runtime = undefined
-    await runtime?.stop()
-    appState.dshPid = undefined
-    appState.dshVersion = undefined
-    appState.runtimeEndpoint = undefined
-    const lease = appState.runtimeLease
-    appState.runtimeLease = undefined
-    await lease?.release().catch(() => undefined)
-    setRuntimeState('stopped')
-    await bootLogEvent({ level: 'info', component: 'runtime', event: 'runtime_stopped' })
-  }
-
   return {
     async status(): Promise<RuntimeStatus> {
       let health: RuntimeHealth | undefined
@@ -134,16 +272,16 @@ export function createElectronRuntimeService(): RuntimeService {
       if (appState.runtimeState === 'ready' && appState.dshPid && isProcessAlive(appState.dshPid)) {
         return currentSession()
       }
-      return relaunchRuntime()
+      return startRuntimeProcess(appState.dshVersion, 'connecting')
     },
     health: runtimeHealth,
-    restart: relaunchRuntime,
-    stop,
-    async disconnect() {
-      await stop()
-    },
+    restart: () => restartRuntime(true),
+    stop: () => stopRuntimeProcess(false),
+    disconnect: () => stopRuntimeProcess(true),
   }
 }
+
+let handlingLeaseLoss = false
 
 export function startRuntimeLeaseHeartbeat(intervalMs = 10_000): void {
   if (appState.leaseHeartbeat) clearInterval(appState.leaseHeartbeat)
@@ -160,6 +298,16 @@ export function startRuntimeLeaseHeartbeat(intervalMs = 10_000): void {
         event: 'lease_heartbeat_failed',
         message: error instanceof Error ? error.message : String(error),
       })
+      if (!(error instanceof RuntimeLeaseConflictError) || handlingLeaseLoss) return
+      handlingLeaseLoss = true
+      stopRuntimeLeaseHeartbeat()
+      appState.runtimeLease = undefined
+      void stopRuntimeProcess(false)
+        .catch(() => undefined)
+        .finally(() => {
+          setRuntimeState('degraded')
+          handlingLeaseLoss = false
+        })
     })
   }, intervalMs)
   timer.unref()
@@ -177,6 +325,7 @@ export function startRuntimeSupervisor(pollMs = 4_000): () => void {
   const crashFile = path.join(app.getPath('userData'), 'client-state', 'runtime-crashes.v1.json')
   let handlingCrash = false
   let stableSince = Date.now()
+  let pendingRestart: NodeJS.Timeout | undefined
   const timer = setInterval(() => {
     if (handlingCrash || appState.quitting || appState.runtimeState !== 'ready') return
     const pid = appState.dshPid
@@ -211,13 +360,22 @@ export function startRuntimeSupervisor(pollMs = 4_000): () => void {
         return
       }
       setRuntimeState('restarting')
-      const restartTimer = setTimeout(() => {
-        void captureCurrentSessionSnapshot().finally(() => {
-          app.relaunch()
-          app.quit()
+      pendingRestart = setTimeout(() => {
+        pendingRestart = undefined
+        void restartRuntime(true).then(() => {
+          stableSince = Date.now()
+          handlingCrash = false
+        }).catch(async (error) => {
+          setRuntimeState('degraded')
+          await bootLogEvent({
+            level: 'error',
+            component: 'runtime',
+            event: 'runtime_recovery_failed',
+            message: error instanceof Error ? error.message : String(error),
+          })
         })
       }, decision.delayMs)
-      restartTimer.unref()
+      pendingRestart.unref()
     }).catch(async (error) => {
       setRuntimeState('degraded')
       await bootLogEvent({
@@ -229,7 +387,11 @@ export function startRuntimeSupervisor(pollMs = 4_000): () => void {
     })
   }, pollMs)
   timer.unref()
-  const stop = () => clearInterval(timer)
+  const stop = () => {
+    clearInterval(timer)
+    if (pendingRestart) clearTimeout(pendingRestart)
+    pendingRestart = undefined
+  }
   appState.runtimeSupervisorStop = stop
   return stop
 }

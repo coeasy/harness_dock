@@ -55,6 +55,18 @@ describe('encrypted credential file store', () => {
     expect(await store.get('provider-token')).toBeNull()
   })
 
+  it('expires OAuth pending state and removes invalid legacy values fail-closed', async () => {
+    const root = await tempRoot()
+    const file = path.join(root, 'secure', 'credentials.json')
+    let now = 1_000
+    const store = new EncryptedCredentialFileStore(file, codec, () => now, 500)
+    await store.set('oauth.pending.nonce-1', '/session/1')
+    expect(await store.get('oauth.pending.nonce-1')).toBe('/session/1')
+    now = 1_501
+    expect(await store.get('oauth.pending.nonce-1')).toBeNull()
+    expect(await store.list('oauth.pending.')).toEqual([])
+  })
+
   it('fails closed on corrupt credential metadata', async () => {
     const root = await tempRoot()
     const file = path.join(root, 'credentials.json')

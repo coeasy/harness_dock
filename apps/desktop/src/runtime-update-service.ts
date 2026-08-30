@@ -20,7 +20,9 @@ import {
 } from '@dsh/bootstrap'
 import { bootLogEvent } from './boot-log.ts'
 import { captureCurrentSessionSnapshot } from './session-snapshot.ts'
+import { activateRuntimeWithRollback } from './runtime-transition.ts'
 import { appState } from './state.ts'
+import { refreshTray } from './tray.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -34,7 +36,7 @@ async function fetchRuntimeFile(file: RuntimeReleaseFile, destination: string): 
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
     throw new Error(`Runtime artifacts must use HTTPS: ${url.origin}`)
   }
-  const response = await net.fetch(url.toString(), { redirect: 'follow' })
+  const response = await net.fetch(url.toString(), { redirect: 'error' })
   if (!response.ok || !response.body) throw new Error(`Runtime artifact download failed (${response.status})`)
   await mkdir(path.dirname(destination), { recursive: true })
   const writer = createWriteStream(destination, { flags: 'w', mode: 0o600 })
@@ -137,6 +139,8 @@ class ElectronRuntimeUpdateService implements UpdateService {
         updatedAt: new Date().toISOString(),
       }
     }
+    appState.runtimeUpdatePhase = phase
+    if (appState.tray) refreshTray(appState.tray)
   }
 
   private fail(error: unknown): void {
@@ -156,13 +160,15 @@ class ElectronRuntimeUpdateService implements UpdateService {
         ...initialUpdateSnapshot('runtime'),
         ...(appState.dshVersion ? { currentVersion: appState.dshVersion } : {}),
       }
+      appState.runtimeUpdatePhase = 'idle'
+      if (appState.tray) refreshTray(appState.tray)
       return null
     }
     this.advance('checking', { currentVersion: appState.dshVersion, error: undefined })
     try {
       const response = await net.fetch(safeManifestUrl(manifestUrl).toString(), {
         headers: { accept: 'application/json' },
-        redirect: 'follow',
+        redirect: 'error',
       })
       if (!response.ok) throw new Error(`Runtime manifest request failed (${response.status})`)
       const manifest = (await response.json()) as RuntimeReleaseManifest
@@ -212,30 +218,53 @@ class ElectronRuntimeUpdateService implements UpdateService {
   async install(target: UpdateTarget): Promise<void> {
     if (target !== 'runtime') throw new Error(`Runtime updater cannot manage ${target}`)
     if (!this.preparedVersion) throw new Error('Runtime update is not prepared')
+    const preparedVersion = this.preparedVersion
     await captureCurrentSessionSnapshot().catch(() => undefined)
     this.advance('stopping-runtime')
+    let rollbackVersion: string | null = null
     try {
-      this.advance('installing')
-      await this.manager.activate(this.preparedVersion)
-      this.advance('restart-required')
-      this.advance('restarting')
-      await bootLogEvent({
-        level: 'info',
-        component: 'runtime-update',
-        event: 'runtime_activated',
-        data: { version: this.preparedVersion },
+      await activateRuntimeWithRollback({
+        stop: () => this.runtime.stop(),
+        activate: async () => {
+          this.advance('installing')
+          await this.manager.activate(preparedVersion)
+          this.advance('restart-required')
+          await bootLogEvent({
+            level: 'info',
+            component: 'runtime-update',
+            event: 'runtime_activated',
+            data: { version: preparedVersion },
+          })
+        },
+        start: async () => {
+          if (this.snapshot.phase === 'rolling-back') {
+            this.advance('restart-required', { nextVersion: rollbackVersion ?? undefined })
+          }
+          this.advance('restarting')
+          await this.runtime.connect()
+        },
+        health: () => this.runtime.health(),
+        rollback: async () => {
+          this.advance('rolling-back')
+          const rolledBack = await this.manager.rollback()
+          rollbackVersion = rolledBack.current?.version ?? null
+          await bootLogEvent({
+            level: 'warn',
+            component: 'runtime-update',
+            event: 'runtime_rollback_activated',
+            data: { version: rollbackVersion },
+          })
+        },
       })
-      await this.runtime.restart()
-      this.advance('succeeded')
+      this.preparedVersion = null
+      this.advance('succeeded', { currentVersion: appState.dshVersion, nextVersion: undefined })
     } catch (error) {
-      this.advance('rolling-back')
-      const rolledBack = await this.manager.rollback().catch(() => null)
       await bootLogEvent({
         level: 'error',
         component: 'runtime-update',
         event: 'runtime_install_failed',
         message: error instanceof Error ? error.message : String(error),
-        data: { rollbackVersion: rolledBack?.current?.version ?? null },
+        data: { rollbackVersion },
       })
       this.fail(error)
       throw error
@@ -247,11 +276,14 @@ class ElectronRuntimeUpdateService implements UpdateService {
     await captureCurrentSessionSnapshot().catch(() => undefined)
     this.advance('rolling-back')
     try {
+      await this.runtime.stop()
       const state = await this.manager.rollback()
       this.advance('restart-required', { nextVersion: state.current?.version })
       this.advance('restarting')
-      await this.runtime.restart()
-      this.advance('succeeded', { nextVersion: state.current?.version })
+      await this.runtime.connect()
+      const health = await this.runtime.health()
+      if (!health.ok) throw new Error(health.message || 'Rolled-back runtime failed health verification')
+      this.advance('succeeded', { currentVersion: appState.dshVersion, nextVersion: undefined })
     } catch (error) {
       this.fail(error)
       throw error

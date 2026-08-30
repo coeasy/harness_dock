@@ -27,6 +27,7 @@ import {
   proxyModeFromRules,
   safeNetworkTarget,
 } from './log-redaction.ts'
+import { refreshTray } from './tray.ts'
 
 const gzipAsync = promisify(gzip)
 
@@ -121,6 +122,16 @@ export function createElectronNetworkService(
   let timer: NodeJS.Timeout | undefined
   let previous = readNetworkState()
   let proxyCredentialKey: string | undefined
+  appState.networkState = previous
+
+  const publish = (next: NetworkState, force = false): void => {
+    const changed = next !== previous
+    previous = next
+    appState.networkState = next
+    if (appState.tray) refreshTray(appState.tray)
+    if (!changed && !force) return
+    for (const listener of listeners) listener(next)
+  }
 
   if (credentials) {
     app.on('login', (event, _webContents, _request, authInfo, callback) => {
@@ -136,12 +147,7 @@ export function createElectronNetworkService(
     })
   }
 
-  const poll = (): void => {
-    const next = readNetworkState()
-    if (next === previous) return
-    previous = next
-    for (const listener of listeners) listener(next)
-  }
+  const poll = (): void => publish(readNetworkState())
 
   const syncTimer = (): void => {
     if (listeners.size > 0 && !timer) {
@@ -160,6 +166,7 @@ export function createElectronNetworkService(
     const checkedAt = new Date().toISOString()
     const baseline = readNetworkState()
     if (!app.isReady() || baseline === 'offline') {
+      publish(baseline === 'offline' ? 'offline' : 'limited')
       return {
         target: safeTarget,
         state: baseline === 'offline' ? 'offline' : 'limited',
@@ -175,6 +182,7 @@ export function createElectronNetworkService(
     } catch (error) {
       const classified = networkStateFromError(error)
       if (classified.state === 'proxy-error') {
+        publish(classified.state)
         return {
           target: safeTarget,
           state: classified.state,
@@ -197,6 +205,7 @@ export function createElectronNetworkService(
         redirect: 'manual',
         signal: controller.signal,
       })
+      publish('online')
       return {
         target: safeTarget,
         state: 'online',
@@ -208,6 +217,7 @@ export function createElectronNetworkService(
       }
     } catch (error) {
       const classified = networkStateFromError(error)
+      publish(classified.state)
       return {
         target: safeTarget,
         state: classified.state,
@@ -224,13 +234,13 @@ export function createElectronNetworkService(
 
   return {
     async state() {
-      previous = readNetworkState()
+      publish(readNetworkState())
       return previous
     },
     subscribe(listener) {
       listeners.add(listener)
       syncTimer()
-      queueMicrotask(() => listener(readNetworkState()))
+      queueMicrotask(() => listener(previous))
       return () => {
         listeners.delete(listener)
         syncTimer()
@@ -259,6 +269,7 @@ export function createElectronNetworkService(
         })
       }
       await session.defaultSession.forceReloadProxyConfig()
+      publish(readNetworkState(), true)
       await bootLogEvent({
         level: 'info',
         component: 'network',

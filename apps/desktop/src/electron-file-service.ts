@@ -1,7 +1,7 @@
 import { app, dialog, net, session, shell, type BrowserWindow } from 'electron'
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   DownloadFileInput,
@@ -13,7 +13,8 @@ import type {
   UploadFileResult,
 } from '@dsh/bootstrap/client-core'
 import { appState } from './state.ts'
-import { pathIsWithin, sanitizeDownloadFilename, suggestedDownloadPath } from './downloads.ts'
+import { sanitizeDownloadFilename, suggestedDownloadPath } from './downloads.ts'
+import { canonicalDestinationPath, canonicalExistingPath } from './workspace-path.ts'
 
 function ownerWindow(): BrowserWindow | undefined {
   const window = appState.mainWindow
@@ -26,26 +27,6 @@ function fileFilters(
 ): Electron.FileFilter[] | undefined {
   if (!filters?.length) return undefined
   return filters.map((filter) => ({ name: filter.name, extensions: [...filter.extensions] }))
-}
-
-async function canonicalExistingPath(targetPath: string, workspaceRoot?: string): Promise<string> {
-  const resolved = await realpath(path.resolve(targetPath))
-  if (workspaceRoot) {
-    const root = await realpath(path.resolve(workspaceRoot))
-    if (!pathIsWithin(root, resolved)) throw new Error('Path is outside the allowed workspace boundary')
-  }
-  return resolved
-}
-
-async function canonicalDestination(targetPath: string, workspaceRoot?: string): Promise<string> {
-  const absolute = path.resolve(targetPath)
-  const parent = await realpath(path.dirname(absolute))
-  const resolved = path.join(parent, sanitizeDownloadFilename(path.basename(absolute)))
-  if (workspaceRoot) {
-    const root = await realpath(path.resolve(workspaceRoot))
-    if (!pathIsWithin(root, resolved)) throw new Error('Destination is outside the allowed workspace boundary')
-  }
-  return resolved
 }
 
 function safeTransferHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
@@ -96,7 +77,11 @@ async function downloadOnce(
     method: 'GET',
     headers,
     signal: input.signal,
+    redirect: 'manual',
   })
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error('Download redirect was blocked; callers must use an explicitly trusted final origin')
+  }
   const resumed = resumeFrom > 0 && response.status === 206
   if (!response.ok && response.status !== 206) throw new Error(`Download failed with HTTP ${response.status}`)
   if (!response.body) throw new Error('Download response did not contain a body')
@@ -136,8 +121,8 @@ async function downloadFile(input: DownloadFileInput): Promise<DownloadFileResul
   const fallbackName = path.basename(url.pathname) || 'download.bin'
   let destination: string
   if (input.destination) {
-    await mkdir(path.dirname(path.resolve(input.destination)), { recursive: true })
-    destination = await canonicalDestination(input.destination, input.workspaceRoot)
+    destination = await canonicalDestinationPath(input.destination, input.workspaceRoot)
+    await mkdir(path.dirname(destination), { recursive: true })
   } else {
     const downloads = app.getPath('downloads')
     destination = suggestedDownloadPath(downloads, input.suggestedName || fallbackName)
@@ -175,7 +160,7 @@ async function uploadFile(input: UploadFileInput): Promise<UploadFileResult> {
       method: input.method ?? 'POST',
       url: url.toString(),
       session: session.defaultSession,
-      redirect: 'follow',
+      redirect: 'error',
     })
     for (const [name, value] of Object.entries(headers)) request.setHeader(name, value)
     let settled = false
@@ -250,8 +235,9 @@ export function createElectronFileService(): FileService {
       const owner = ownerWindow()
       const result = owner ? await dialog.showSaveDialog(owner, dialogOptions) : await dialog.showSaveDialog(dialogOptions)
       if (result.canceled || !result.filePath) return null
-      await mkdir(path.dirname(path.resolve(result.filePath)), { recursive: true })
-      return canonicalDestination(result.filePath)
+      const destination = await canonicalDestinationPath(result.filePath)
+      await mkdir(path.dirname(destination), { recursive: true })
+      return destination
     },
     async openPath(targetPath: string, workspaceRoot?: string) {
       const safe = await canonicalExistingPath(targetPath, workspaceRoot)

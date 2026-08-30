@@ -4,7 +4,6 @@ export type HarnessDockDeepLinkIntent =
   | { type: 'chat-new' }
   | { type: 'session-open'; sessionId: string }
   | { type: 'workspace-open'; workspaceId: string }
-  | { type: 'workspace-path-open'; path: string }
   | { type: 'plugin-install'; pluginId: string }
   | { type: 'mcp-install'; serverId: string }
   | { type: 'device-pair'; token: string }
@@ -12,7 +11,6 @@ export type HarnessDockDeepLinkIntent =
 
 const MAX_URL_LENGTH = 8 * 1024
 const MAX_ID_LENGTH = 256
-const MAX_PATH_LENGTH = 4096
 const MAX_TOKEN_LENGTH = 1024
 
 export class InvalidHarnessDockDeepLinkError extends Error {
@@ -41,13 +39,6 @@ function validateId(value: string, name: string): string {
     throw new InvalidHarnessDockDeepLinkError(`Invalid ${name} in HarnessDock deep link`)
   }
   return trimmed
-}
-
-function validatePath(value: string): string {
-  if (!value || value.length > MAX_PATH_LENGTH || value.includes('\0')) {
-    throw new InvalidHarnessDockDeepLinkError('Invalid workspace path in HarnessDock deep link')
-  }
-  return value
 }
 
 function validateToken(value: string): string {
@@ -96,7 +87,9 @@ export function parseHarnessDockDeepLink(input: string): HarnessDockDeepLinkInte
     return { type: 'session-open', sessionId: validateId(segments[1], 'session id') }
   }
   if (segments[0] === 'workspace' && segments[1] === 'open') {
-    return { type: 'workspace-path-open', path: validatePath(required(parsed.searchParams.get('path'), 'workspace path')) }
+    throw new InvalidHarnessDockDeepLinkError(
+      'Workspace filesystem paths are not allowed in deep links; use a workspace id or native picker',
+    )
   }
   if (segments[0] === 'workspace' && segments[1] && segments.length === 2) {
     return { type: 'workspace-open', workspaceId: validateId(segments[1], 'workspace id') }
@@ -140,8 +133,6 @@ export function deepLinkIntentToCommand(intent: HarnessDockDeepLinkIntent): {
       return { name: 'session.open', payload: { sessionId: intent.sessionId } }
     case 'workspace-open':
       return { name: 'workspace.open', payload: { workspaceId: intent.workspaceId } }
-    case 'workspace-path-open':
-      return { name: 'workspace.open', payload: { path: intent.path } }
     case 'plugin-install':
       return { name: 'plugin.install', payload: { pluginId: intent.pluginId } }
     case 'mcp-install':

@@ -2,6 +2,7 @@ import { app, Menu, nativeImage, Tray } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { systemLocale, t } from './i18n.ts'
+import { appState } from './state.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -9,6 +10,8 @@ const repoRoot = path.resolve(here, '../../..')
 export interface TrayRuntimeStatus {
   state: string
   version?: string
+  network?: string
+  update?: string
 }
 
 export interface TrayHandlers {
@@ -61,15 +64,34 @@ function runtimeVersionLabel(status: TrayRuntimeStatus): string {
     : `Runtime version: ${status.version ?? 'unknown'}`
 }
 
+function networkLabel(status: TrayRuntimeStatus): string {
+  return zh()
+    ? `网络：${status.network ?? '未知'}`
+    : `Network: ${status.network ?? 'unknown'}`
+}
+
+function updateLabel(status: TrayRuntimeStatus): string {
+  return zh()
+    ? `运行时更新：${status.update ?? 'idle'}`
+    : `Runtime update: ${status.update ?? 'idle'}`
+}
+
 function buildContextMenu(handlers: TrayHandlers): Electron.Menu {
-  const runtime = handlers.getRuntimeStatus()
+  const reported = handlers.getRuntimeStatus()
+  const runtime: TrayRuntimeStatus = {
+    ...reported,
+    network: reported.network ?? appState.networkState,
+    update: reported.update ?? appState.runtimeUpdatePhase,
+  }
   const canStop = !['stopped', 'disconnected', 'stopping'].includes(runtime.state)
-  const canRestart = !['stopping', 'restarting'].includes(runtime.state)
+  const canRestart = !['stopping', 'restarting', 'updating', 'rolling-back'].includes(runtime.state)
   return Menu.buildFromTemplate([
     { label: t('tray.toggle'), click: () => handlers.onToggle() },
     { type: 'separator' },
     { label: runtimeLabel(runtime), enabled: false },
     { label: runtimeVersionLabel(runtime), enabled: false },
+    { label: networkLabel(runtime), enabled: false },
+    { label: updateLabel(runtime), enabled: false },
     {
       label: zh() ? '重启运行时' : 'Restart runtime',
       enabled: canRestart,

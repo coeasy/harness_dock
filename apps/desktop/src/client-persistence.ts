@@ -12,6 +12,15 @@ interface CredentialFileV1 {
   entries: Record<string, string>
 }
 
+interface ExpiringCredentialV1 {
+  schemaVersion: 1
+  value: string
+  expiresAt: number
+}
+
+const OAUTH_PENDING_PREFIX = 'oauth.pending.'
+const DEFAULT_OAUTH_STATE_TTL_MS = 10 * 60_000
+
 export class CredentialStoreCorruptError extends Error {
   constructor(readonly file: string) {
     super(`Encrypted credential store is corrupt: ${file}`)
@@ -37,6 +46,8 @@ export class EncryptedCredentialFileStore implements CredentialService {
   constructor(
     private readonly file: string,
     private readonly codec: SecretCodec,
+    private readonly now: () => number = () => Date.now(),
+    private readonly oauthStateTtlMs = DEFAULT_OAUTH_STATE_TTL_MS,
   ) {}
 
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -72,9 +83,42 @@ export class EncryptedCredentialFileStore implements CredentialService {
     }
   }
 
+  private async persistStore(store: CredentialFileV1): Promise<void> {
+    if (Object.keys(store.entries).length === 0) {
+      await rm(this.file, { force: true })
+      return
+    }
+    await writeAtomic(this.file, `${JSON.stringify(store, null, 2)}\n`)
+  }
+
   private assertKey(key: string): void {
     if (!key.trim() || key.length > 256 || /[\u0000-\u001f\u007f]/.test(key)) {
       throw new Error('Credential key must be 1-256 printable characters')
+    }
+  }
+
+  private encodeValue(key: string, value: string): string {
+    if (!key.startsWith(OAUTH_PENDING_PREFIX)) return value
+    const envelope: ExpiringCredentialV1 = {
+      schemaVersion: 1,
+      value,
+      expiresAt: this.now() + this.oauthStateTtlMs,
+    }
+    return JSON.stringify(envelope)
+  }
+
+  private decodeExpiringValue(value: string): ExpiringCredentialV1 | null {
+    try {
+      const parsed = JSON.parse(value) as Partial<ExpiringCredentialV1>
+      if (
+        parsed.schemaVersion !== 1 ||
+        typeof parsed.value !== 'string' ||
+        typeof parsed.expiresAt !== 'number' ||
+        !Number.isFinite(parsed.expiresAt)
+      ) return null
+      return parsed as ExpiringCredentialV1
+    } catch {
+      return null
     }
   }
 
@@ -83,7 +127,16 @@ export class EncryptedCredentialFileStore implements CredentialService {
     return this.exclusive(async () => {
       const store = await this.readStore()
       const encrypted = store.entries[key]
-      return encrypted === undefined ? null : this.codec.decrypt(encrypted)
+      if (encrypted === undefined) return null
+      const plain = this.codec.decrypt(encrypted)
+      if (!key.startsWith(OAUTH_PENDING_PREFIX)) return plain
+      const envelope = this.decodeExpiringValue(plain)
+      if (!envelope || envelope.expiresAt <= this.now()) {
+        delete store.entries[key]
+        await this.persistStore(store)
+        return null
+      }
+      return envelope.value
     })
   }
 
@@ -91,8 +144,8 @@ export class EncryptedCredentialFileStore implements CredentialService {
     this.assertKey(key)
     return this.exclusive(async () => {
       const store = await this.readStore()
-      store.entries[key] = this.codec.encrypt(value)
-      await writeAtomic(this.file, `${JSON.stringify(store, null, 2)}\n`)
+      store.entries[key] = this.codec.encrypt(this.encodeValue(key, value))
+      await this.persistStore(store)
     })
   }
 
@@ -102,11 +155,7 @@ export class EncryptedCredentialFileStore implements CredentialService {
       const store = await this.readStore()
       if (!(key in store.entries)) return
       delete store.entries[key]
-      if (Object.keys(store.entries).length === 0) {
-        await rm(this.file, { force: true })
-        return
-      }
-      await writeAtomic(this.file, `${JSON.stringify(store, null, 2)}\n`)
+      await this.persistStore(store)
     })
   }
 
