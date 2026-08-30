@@ -8,6 +8,8 @@ export { bundledRuntimeVersion, inspectBundledRuntime, NODE_BUNDLE_VERSION, runt
 export { scrubElectronEnv } from './env.ts'
 export { buildSpawnRequest, isWindowsScriptCommand, quoteForCmd } from './shell.ts'
 export { DshRuntime } from './runtime.ts'
+export { openWebUiSession, probeWebUiSession } from './web-auth.ts'
+export type { WebUiProbeOptions, WebUiSession } from './web-auth.ts'
 export {
   assertBundledRuntimeIntegrity,
   repairKnownRuntimeAssets,

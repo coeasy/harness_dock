@@ -99,6 +99,42 @@ describe('HarnessGateway', () => {
     }
   })
 
+  it('keeps the dsh browser-auth cookie host-private and authoritative for HTTP proxying', async () => {
+    const seen: string[] = []
+    const upstream = http.createServer((req, res) => {
+      seen.push(req.headers.cookie ?? '')
+      if (!req.headers.cookie?.includes('dsh-auth-test=server-secret')) {
+        res.writeHead(401)
+        res.end('missing-auth')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('authenticated')
+    })
+    const upstreamPort = await listen(upstream)
+    const gateway = await startHarnessGateway({
+      upstreamUrl: `http://127.0.0.1:${upstreamPort}/`,
+      upstreamCookie: 'dsh-auth-test=server-secret',
+    })
+
+    try {
+      const { cookie } = await pairDevice(gateway, 'authenticated-phone')
+      const response = await fetch(gateway.localUrl, {
+        headers: { cookie: `${cookie}; dsh-auth-test=client-forgery; client-pref=ok` },
+      })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('authenticated')
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toContain('dsh-auth-test=server-secret')
+      expect(seen[0]).toContain('client-pref=ok')
+      expect(seen[0]).not.toContain('client-forgery')
+      expect(seen[0]).not.toContain('harnessdock_session')
+    } finally {
+      await gateway.stop()
+      await close(upstream)
+    }
+  })
+
   it('lists active devices and immediately revokes their sessions', async () => {
     const upstream = http.createServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain' })
@@ -131,7 +167,7 @@ describe('HarnessGateway', () => {
     }
   })
 
-  it('requires a gateway session for WebSocket upgrades and strips the gateway cookie upstream', async () => {
+  it('requires a gateway session for WebSocket upgrades and forwards only authoritative dsh auth', async () => {
     let upstreamCookie: string | undefined
     const upstream = http.createServer((_req, res) => {
       res.writeHead(404)
@@ -143,7 +179,10 @@ describe('HarnessGateway', () => {
       socket.end('upstream-upgraded')
     })
     const upstreamPort = await listen(upstream)
-    const gateway = await startHarnessGateway({ upstreamUrl: `http://127.0.0.1:${upstreamPort}/` })
+    const gateway = await startHarnessGateway({
+      upstreamUrl: `http://127.0.0.1:${upstreamPort}/`,
+      upstreamCookie: 'dsh-auth-test=server-secret',
+    })
 
     try {
       const unauthenticated = await rawTcpRequest(
@@ -155,11 +194,11 @@ describe('HarnessGateway', () => {
       const { cookie } = await pairDevice(gateway, 'streaming-phone')
       const authenticated = await rawTcpRequest(
         gateway.localUrl,
-        `GET /stream HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nCookie: ${cookie}\r\n\r\n`,
+        `GET /stream HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nCookie: ${cookie}; dsh-auth-test=forged\r\n\r\n`,
       )
       expect(authenticated).toContain('101 Switching Protocols')
       expect(authenticated).toContain('upstream-upgraded')
-      expect(upstreamCookie).toBeUndefined()
+      expect(upstreamCookie).toBe('dsh-auth-test=server-secret')
     } finally {
       await gateway.stop()
       await close(upstream)

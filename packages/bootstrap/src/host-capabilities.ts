@@ -1,6 +1,8 @@
 export type HarnessHostId =
   | 'electron'
   | 'tauri'
+  | 'tauri-ios'
+  | 'tauri-android'
   | 'perry-desktop'
   | 'perry-ios'
   | 'perry-android'
@@ -33,10 +35,11 @@ export interface HarnessHostProfile {
   capabilities: HarnessHostCapabilities
 }
 
+/** Legacy v0.1/v0.2 migration host. It remains readable until Tauri parity is green. */
 export const ELECTRON_HOST_PROFILE: HarnessHostProfile = {
   id: 'electron',
-  productName: 'HarnessDock',
-  channel: 'stable',
+  productName: 'HarnessDock Legacy Electron',
+  channel: 'lts',
   appId: 'com.dsh.client',
   capabilities: {
     runtimes: ['local'],
@@ -55,110 +58,107 @@ export const ELECTRON_HOST_PROFILE: HarnessHostProfile = {
   },
 }
 
-/**
- * Tauri is registered in the shared Host Contract before the native adapter is
- * promoted. Capability flags remain pessimistic until the v0.2 adapter and
- * parity tests prove each service. This prevents the UI from exposing native
- * actions that are only theoretically supported by Tauri.
- */
+/** v0.2 target desktop host. The release gate promotes this implementation, not Electron. */
 export const TAURI_HOST_PROFILE: HarnessHostProfile = {
   id: 'tauri',
-  productName: 'HarnessDock Next-Gen Preview',
-  channel: 'preview',
-  appId: 'com.dsh.client.tauri.preview',
+  productName: 'HarnessDock',
+  channel: 'stable',
+  appId: 'com.harnessdock.client',
   capabilities: {
-    runtimes: [],
-    downloads: false,
-    filePicker: false,
-    clipboardPermission: false,
-    nativeJsBridge: false,
-    serviceWorkers: false,
-    autoUpdate: false,
-    tray: false,
-    notifications: false,
+    runtimes: ['local', 'remote'],
+    downloads: true,
+    filePicker: true,
+    clipboardPermission: true,
+    nativeJsBridge: true,
+    serviceWorkers: true,
+    autoUpdate: true,
+    tray: true,
+    notifications: true,
     pushNotifications: false,
-    deepLinks: false,
-    secureCredentials: false,
-    backgroundExecution: false,
-  },
-}
-
-export const PERRY_DESKTOP_HOST_PROFILE: HarnessHostProfile = {
-  id: 'perry-desktop',
-  productName: 'HarnessDock Native Preview',
-  channel: 'experimental',
-  appId: 'com.dsh.client.perry.preview',
-  capabilities: {
-    runtimes: ['local'],
-    downloads: false,
-    filePicker: false,
-    clipboardPermission: false,
-    nativeJsBridge: false,
-    serviceWorkers: false,
-    autoUpdate: false,
-    tray: false,
-    notifications: false,
-    pushNotifications: false,
-    deepLinks: false,
-    secureCredentials: false,
+    deepLinks: true,
+    secureCredentials: true,
     backgroundExecution: true,
   },
 }
 
-/**
- * Mobile hosts are remote-runtime-only by design. They must never download or
- * execute the desktop dsh/Node runtime inside an App Store / Play package.
- */
+/** Mobile hosts deliberately expose only the remote runtime mode. */
+export const TAURI_IOS_HOST_PROFILE: HarnessHostProfile = {
+  id: 'tauri-ios',
+  productName: 'HarnessDock',
+  channel: 'stable',
+  appId: 'com.harnessdock.client',
+  capabilities: {
+    runtimes: ['remote'],
+    downloads: false,
+    filePicker: true,
+    clipboardPermission: true,
+    nativeJsBridge: true,
+    serviceWorkers: true,
+    autoUpdate: true,
+    tray: false,
+    notifications: true,
+    pushNotifications: true,
+    deepLinks: true,
+    secureCredentials: true,
+    backgroundExecution: false,
+  },
+}
+
+export const TAURI_ANDROID_HOST_PROFILE: HarnessHostProfile = {
+  id: 'tauri-android',
+  productName: 'HarnessDock',
+  channel: 'stable',
+  appId: 'com.harnessdock.client',
+  capabilities: {
+    runtimes: ['remote'],
+    downloads: false,
+    filePicker: true,
+    clipboardPermission: true,
+    nativeJsBridge: true,
+    serviceWorkers: true,
+    autoUpdate: true,
+    tray: false,
+    notifications: true,
+    pushNotifications: true,
+    deepLinks: true,
+    secureCredentials: true,
+    backgroundExecution: false,
+  },
+}
+
+/** @deprecated Historical lease/profile compatibility only; no Perry app is built or released. */
+export const PERRY_DESKTOP_HOST_PROFILE: HarnessHostProfile = {
+  ...TAURI_HOST_PROFILE,
+  id: 'perry-desktop',
+  channel: 'experimental',
+  productName: 'HarnessDock Legacy Perry',
+  appId: 'com.dsh.client.perry.preview',
+}
+
+/** @deprecated Historical compatibility only. */
 export const PERRY_IOS_HOST_PROFILE: HarnessHostProfile = {
+  ...TAURI_IOS_HOST_PROFILE,
   id: 'perry-ios',
-  productName: 'HarnessDock Mobile Preview',
-  channel: 'preview',
+  channel: 'experimental',
+  productName: 'HarnessDock Legacy Perry Mobile',
   appId: 'com.dsh.client.mobile.preview',
-  capabilities: {
-    runtimes: ['remote'],
-    downloads: false,
-    filePicker: false,
-    clipboardPermission: false,
-    nativeJsBridge: false,
-    serviceWorkers: false,
-    autoUpdate: true,
-    tray: false,
-    notifications: true,
-    pushNotifications: false,
-    deepLinks: false,
-    secureCredentials: false,
-    backgroundExecution: false,
-  },
 }
 
+/** @deprecated Historical compatibility only. */
 export const PERRY_ANDROID_HOST_PROFILE: HarnessHostProfile = {
+  ...TAURI_ANDROID_HOST_PROFILE,
   id: 'perry-android',
-  productName: 'HarnessDock Mobile Preview',
-  channel: 'preview',
+  channel: 'experimental',
+  productName: 'HarnessDock Legacy Perry Mobile',
   appId: 'com.dsh.client.mobile.preview',
-  capabilities: {
-    runtimes: ['remote'],
-    downloads: false,
-    filePicker: false,
-    clipboardPermission: false,
-    nativeJsBridge: false,
-    serviceWorkers: false,
-    autoUpdate: true,
-    tray: false,
-    notifications: true,
-    pushNotifications: false,
-    deepLinks: false,
-    secureCredentials: false,
-    backgroundExecution: false,
-  },
 }
 
+/** Active v0.2 product hosts. Legacy Perry profiles are intentionally excluded. */
 export const HOST_PROFILES = {
   electron: ELECTRON_HOST_PROFILE,
   tauri: TAURI_HOST_PROFILE,
-  'perry-desktop': PERRY_DESKTOP_HOST_PROFILE,
-  'perry-ios': PERRY_IOS_HOST_PROFILE,
-  'perry-android': PERRY_ANDROID_HOST_PROFILE,
+  'tauri-ios': TAURI_IOS_HOST_PROFILE,
+  'tauri-android': TAURI_ANDROID_HOST_PROFILE,
 } as const
 
 export function supportsRuntime(profile: HarnessHostProfile, mode: RuntimeAccessMode): boolean {
