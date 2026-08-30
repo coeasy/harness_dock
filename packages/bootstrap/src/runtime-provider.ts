@@ -1,3 +1,9 @@
+import {
+  normalizeReconnectPolicy,
+  reconnectDelayMs,
+  type ReconnectPolicy,
+} from './network-policy.ts'
+
 export type RuntimeProviderKind = 'local' | 'remote'
 
 export interface RuntimeSession {
@@ -25,6 +31,7 @@ export interface RuntimeProvider {
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
+export type SleepLike = (delayMs: number, signal?: AbortSignal) => Promise<void>
 
 export interface RemoteRuntimeProviderOptions {
   gatewayUrl: string
@@ -33,6 +40,13 @@ export interface RemoteRuntimeProviderOptions {
   fetchImpl?: FetchLike
   /** HTTP is accepted only for loopback development by default. */
   allowInsecureLocalhost?: boolean
+}
+
+export interface WaitForRemoteHealthOptions {
+  policy?: Partial<ReconnectPolicy>
+  signal?: AbortSignal
+  sleepImpl?: SleepLike
+  random?: () => number
 }
 
 interface PairResponse {
@@ -46,6 +60,16 @@ interface HealthResponse {
   appUrl?: string
   dshVersion?: string
   message?: string
+}
+
+export class RemoteRuntimeReconnectError extends Error {
+  constructor(
+    readonly attempts: number,
+    readonly lastHealth: RuntimeHealth,
+  ) {
+    super(`Remote runtime did not recover after ${attempts} health checks${lastHealth.message ? `: ${lastHealth.message}` : ''}`)
+    this.name = 'RemoteRuntimeReconnectError'
+  }
 }
 
 function isLoopback(hostname: string): boolean {
@@ -85,6 +109,29 @@ function assertPairResponse(value: unknown, gateway: URL): PairResponse {
     expiresAt: record.expiresAt,
     ...(typeof record.dshVersion === 'string' ? { dshVersion: record.dshVersion } : {}),
   }
+}
+
+function abortError(): Error {
+  const error = new Error('Remote runtime reconnect aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+export const sleepWithAbort: SleepLike = async (delayMs, signal) => {
+  if (signal?.aborted) throw abortError()
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = (): void => {
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(abortError())
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, Math.max(0, delayMs))
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**
@@ -154,6 +201,33 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
         provider: 'remote',
         message: error instanceof Error ? error.message : String(error),
       }
+    }
+  }
+
+  /**
+   * Wait for an already-paired gateway/runtime to become healthy again using
+   * bounded exponential backoff. This deliberately NEVER calls connect() and
+   * therefore never reuses a one-time pairing code. Restoring an authenticated
+   * WebView session after cookie expiry requires the future device-credential
+   * flow rather than unsafe automatic re-pairing.
+   */
+  async waitUntilHealthy(options: WaitForRemoteHealthOptions = {}): Promise<RuntimeHealth> {
+    const policy = normalizeReconnectPolicy(options.policy)
+    const sleep = options.sleepImpl ?? sleepWithAbort
+    const random = options.random ?? Math.random
+    let attempts = 0
+    let lastHealth: RuntimeHealth = { ok: false, provider: 'remote', message: 'not checked' }
+
+    for (;;) {
+      if (options.signal?.aborted) throw abortError()
+      attempts += 1
+      lastHealth = await this.health()
+      if (lastHealth.ok) return lastHealth
+      if (policy.maxAttempts !== undefined && attempts >= policy.maxAttempts) {
+        throw new RemoteRuntimeReconnectError(attempts, lastHealth)
+      }
+      const delay = reconnectDelayMs(attempts - 1, policy, random)
+      await sleep(delay, options.signal)
     }
   }
 

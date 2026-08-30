@@ -4,12 +4,15 @@ import { promisify } from 'node:util'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
+  normalizeNetworkProxyPolicy,
   redactDiagnostics,
   type CredentialService,
   type DiagnosticsService,
   type DiagnosticsSnapshot,
   type LogService,
   type NetworkDiagnostic,
+  type NetworkPolicyService,
+  type NetworkProxyPolicy,
   type NetworkService,
   type NetworkState,
   type SessionRecoveryService,
@@ -26,6 +29,10 @@ import {
   proxyModeFromRules,
   safeNetworkTarget,
 } from './log-redaction.ts'
+import {
+  JsonNetworkPolicyStore,
+  electronProxyConfigFromPolicy,
+} from './network-policy-store.ts'
 
 const gzipAsync = promisify(gzip)
 
@@ -42,6 +49,10 @@ function credentialFile(): string {
 
 function recoveryFile(): string {
   return path.join(app.getPath('userData'), 'client-state', 'session.v1.json')
+}
+
+function networkPolicyFile(): string {
+  return path.join(app.getPath('userData'), 'client-state', 'network-policy.v1.json')
 }
 
 function safeStorageCodec(): SecretCodec {
@@ -81,6 +92,53 @@ export function createElectronLogService(): LogService {
   return {
     write: bootLogEvent,
     recent: recentLogEvents,
+  }
+}
+
+async function applyProxyPolicyToSession(policy: NetworkProxyPolicy): Promise<NetworkProxyPolicy> {
+  if (!app.isReady()) throw new Error('Electron must be ready before applying network policy')
+  const normalized = normalizeNetworkProxyPolicy(policy)
+  await session.defaultSession.setProxy(electronProxyConfigFromPolicy(normalized))
+  const compatibleSession = session.defaultSession as typeof session.defaultSession & {
+    closeAllConnections?: () => Promise<void>
+  }
+  await compatibleSession.closeAllConnections?.().catch(() => undefined)
+  return normalized
+}
+
+export function createElectronNetworkPolicyService(logs: LogService): NetworkPolicyService {
+  const store = new JsonNetworkPolicyStore(networkPolicyFile())
+  const applyAndLog = async (
+    policy: NetworkProxyPolicy,
+    event: 'applied' | 'restored' | 'reset',
+    persist: boolean,
+  ): Promise<NetworkProxyPolicy> => {
+    const normalized = await applyProxyPolicyToSession(policy)
+    if (persist) await store.save(normalized)
+    await logs.write({
+      level: 'info',
+      component: 'network-policy',
+      event,
+      data: {
+        mode: normalized.mode,
+        bypassCount: 'bypass' in normalized ? (normalized.bypass?.length ?? 0) : 0,
+      },
+    })
+    return normalized
+  }
+
+  return {
+    current: () => store.load(),
+    apply: (policy) => applyAndLog(policy, 'applied', true),
+    async reset() {
+      const normalized = await applyAndLog({ mode: 'system' }, 'reset', false)
+      await store.reset()
+      return normalized
+    },
+    async restore() {
+      const stored = await store.load()
+      return applyAndLog(stored, 'restored', false)
+    },
   }
 }
 

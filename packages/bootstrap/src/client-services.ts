@@ -1,3 +1,4 @@
+import type { NetworkProxyPolicy } from './network-policy.ts'
 import type { UpdateSnapshot, UpdateTarget } from './update-state.ts'
 
 export type NetworkState = 'online' | 'offline' | 'limited' | 'proxy-error' | 'dns-error' | 'tls-error'
@@ -117,6 +118,14 @@ export interface NetworkService {
   diagnose(target: string, timeoutMs?: number): Promise<NetworkDiagnostic>
 }
 
+export interface NetworkPolicyService {
+  current(): Promise<NetworkProxyPolicy>
+  apply(policy: NetworkProxyPolicy): Promise<NetworkProxyPolicy>
+  reset(): Promise<NetworkProxyPolicy>
+  /** Reapply the persisted non-secret policy to a newly created host session. */
+  restore(): Promise<NetworkProxyPolicy>
+}
+
 export interface DeepLinkService {
   register(protocol: 'harnessdock'): Promise<void>
   subscribe(listener: (url: string) => void): () => void
@@ -130,6 +139,7 @@ export interface ClientServices {
   recovery: SessionRecoveryService
   diagnostics: DiagnosticsService
   network: NetworkService
+  networkPolicy: NetworkPolicyService
   logs: LogService
   deepLinks: DeepLinkService
 }

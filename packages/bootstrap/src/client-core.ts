@@ -16,6 +16,15 @@ export {
 } from './deep-link.ts'
 export type { HarnessDockDeepLinkIntent } from './deep-link.ts'
 export {
+  DEFAULT_RECONNECT_POLICY,
+  InvalidNetworkProxyPolicyError,
+  defaultNetworkProxyPolicy,
+  normalizeNetworkProxyPolicy,
+  normalizeReconnectPolicy,
+  reconnectDelayMs,
+} from './network-policy.ts'
+export type { NetworkProxyPolicy, ReconnectPolicy } from './network-policy.ts'
+export {
   InvalidUpdateTransitionError,
   canTransitionUpdate,
   initialUpdateSnapshot,
@@ -39,6 +48,7 @@ export type {
   HostUpdateInfo,
   LogService,
   NetworkDiagnostic,
+  NetworkPolicyService,
   NetworkService,
   NetworkState,
   ProxyMode,

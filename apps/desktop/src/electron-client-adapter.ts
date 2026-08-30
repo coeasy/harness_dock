@@ -10,6 +10,7 @@ import {
   type FilePickerOptions,
   type FileService,
   type LogService,
+  type NetworkPolicyService,
   type NetworkService,
   type SaveFileOptions,
   type SessionRecoveryService,
@@ -20,6 +21,7 @@ import {
   createElectronCredentialService,
   createElectronDiagnosticsService,
   createElectronLogService,
+  createElectronNetworkPolicyService,
   createElectronNetworkService,
   createElectronSessionRecoveryService,
 } from './electron-services.ts'
@@ -129,6 +131,7 @@ export interface ElectronClientAdapter {
   readonly recovery: SessionRecoveryService
   readonly diagnostics: DiagnosticsService
   readonly network: NetworkService
+  readonly networkPolicy: NetworkPolicyService
   readonly logs: LogService
   registerProtocol(): Promise<boolean>
   dispatchArgv(argv: readonly string[]): Promise<void>
@@ -149,6 +152,7 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
   const recovery = createElectronSessionRecoveryService()
   const network = createElectronNetworkService()
   const logs = createElectronLogService()
+  const networkPolicy = createElectronNetworkPolicyService(logs)
   const diagnostics = createElectronDiagnosticsService(network, logs)
   const pendingUrls: string[] = []
   let pendingFocus = false
@@ -218,6 +222,7 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
     recovery,
     diagnostics,
     network,
+    networkPolicy,
     logs,
     async registerProtocol() {
       if (!app.isPackaged) return false

@@ -78,6 +78,16 @@ if (gotSingleInstanceLock) {
     await pruneOldLogs()
     await bootLog(`log dir: ${getLogDir()}`)
     try {
+      // Client/WebView proxy policy is restored before the Harness window is
+      // created. Failure is non-fatal: reset to OS/system proxy and continue.
+      try {
+        await clientAdapter.networkPolicy.restore()
+      } catch (error) {
+        await bootLog(
+          `network policy restore failed; resetting to system: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        await clientAdapter.networkPolicy.reset().catch(() => undefined)
+      }
       await bootLog(`plugin=${pluginPath()} | bundled=${bundledRoot()} | origin=${originPath()}`)
       await bootFlow()
       await clientAdapter.markReady()
