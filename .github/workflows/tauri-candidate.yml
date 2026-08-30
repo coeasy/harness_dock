@@ -220,7 +220,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Linux Tauri dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
       - uses: pnpm/action-setup@v6
         with:
           version: 10.12.1
@@ -257,7 +257,7 @@ jobs:
         run: cargo install tauri-cli --version 2.11.4 --locked
       - name: Build Tauri desktop candidate
         working-directory: apps/tauri
-        run: cargo tauri build --bundles ${{ matrix.bundles }}
+        run: cargo tauri build --verbose --bundles ${{ matrix.bundles }}
       - name: Validate desktop bundle exists
         shell: bash
         run: |
