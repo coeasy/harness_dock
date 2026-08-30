@@ -1,6 +1,16 @@
 import { app, Notification } from 'electron'
 import { bundledRuntimeVersion, redactWebAuthTokens } from '@dsh/client-runtime'
-import { acquireRuntimeLease, LocalRuntimeProvider } from '@dsh/bootstrap'
+import {
+  acquireRuntimeLease,
+  commitManagedRuntimeCandidate,
+  compareVersions,
+  defaultManagedRuntimeStatePath,
+  failManagedRuntimeCandidate,
+  LocalRuntimeProvider,
+  markManagedRuntimeVerifying,
+  readManagedRuntimeState,
+  selectManagedRuntimeVersion,
+} from '@dsh/bootstrap'
 import { startHarnessGateway } from '@dsh/bootstrap/gateway'
 import { readOriginFile } from '@dsh/docs-sync'
 import { bootLog, openLogDir } from '../boot-log.ts'
@@ -17,6 +27,7 @@ import {
 import { createWindow, toggleMainWindow } from '../window/main-window.ts'
 import { createTray } from '../tray.ts'
 import { initAutoUpdate, type AutoUpdateHandle } from '../auto-update.ts'
+import { initRuntimeAutoUpdate } from '../runtime-auto-update.ts'
 import { openDiagnosticsWindow } from '../diagnostics/diagnostics.ts'
 import { openMobileManagerWindow } from '../mobile/mobile-window.ts'
 import { bundledRoot, originPath, pluginPath } from '../paths.ts'
@@ -30,13 +41,21 @@ import { BootProgressTracker } from './progress.ts'
 
 let autoUpdate: AutoUpdateHandle | undefined
 
+interface BootVersionSelection {
+  version?: string
+  managedCandidate?: string
+  managedStatePath?: string
+}
+
 /**
  * Boot orchestration: splash → cross-host runtime lease → LocalRuntimeProvider
  * (origin → runtime → start, with last-known-good rollback) → optional secure
- * remote gateway → main window → auto-update → tray.
+ * remote gateway → main window → Host/Runtime auto-update → tray.
  *
- * The provider boundary is shared with Perry Desktop; iOS/Android implement the
- * same runtime contract through RemoteRuntimeProvider and never spawn dsh.
+ * Manual Runtime selection always wins. Otherwise a verified managed Runtime
+ * candidate can be activated from the versioned cache. It is committed only
+ * after dsh + the official Harness UI window pass boot; a failed candidate is
+ * quarantined and the shared bootstrap falls back to last-known-good.
  */
 export async function bootFlow(): Promise<void> {
   const progress = new BootProgressTracker()
@@ -47,10 +66,14 @@ export async function bootFlow(): Promise<void> {
   const runtimeLease = await acquireRuntimeLease({ host: 'electron' })
   appState.runtimeLease = runtimeLease
   let localProvider: LocalRuntimeProvider | undefined
+  let managedCandidate: string | undefined
+  let managedStatePath: string | undefined
 
   try {
     const userDataDir = app.getPath('userData')
-    const versionOverride = await resolveVersionOverride(userDataDir)
+    const selection = await resolveBootVersionSelection(userDataDir)
+    managedCandidate = selection.managedCandidate
+    managedStatePath = selection.managedStatePath
 
     localProvider = new LocalRuntimeProvider({
       originPath: originPath(),
@@ -58,7 +81,7 @@ export async function bootFlow(): Promise<void> {
       packaged: app.isPackaged,
       bundledRoot: bundledRoot(),
       userDataDir,
-      versionOverride,
+      versionOverride: selection.version,
       stopTimeoutMs: 12_000,
       log: (message) => void bootLog(message),
       onBeforeStart: ({ bundledAvailable }) => {
@@ -116,6 +139,18 @@ export async function bootFlow(): Promise<void> {
     const result = localProvider.bootstrapResult
     if (!result) throw new Error('LocalRuntimeProvider connected without a bootstrap result.')
 
+    if (managedCandidate && managedStatePath && result.rolledBack) {
+      await failManagedRuntimeCandidate(
+        managedStatePath,
+        managedCandidate,
+        new Error(`candidate ${managedCandidate} rolled back to ${result.rolledBack.to}`),
+      )
+      await bootLog(
+        `runtime auto-update: candidate ${managedCandidate} quarantined after rollback to ${result.rolledBack.to}`,
+      )
+      managedCandidate = undefined
+    }
+
     appState.runtime = result.runtime
     appState.dshPid = result.ready.pid
     appState.dshVersion = result.ready.dshVersion
@@ -131,6 +166,15 @@ export async function bootFlow(): Promise<void> {
     updateSplash(t('splash.loadingInterface'))
     showSplashProgress(progress.loadingInterface())
     await createWindow(session.appUrl)
+
+    // The candidate is not active merely because dsh spawned. Commit only after
+    // the official Harness UI window also loaded successfully.
+    if (managedCandidate && managedStatePath && result.ready.dshVersion === managedCandidate) {
+      await commitManagedRuntimeCandidate(managedStatePath, managedCandidate)
+      await bootLog(`runtime auto-update: candidate ${managedCandidate} passed health gate and is now active`)
+      managedCandidate = undefined
+    }
+
     showSplashProgress(progress.complete())
     showSplashDone()
 
@@ -138,6 +182,11 @@ export async function bootFlow(): Promise<void> {
       autoUpdate = initAutoUpdate()
     } catch (error) {
       await bootLog(`auto-update init failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    try {
+      initRuntimeAutoUpdate()
+    } catch (error) {
+      await bootLog(`runtime auto-update init failed: ${error instanceof Error ? error.message : String(error)}`)
     }
     try {
       appState.tray = createTray({
@@ -153,6 +202,9 @@ export async function bootFlow(): Promise<void> {
       await bootLog(`tray creation failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   } catch (error) {
+    if (managedCandidate && managedStatePath) {
+      await failManagedRuntimeCandidate(managedStatePath, managedCandidate, error).catch(() => undefined)
+    }
     appState.runtimeLease = undefined
     await appState.gateway?.stop().catch(() => undefined)
     appState.gateway = undefined
@@ -187,8 +239,6 @@ async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
   appState.gateway = gateway
   await bootLog(`remote gateway ready: local=${gateway.localUrl} public=${gateway.publicUrl}`)
 
-  // Compatibility switch for early Preview automation. The tray Mobile Devices
-  // panel is the preferred place to create/revoke one-time pairing codes.
   if (process.env.HARNESSDOCK_GATEWAY_PAIR_ON_START === '1') {
     const ticket = gateway.createPairingTicket()
     try {
@@ -202,13 +252,56 @@ async function startRemoteGatewayIfEnabled(upstreamUrl: string): Promise<void> {
   }
 }
 
+/** Manual diagnostics choice wins over all automatic Runtime movement. */
+async function resolveBootVersionSelection(userDataDir: string): Promise<BootVersionSelection> {
+  const manual = await resolveManualVersionOverride(userDataDir)
+  if (manual) return { version: manual }
+
+  let pinned = ''
+  try {
+    pinned = (await readOriginFile(originPath())).dshVersion
+  } catch {
+    return {}
+  }
+
+  const cacheDir = runtimeCacheDir(userDataDir)
+  const cached = await listCachedRuntimeVersions(cacheDir)
+  const statePath = defaultManagedRuntimeStatePath(userDataDir)
+  const state = await readManagedRuntimeState(statePath).catch(async (error) => {
+    await bootLog(`runtime auto-update: managed state ignored: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  })
+  const selected = selectManagedRuntimeVersion(state, cached)
+  if (!selected) return {}
+
+  try {
+    if (compareVersions(selected.version, pinned) <= 0) {
+      await bootLog(
+        `runtime auto-update: packaged pin ${pinned} supersedes managed ${selected.version}; using packaged pin`,
+      )
+      return {}
+    }
+  } catch {
+    return {}
+  }
+
+  if (selected.candidate) {
+    await markManagedRuntimeVerifying(statePath, selected.version)
+    await bootLog(`runtime auto-update: verifying staged candidate ${selected.version}`)
+    return { version: selected.version, managedCandidate: selected.version, managedStatePath: statePath }
+  }
+
+  await bootLog(`runtime auto-update: using healthy managed Runtime ${selected.version}`)
+  return { version: selected.version, managedStatePath: statePath }
+}
+
 /**
  * Read userData/origin-override.json before booting. Returns the override when
  * it is non-empty and allowed (pinned / seed / cached); logs and ignores
  * anything else so a stray override can never drift the client to an arbitrary
  * version.
  */
-async function resolveVersionOverride(userDataDir: string): Promise<string | undefined> {
+async function resolveManualVersionOverride(userDataDir: string): Promise<string | undefined> {
   const override = await readVersionOverride(userDataDir)
   if (!override) return undefined
   let pinned = ''
