@@ -6,6 +6,8 @@ export interface GuideCapability {
 
 export interface RuntimeBundleSpec {
   url: string
+  sha256?: string
+  size?: number
 }
 
 export interface Origin {
