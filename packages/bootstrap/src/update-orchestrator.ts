@@ -57,6 +57,12 @@ export interface InstalledUpdateContext {
   runtimeVersion?: string
   runtimeSha256?: string
   runtimeMode: PackageRuntimeMode
+  /**
+   * True when the active Runtime lives in a HarnessDock-managed mutable store.
+   * Thin defaults to true. Current Full packages run their signed bundled seed
+   * in-place, so they default to false until the v0.2 managed-runtime migration.
+   */
+  runtimeManaged?: boolean
   platform: string
   arch: string
   channel: UpdateChannel
@@ -138,6 +144,41 @@ export function assertReleaseManifestV2(value: unknown): asserts value is Releas
   for (const artifact of manifest.artifacts) validateArtifact(artifact)
 }
 
+export async function fetchReleaseManifestV2(
+  url: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ReleaseManifestV2> {
+  const response = await fetchImpl(url, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) throw new Error(`release manifest request failed: HTTP ${response.status} ${url}`)
+  const value: unknown = await response.json()
+  assertReleaseManifestV2(value)
+  return value
+}
+
+export function githubLatestReleaseManifestUrl(repository: string): string {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    throw new Error(`invalid GitHub repository: ${repository}`)
+  }
+  return `https://github.com/${repository}/releases/latest/download/release-manifest.json`
+}
+
+export function resolveReleaseArtifactUrl(
+  manifest: ReleaseManifestV2,
+  artifact: Pick<ReleaseArtifactV2, 'assetName' | 'url'>,
+): string {
+  if (artifact.url) return artifact.url
+  if (manifest.source?.baseUrl) {
+    return `${manifest.source.baseUrl.replace(/\/$/, '')}/${encodeURIComponent(artifact.assetName)}`
+  }
+  if (manifest.source?.provider === 'github' && manifest.source.repository && manifest.release.tag) {
+    return `https://github.com/${manifest.source.repository}/releases/download/${encodeURIComponent(manifest.release.tag)}/${encodeURIComponent(artifact.assetName)}`
+  }
+  throw new Error(`cannot resolve URL for release artifact ${artifact.assetName}`)
+}
+
 export function createUpdatePlan(
   manifest: ReleaseManifestV2,
   current: InstalledUpdateContext,
@@ -158,8 +199,9 @@ export function createUpdatePlan(
     current.preferredFormats ?? preferredFormats(current.platform),
   )
 
+  const runtimeManaged = current.runtimeManaged ?? current.runtimeMode === 'thin'
   const runtimeArtifact =
-    current.runtimeMode === 'remote' || !current.runtimeVersion
+    !runtimeManaged || !current.runtimeVersion
       ? undefined
       : pickBestArtifact(
           manifest.artifacts.filter(
@@ -201,7 +243,7 @@ export function selectDelivery(
     .filter(
       (delta) =>
         delta.fromVersion === currentVersion &&
-        (!delta.fromSha256 || !currentSha256 || delta.fromSha256 === currentSha256) &&
+        (!delta.fromSha256 || (Boolean(currentSha256) && delta.fromSha256 === currentSha256)) &&
         delta.size > 0 &&
         delta.size < artifact.size,
     )
@@ -329,6 +371,9 @@ function validateArtifact(artifact: ReleaseArtifactV2): void {
   if (!artifact.id || !artifact.assetName || !artifact.version) throw new Error('release artifact is missing required identity fields')
   if (artifact.component !== 'host' && artifact.component !== 'runtime') {
     throw new Error(`invalid release artifact component: ${String(artifact.component)}`)
+  }
+  if (artifact.component === 'host' && (!artifact.host || !artifact.runtimeMode)) {
+    throw new Error(`host release artifact is missing host/runtimeMode: ${artifact.assetName}`)
   }
   if (!/^[a-f0-9]{64}$/i.test(artifact.sha256)) {
     throw new Error(`invalid sha256 for ${artifact.assetName}`)
