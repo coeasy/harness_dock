@@ -5,12 +5,22 @@ import {
   deepLinkIntentToCommand,
   parseHarnessDockDeepLink,
   type AppLifecycleService,
+  type CredentialService,
+  type DiagnosticsService,
   type FilePickerOptions,
   type FileService,
+  type NetworkService,
   type SaveFileOptions,
+  type SessionRecoveryService,
 } from '@dsh/bootstrap/client-core'
 import { bootLog } from './boot-log.ts'
 import { extractHarnessDockDeepLinks } from './client-activation.ts'
+import {
+  createElectronCredentialService,
+  createElectronDiagnosticsService,
+  createElectronNetworkService,
+  createElectronSessionRecoveryService,
+} from './electron-services.ts'
 import { appState } from './state.ts'
 
 function ownerWindow(): BrowserWindow | undefined {
@@ -97,10 +107,20 @@ export function createElectronFileService(): FileService {
   }
 }
 
+function diagnosticsDestination(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const value = (payload as Record<string, unknown>).destination
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
 export interface ElectronClientAdapter {
   readonly commands: ClientCommandBus
   readonly lifecycle: AppLifecycleService
   readonly files: FileService
+  readonly credentials: CredentialService
+  readonly recovery: SessionRecoveryService
+  readonly diagnostics: DiagnosticsService
+  readonly network: NetworkService
   registerProtocol(): Promise<boolean>
   dispatchArgv(argv: readonly string[]): Promise<void>
   dispatchDeepLink(url: string): Promise<void>
@@ -116,6 +136,10 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
   const commands = new ClientCommandBus()
   const lifecycle = createElectronLifecycleService()
   const files = createElectronFileService()
+  const credentials = createElectronCredentialService()
+  const recovery = createElectronSessionRecoveryService()
+  const network = createElectronNetworkService()
+  const diagnostics = createElectronDiagnosticsService(network)
   const pendingUrls: string[] = []
   let pendingFocus = false
   let ready = false
@@ -123,6 +147,11 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
   commands.register('app.focus', async () => lifecycle.focus())
   commands.register('app.quit', async () => lifecycle.quit())
   commands.register('app.relaunch', async () => lifecycle.relaunch())
+  commands.register('diagnostics.export', async (command) => {
+    const file = await diagnostics.exportBundle(diagnosticsDestination(command.payload))
+    await bootLog(`diagnostics exported: ${file}`)
+    return file
+  })
 
   const dispatchReadyDeepLink = async (url: string): Promise<void> => {
     try {
@@ -168,6 +197,10 @@ export function createElectronClientAdapter(): ElectronClientAdapter {
     commands,
     lifecycle,
     files,
+    credentials,
+    recovery,
+    diagnostics,
+    network,
     async registerProtocol() {
       if (!app.isPackaged) return false
       try {
