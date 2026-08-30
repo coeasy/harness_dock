@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HarnessDock Next",
+  "version": "0.2.0",
+  "identifier": "com.dsh.client.tauri.next",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../.. build:tauri-bridge",
+    "beforeBuildCommand": "pnpm --dir ../.. build:tauri-bridge",
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all"
+  }
+}

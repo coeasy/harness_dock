@@ -1,0 +1,76 @@
+name: tauri-nextgen
+
+on:
+  pull_request:
+    paths:
+      - 'apps/tauri/**'
+      - 'packages/bootstrap/**'
+      - 'packages/client-runtime/**'
+      - 'packages/docs-sync/**'
+      - 'packages/plugin-embedded-client/**'
+      - 'package.json'
+      - '.github/workflows/tauri-nextgen.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: tauri-nextgen-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+  TAURI_CORE_VERSION: '2.11.5'
+  TAURI_CLI_VERSION: '2.11.4'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm check:versions
+      - run: pnpm check:release
+      - run: pnpm test
+      - run: pnpm check:tauri-host
+
+  native-build:
+    needs: contract
+    if: needs.contract.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm check:tauri-host
+      - name: Build Tauri Next-Gen native host
+        run: cargo build --manifest-path apps/tauri/src-tauri/Cargo.toml --release

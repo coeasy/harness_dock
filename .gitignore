@@ -10,6 +10,8 @@ coverage/
 apps/desktop/release/
 apps/perry/release/
 apps/perry/.perry/
+apps/tauri/dist/
+apps/tauri/src-tauri/target/
 apps/vscode/resources/
 runtimes/
 .tmp/
