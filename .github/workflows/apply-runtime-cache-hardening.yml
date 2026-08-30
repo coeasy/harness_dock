@@ -1,0 +1,73 @@
+name: apply-runtime-cache-hardening
+
+on:
+  push:
+    branches:
+      - fix/v0.1.1-runtime-cache-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/v0.1.1-runtime-cache-hardening
+      - name: Apply permanent runtime hardening
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          release = Path('.github/workflows/release.yml')
+          text = release.read_text()
+
+          old = 'or $target == (.target_os + "-thin") or $target == (.target_os + "-full")'
+          new = 'or $target == (.target_os + "-full")'
+          if old not in text:
+              raise SystemExit('runtime target selector pattern not found')
+          text = text.replace(old, new, 1)
+
+          lines = text.splitlines()
+          out = []
+          skip_restore_value = False
+          for line in lines:
+              if skip_restore_value:
+                  if line.startswith('            dsh-runtime-'):
+                      skip_restore_value = False
+                      continue
+                  skip_restore_value = False
+              if 'key: dsh-runtime-' in line and 'hashFiles(' in line:
+                  line = re.sub(
+                      r"hashFiles\([^\n]+\)",
+                      "hashFiles('packages/docs-sync/origin.json', 'packages/client-runtime/src/**/*.ts', 'packages/client-runtime/package.json', 'pnpm-lock.yaml')",
+                      line,
+                  )
+              if line.strip() == 'restore-keys: |':
+                  skip_restore_value = True
+                  continue
+              out.append(line)
+          release.write_text('\n'.join(out) + '\n')
+
+          prepare = Path('packages/client-runtime/src/prepare-cli.ts')
+          text = prepare.read_text()
+          if 'const RUNTIME_LAYOUT_VERSION = 2' not in text:
+              raise SystemExit('runtime layout version pattern not found')
+          text = text.replace('const RUNTIME_LAYOUT_VERSION = 2', 'const RUNTIME_LAYOUT_VERSION = 3', 1)
+          marker = "      '--include=optional',"
+          if marker not in text:
+              raise SystemExit('target-native optional marker not found')
+          text = text.replace(marker, "      '--omit=optional',", 1)
+          prepare.write_text(text)
+          PY
+
+          git diff --check
+          git diff -- .github/workflows/release.yml packages/client-runtime/src/prepare-cli.ts
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/release.yml packages/client-runtime/src/prepare-cli.ts
+          git commit -m "fix: harden runtime cache and optional dependency handling"
+          git push origin HEAD:fix/v0.1.1-runtime-cache-hardening
