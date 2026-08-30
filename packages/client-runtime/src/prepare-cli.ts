@@ -31,6 +31,10 @@ import {
 
 const execFileAsync = promisify(execFile)
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+// Bump whenever the on-disk runtime composition/selection rules change. This
+// prevents an Actions restore-key or a local cache from bypassing new runtime
+// builder logic merely because the pinned dsh version stayed the same.
+const RUNTIME_LAYOUT_VERSION = 2
 
 const { values } = parseArgs({
   options: {
@@ -71,6 +75,19 @@ if (values['prune-only']) {
 const origin = await readOriginFile(ORIGIN_PATH)
 const existingLayout = inspectBundledRuntime(dest, platform)
 const existingVersion = existingLayout ? bundledRuntimeVersion(dest) : null
+let existingRuntimeLayoutVersion: number | null = null
+if (existingLayout) {
+  try {
+    const manifest = JSON.parse(await readFile(path.join(dest, 'manifest.json'), 'utf8')) as {
+      runtimeLayoutVersion?: unknown
+    }
+    if (Number.isInteger(manifest.runtimeLayoutVersion)) {
+      existingRuntimeLayoutVersion = Number(manifest.runtimeLayoutVersion)
+    }
+  } catch {
+    existingRuntimeLayoutVersion = null
+  }
+}
 
 async function installTargetNativePackages(): Promise<void> {
   const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
@@ -193,7 +210,12 @@ async function installPackedRuntime(root: string): Promise<void> {
   }
 }
 
-if (!values.force && existingLayout && existingVersion === origin.dshVersion) {
+if (
+  !values.force &&
+  existingLayout &&
+  existingVersion === origin.dshVersion &&
+  existingRuntimeLayoutVersion === RUNTIME_LAYOUT_VERSION
+) {
   const repairedAssets = await repairKnownRuntimeAssets(dest)
   try {
     await assertBundledRuntimeIntegrity(dest, platform, arch)
@@ -211,9 +233,15 @@ if (!values.force && existingLayout && existingVersion === origin.dshVersion) {
   process.exit(0)
 }
 if (!values.force && existingLayout) {
-  console.log(
-    `bundled runtime version mismatch at ${dest}: found ${existingVersion ?? 'unknown'}, expected ${origin.dshVersion}; rebuilding`,
-  )
+  if (existingVersion !== origin.dshVersion) {
+    console.log(
+      `bundled runtime version mismatch at ${dest}: found ${existingVersion ?? 'unknown'}, expected ${origin.dshVersion}; rebuilding`,
+    )
+  } else {
+    console.log(
+      `bundled runtime layout mismatch at ${dest}: found ${existingRuntimeLayoutVersion ?? 'legacy'}, expected ${RUNTIME_LAYOUT_VERSION}; rebuilding`,
+    )
+  }
 }
 
 await rm(dest, { recursive: true, force: true })
@@ -379,6 +407,7 @@ await writeFile(
       gitTag: origin.gitTag,
       gitCommit: origin.gitCommit,
       runtimeSource: packedRuntimeDir ? 'official-source-pack' : 'npm',
+      runtimeLayoutVersion: RUNTIME_LAYOUT_VERSION,
       nodeVersion: NODE_BUNDLE_VERSION,
       nodeSource,
       platform,
