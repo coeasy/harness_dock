@@ -7,7 +7,7 @@ import {
   TAURI_ANDROID_HOST_PROFILE,
   TAURI_HOST_PROFILE,
   TAURI_IOS_HOST_PROFILE,
-} from '@dsh/bootstrap'
+} from '../../packages/bootstrap/src/index.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
