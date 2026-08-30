@@ -45,12 +45,14 @@ const releaseRoot = path.join(appRoot, 'release', 'full')
 function run(command, args, cwd, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     console.log(`[tauri-pack] ${command} ${args.join(' ')}`)
-    const executable = process.platform === 'win32' && command === 'pnpm' ? 'pnpm.cmd' : command
-    const child = spawn(executable, args, {
+    const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
       env: { ...process.env, ...extraEnv },
       windowsHide: true,
+      // pnpm is a .cmd shim on Windows. Use cmd.exe only for that command;
+      // native executables such as node keep direct spawn semantics.
+      shell: process.platform === 'win32' && command === 'pnpm',
     })
     child.once('error', reject)
     child.once('close', (code) => {
