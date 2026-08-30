@@ -3,6 +3,8 @@ import {
   compareVersions,
   createUpdatePlan,
   createUpdateTransaction,
+  githubLatestReleaseManifestUrl,
+  resolveReleaseArtifactUrl,
   selectDelivery,
   transitionUpdateTransaction,
   type ReleaseArtifactV2,
@@ -84,7 +86,7 @@ describe('update orchestrator', () => {
     expect(result?.targetHostVersion).toBe('0.2.0')
   })
 
-  it('plans an independent runtime-only update without forcing a host update', () => {
+  it('plans an independent runtime-only update for a managed Thin runtime', () => {
     const result = createUpdatePlan(
       manifest([
         {
@@ -115,6 +117,36 @@ describe('update orchestrator', () => {
     expect(result?.runtime?.mode).toBe('full')
     expect(result?.restart).toBe('runtime')
     expect(result?.targetRuntimeVersion).toBe('0.1.3')
+  })
+
+  it('does not mutate the signed bundled Runtime of a Full install independently by default', () => {
+    const result = createUpdatePlan(
+      manifest([
+        {
+          id: 'runtime-win-x64',
+          component: 'runtime',
+          version: '0.1.3',
+          channel: 'stable',
+          platform: 'win32',
+          arch: 'x64',
+          format: 'tar.gz',
+          assetName: 'HarnessDock-runtime-0.1.3-win32-x64.tar.gz',
+          sha256: hashA,
+          size: 80,
+        },
+      ]),
+      {
+        host: 'electron',
+        hostVersion: '0.2.0',
+        runtimeVersion: '0.1.2-alpha.1',
+        runtimeMode: 'full',
+        platform: 'win32',
+        arch: 'x64',
+        channel: 'stable',
+      },
+    )
+
+    expect(result).toBeNull()
   })
 
   it('does not cross update channels', () => {
@@ -173,6 +205,51 @@ describe('update orchestrator', () => {
     }
 
     expect(selectDelivery(artifact, '0.1.2').mode).toBe('full')
+  })
+
+  it('requires the installed digest when a delta declares fromSha256', () => {
+    const artifact: ReleaseArtifactV2 = {
+      id: 'host',
+      component: 'host',
+      version: '0.2.0',
+      channel: 'stable',
+      host: 'electron',
+      runtimeMode: 'thin',
+      platform: 'win32',
+      arch: 'x64',
+      format: 'nsis',
+      assetName: 'setup.exe',
+      sha256: hashA,
+      size: 100,
+      deltas: [
+        {
+          fromVersion: '0.1.1',
+          fromSha256: hashC,
+          assetName: 'setup.blockmap',
+          sha256: hashB,
+          size: 20,
+          format: 'blockmap',
+        },
+      ],
+    }
+
+    expect(selectDelivery(artifact, '0.1.1').mode).toBe('full')
+    expect(selectDelivery(artifact, '0.1.1', hashB).mode).toBe('full')
+    expect(selectDelivery(artifact, '0.1.1', hashC).mode).toBe('delta')
+  })
+
+  it('resolves the latest GitHub manifest and artifact URL without filename guessing', () => {
+    const data = manifest([])
+    expect(githubLatestReleaseManifestUrl('coeasy/harness_dock')).toBe(
+      'https://github.com/coeasy/harness_dock/releases/latest/download/release-manifest.json',
+    )
+    expect(
+      resolveReleaseArtifactUrl(data, {
+        assetName: 'HarnessDock-Setup-0.2.0-win-x64-full.exe',
+      }),
+    ).toBe(
+      'https://github.com/coeasy/harness_dock/releases/download/v0.2.0/HarnessDock-Setup-0.2.0-win-x64-full.exe',
+    )
   })
 
   it('orders stable and prerelease versions correctly', () => {
