@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: tauri-ci-${{ github.event.pull_request.number || github.ref }}
@@ -49,7 +50,34 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
       - name: Rust compile check
-        run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
+        id: cargo
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml 2>&1 | tee cargo-check.log
+      - name: Publish Cargo diagnostics to PR
+        if: steps.cargo.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs')
+            const marker = '<!-- tauri-cargo-diagnostic -->'
+            const raw = fs.existsSync('cargo-check.log') ? fs.readFileSync('cargo-check.log', 'utf8') : 'cargo-check.log was not produced'
+            const tail = raw.length > 16000 ? raw.slice(-16000) : raw
+            const body = `${marker}\n### Tauri Cargo diagnostic\n\nExact-head: \`${context.sha}\`\n\n\`\`\`text\n${tail}\n\`\`\``
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 })
+            const existing = comments.find((comment) => comment.user?.type === 'Bot' && comment.body?.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body })
+            }
+      - name: Enforce Rust compile gate
+        if: steps.cargo.outcome == 'failure'
+        run: exit 1
 
   android:
     needs: validate

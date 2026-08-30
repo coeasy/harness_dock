@@ -34,7 +34,7 @@
     "resources": {
       "resources/origin.json": "origin.json",
       "resources/gateway-host.mjs": "gateway-host.mjs",
-      "../../packages/plugin-embedded-client/lib/index.js": "embedded-client/index.js",
+      "../../../packages/plugin-embedded-client/lib/index.js": "embedded-client/index.js",
       "resources/dsh-runtime/": "dsh-runtime/"
     },
     "windows": {
