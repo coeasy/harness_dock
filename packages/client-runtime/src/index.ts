@@ -13,5 +13,15 @@ export {
   repairKnownRuntimeAssets,
   requiredNativePackages,
 } from './integrity.ts'
+export {
+  applyRuntimeOverlay,
+  installRuntimeDelta,
+  readRuntimeDeltaManifest,
+  runtimeTreeDigest,
+} from './runtime-delta.ts'
+export type {
+  RuntimeDeltaManifest,
+  RuntimeDeltaSpec,
+} from './runtime-delta.ts'
 export type { DshRuntimeOptions, RuntimeProgressEvent, StopOutcome } from './runtime.ts'
 export type { ReadyInfo, RuntimeMode } from './types.ts'
