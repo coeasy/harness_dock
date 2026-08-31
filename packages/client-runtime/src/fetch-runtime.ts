@@ -22,7 +22,32 @@ interface PackageMeta {
   dependencies?: Record<string, string>
   optionalDependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
+  os?: string[]
+  cpu?: string[]
   dist?: { tarball?: string; integrity?: string }
+}
+
+function matchesPlatformConstraint(values: string[] | undefined, target: string): boolean {
+  if (!values || values.length === 0) return true
+  const constraints = values.map((value) => value.trim().toLowerCase()).filter(Boolean)
+  const normalizedTarget = target.trim().toLowerCase()
+  if (constraints.includes(`!${normalizedTarget}`)) return false
+  if (constraints.includes('any')) return true
+  const positive = constraints.filter((value) => !value.startsWith('!'))
+  return positive.length === 0 || positive.includes(normalizedTarget)
+}
+
+/**
+ * Applies npm package.json `os` / `cpu` constraints before a tarball is added
+ * to the runtime download plan. This prevents a Windows thin install from
+ * downloading Linux/macOS-only optional native packages (and vice versa).
+ */
+export function isPackagePlatformCompatible(
+  meta: Pick<PackageMeta, 'os' | 'cpu'>,
+  platform: string,
+  arch: string,
+): boolean {
+  return matchesPlatformConstraint(meta.os, platform) && matchesPlatformConstraint(meta.cpu, arch)
 }
 
 /**
@@ -84,8 +109,8 @@ export interface PlanEntry {
 
 /**
  * Resolves the full transitive dependency closure WITHOUT downloading
- * anything, so the exact tarball count is known up front and download
- * progress can be reported as a true percentage.
+ * anything, so the exact platform-compatible tarball count is known up front
+ * and download progress can be reported as a true percentage.
  *
  * Flat layout rule: first version resolved wins; a conflicting second
  * version fails loudly instead of silently mixing.
@@ -103,7 +128,10 @@ async function resolveClosure(
   onResolve?: (done: number) => void,
 ): Promise<PlanEntry[]> {
   const plannedVersions = new Map<string, string>()
+  const processedNames = new Set<string>()
   const plan: PlanEntry[] = []
+  const targetPlatform = env.DSH_RUNTIME_PLATFORM?.trim() || process.platform
+  const targetArch = env.DSH_RUNTIME_ARCH?.trim() || process.arch
   let frontier = [...rootSpecs]
   let resolvedCount = 0
 
@@ -111,13 +139,14 @@ async function resolveClosure(
     // dedupe this level by name: first occurrence wins (flat-layout rule)
     const seen = new Set<string>()
     const level = frontier.filter((spec) => {
-      if (plannedVersions.has(spec.name) || seen.has(spec.name)) return false
+      if (plannedVersions.has(spec.name) || processedNames.has(spec.name) || seen.has(spec.name)) return false
       seen.add(spec.name)
+      processedNames.add(spec.name)
       return true
     })
     if (level.length === 0) break
 
-    const results: Array<{ entry: PlanEntry; deps: Array<{ name: string; range: string }> }> = []
+    const results: Array<{ entry: PlanEntry; deps: Array<{ name: string; range: string }> } | null> = []
     for (let i = 0; i < level.length; i += RESOLVE_CONCURRENCY) {
       const chunk = level.slice(i, i + RESOLVE_CONCURRENCY)
       const chunkResults = await Promise.all(
@@ -131,11 +160,19 @@ async function resolveClosure(
           if (!version || !meta.dist?.tarball) {
             throw new Error(`registry metadata for ${spec.name} is missing version/tarball`)
           }
-          plannedVersions.set(spec.name, version)
           resolvedCount += 1
           onResolve?.(resolvedCount)
+          if (!isPackagePlatformCompatible(meta, targetPlatform, targetArch)) {
+            console.log(
+              `[fetch-runtime] skip ${spec.name}@${version}: incompatible with ${targetPlatform}/${targetArch}`,
+            )
+            return null
+          }
+          plannedVersions.set(spec.name, version)
           // npm 7+ auto-installs peerDependencies alongside dependencies;
-          // optionalDependencies are part of the runtime closure too.
+          // optionalDependencies are part of the runtime closure too, but the
+          // package itself is filtered by npm os/cpu constraints before any
+          // of its tarball or descendants enter the platform download plan.
           const deps: Array<{ name: string; range: string }> = []
           const specMaps = [meta.dependencies, meta.optionalDependencies, meta.peerDependencies]
           for (const specs of specMaps) {
@@ -151,6 +188,7 @@ async function resolveClosure(
 
     const nextFrontier: Array<{ name: string; range: string }> = []
     for (const result of results) {
+      if (!result) continue
       plan.push(result.entry)
       nextFrontier.push(...result.deps)
     }
@@ -236,8 +274,8 @@ async function runWithConcurrency<T>(
  *
  * Resumable: every fully-extracted package is stamped with INSTALL_MARKER and
  * skipped on retry, so an interrupted first launch continues where it left off
- * instead of restarting the ~300 MB fetch from zero. Packages download in
- * parallel (default concurrency 4, DSH_DOWNLOAD_CONCURRENCY overrides); a
+ * instead of restarting the platform runtime fetch from zero. Packages download
+ * in parallel (default concurrency 4, DSH_DOWNLOAD_CONCURRENCY overrides); a
  * failure in any package rejects the whole install while keeping already
  * extracted packages installed for the next resumable run.
  */
@@ -279,7 +317,7 @@ export async function installClosure(
         await extract(buffer, nodeModules, entry.name)
         bytesTotal += buffer.byteLength
         done += 1
-        const percent = Math.round((done / plan.length) * 100)
+        const percent = plan.length === 0 ? 100 : Math.round((done / plan.length) * 100)
         options.onProgress?.({
           stage: 'fetch',
           name: entry.name,
@@ -321,7 +359,7 @@ async function extractInto(tgzBuffer: Buffer, nodeModules: string, name: string)
     await writeFile(tgz, tgzBuffer)
     const extracted = path.join(staging, 'out')
     await mkdir(extracted, { recursive: true })
-    // Relative paths + cwd: some tar builds treat "D:\" as a remote hostname.
+    // Relative paths + cwd: some tar builds treat "D:\\" as a remote hostname.
     await execFileAsync('tar', ['-xzf', 'pkg.tgz', '-C', 'out'], { windowsHide: true, cwd: staging })
     const entries = await readdir(extracted)
     const root = entries.includes('package') ? 'package' : entries[0]
@@ -435,9 +473,23 @@ export async function ensureDownloadedRuntime(input: {
 
   const rootPkgRaw = JSON.parse(
     await readFile(path.join(moduleDir(nodeModules, pkg), 'package.json'), 'utf8'),
-  ) as { version?: string; dependencies?: Record<string, string> }
+  ) as {
+    version?: string
+    dependencies?: Record<string, string>
+    optionalDependencies?: Record<string, string>
+    peerDependencies?: Record<string, string>
+  }
 
-  const rootDeps = Object.entries(rootPkgRaw.dependencies ?? {}).map(([name, range]) => ({ name, range }))
+  const rootDeps: Array<{ name: string; range: string }> = []
+  for (const specs of [
+    rootPkgRaw.dependencies,
+    rootPkgRaw.optionalDependencies,
+    rootPkgRaw.peerDependencies,
+  ]) {
+    for (const [name, range] of Object.entries(specs ?? {})) {
+      rootDeps.push({ name, range })
+    }
+  }
   await installClosure(
     rootDeps,
     nodeModules,
