@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util'
 import { DshRuntime } from './runtime.ts'
 import { redactWebAuthTokens } from './output.ts'
 import { openWebUiSession, probeWebUiSession } from './web-auth.ts'
+import { assertBundledRuntimeIntegrity, repairKnownRuntimeAssets } from './integrity.ts'
 
 const cliArgs = process.argv.slice(2)
 if (cliArgs[0] === '--') cliArgs.shift()
@@ -40,14 +41,20 @@ if (typeof manifest.dshVersion !== 'string' || manifest.dshVersion === '') {
   throw new Error('runtime manifest has no dshVersion')
 }
 
-// GitHub Actions artifact archives do not preserve POSIX executable bits.
-// The smoke gate runs in the same workspace that Tauri packages afterwards,
-// so restoring the bundled Node launcher here both validates the real runtime
-// and ensures the final Linux/macOS bundle receives an executable launcher.
+// GitHub Actions artifact ZIPs do not preserve POSIX executable bits. Repair
+// every known runtime asset after download and before the smoke gate so the
+// exact tree Tauri packages has the same executable/integrity guarantees as
+// the runtime prepared in the previous job. This includes the Linux Landlock
+// sandbox helper, not just the Node launcher.
 if (process.platform !== 'win32') {
   const nodePath = path.join(runtimeDir, 'bin', 'node')
   await chmod(nodePath, 0o755)
 }
+const repaired = await repairKnownRuntimeAssets(runtimeDir)
+if (repaired.length > 0) {
+  console.log(`[smoke] repaired artifact assets: ${repaired.join(', ')}`)
+}
+await assertBundledRuntimeIntegrity(runtimeDir, process.platform, process.arch)
 
 const home = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-home-'))
 const work = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-work-'))
