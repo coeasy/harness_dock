@@ -1,5 +1,6 @@
 mod gateway;
 mod gateway_host;
+mod harness_shell;
 mod harness_window;
 mod platform;
 mod plugin_quarantine;
@@ -52,6 +53,7 @@ pub fn run() {
             harness_window::harness_open,
             harness_window::harness_close,
             harness_window::control_show,
+            harness_window::shell_settings_show,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,

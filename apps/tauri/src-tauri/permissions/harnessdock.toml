@@ -37,3 +37,8 @@ commands.allow = ["runtime_start"]
 identifier = "runtime-stop"
 description = "Allows the bundled desktop launcher to stop its owned DeepSeek Harness Runtime."
 commands.allow = ["runtime_stop"]
+
+[[permission]]
+identifier = "harness-shell"
+description = "Allows the loopback Harness WebView to open the on-demand Shell Settings plugin; it cannot manage Runtime or Gateway."
+commands.allow = ["shell_settings_show"]

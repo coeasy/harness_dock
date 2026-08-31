@@ -17,10 +17,8 @@
       <div class="hero-actions"><button id="shell-settings-entry" class="secondary">⚙ 外壳设置</button><button id="shell-open-harness" class="primary">打开 Harness</button></div>
     </section>
     <section id="shell-settings" class="card">
-      <div class="card-heading"><div><h2>外壳设置</h2><p>启动行为、插件兼容层与本地运行环境都在这里管理。默认启动后直接打开 Harness Web 界面。</p></div><span class="badge">ready</span></div>
-      <label class="check-row"><input id="auto-open-harness" type="checkbox" checked />启动 Runtime 后自动打开 Harness Web 界面</label>
-      <div class="actions"><button id="shell-reset-settings" class="secondary">恢复默认设置</button></div>
-      <p id="shell-detail" class="status">旧版插件客户端模块兼容层已启用；插件异常只触发降级，不会关闭外壳。</p>
+      <div class="card-heading"><div><h2>外壳设置插件</h2><p>本窗口只在用户点击 Harness 顶部的“外壳设置”按钮或应用菜单后打开；不会在正常启动时抢占 Harness Web 界面。</p></div><span class="badge">on demand</span></div>
+      <p id="shell-detail" class="status">Harness Web 窗口默认随 Runtime 就绪后自动打开，确保启动后可以直接使用；插件异常只触发降级，不会关闭外壳。</p>
     </section>
     <section id="desktop-card" class="card hidden">
       <div class="card-heading"><div><h2>本地 Runtime</h2><p>桌面端托管完整 DeepSeek Harness Runtime；第三方插件异常只会触发 Runtime 降级，不会关闭 HarnessDock。</p></div><span id="runtime-state" class="badge">stopped</span></div>

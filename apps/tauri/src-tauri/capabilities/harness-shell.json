@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "harness-shell",
+  "description": "Minimal capability for the loopback Harness WebView shell button. It can only show the local Shell Settings plugin.",
+  "windows": ["harness"],
+  "permissions": ["core:default", "harness-shell"]
+}

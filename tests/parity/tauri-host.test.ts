@@ -105,6 +105,22 @@ describe('Tauri v0.2 host contract', () => {
     expect(web).toContain("call('harness_open'")
   })
 
+  it('keeps the Shell Settings plugin on demand while Harness Web is mandatory', () => {
+    const capability = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
+    const permission = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/permissions/harnessdock.toml'), 'utf8')
+    const shell = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/harness_shell.rs'), 'utf8')
+    const web = readFileSync(path.join(repoRoot, 'apps/tauri/web/app.js'), 'utf8')
+    const index = readFileSync(path.join(repoRoot, 'apps/tauri/web/index.html'), 'utf8')
+    expect(capability.windows).toEqual(['harness'])
+    expect(capability.permissions).toContain('harness-shell')
+    expect(permission).toContain('commands.allow = ["shell_settings_show"]')
+    expect(shell).toContain("shell_settings_show")
+    expect(web).toContain("await call('harness_open', { url: currentRuntime.appUrl })")
+    expect(web).not.toContain('autoOpenHarness')
+    expect(web).not.toContain('auto-open-harness')
+    expect(index).toContain('外壳设置插件')
+  })
+
   it('keeps Windows helper processes console-free and has a final Web UI safe profile', () => {
     const platform = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/platform.rs'), 'utf8')
     const runtime = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/runtime.rs'), 'utf8')

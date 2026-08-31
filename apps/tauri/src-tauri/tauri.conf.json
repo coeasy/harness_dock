@@ -19,7 +19,7 @@
       "useHttpsScheme": true
     }],
     "security": {
-      "capabilities": ["local-main"],
+      "capabilities": ["local-main", "harness-shell"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     }
   },

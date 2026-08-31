@@ -11,29 +11,8 @@
   const gatewayUrl = $('gateway-url')
   const pairingCode = $('pairing-code')
   const deviceName = $('device-name')
-  const autoOpenHarness = $('auto-open-harness')
-  const SETTINGS_KEY = 'harnessdock.shell-settings.v1'
-  const DEFAULT_SETTINGS = { autoOpenHarness: true }
   let currentRuntime
   let desktopStartup
-
-  function readSettings() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
-      return { ...DEFAULT_SETTINGS, ...parsed }
-    } catch {
-      return { ...DEFAULT_SETTINGS }
-    }
-  }
-
-  function writeSettings(settings) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)) } catch { /* storage is optional */ }
-  }
-
-  function applySettings() {
-    const settings = readSettings()
-    autoOpenHarness.checked = settings.autoOpenHarness !== false
-  }
 
   function status(element, value, bad = false) {
     if (!element) return
@@ -144,8 +123,7 @@
         currentRuntime = await call('runtime_start')
         if (!currentRuntime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
         status(runtimeDetail, runtimeDetailText(currentRuntime))
-        if (autoOpenHarness.checked) await call('harness_open', { url: currentRuntime.appUrl })
-        else status(runtimeDetail, `${runtimeDetailText(currentRuntime)}\n已按外壳设置保留在控制页。`)
+        await call('harness_open', { url: currentRuntime.appUrl })
       } catch (error) {
         desktopStartup = undefined
         runtimeState.textContent = 'error'
@@ -193,19 +171,6 @@
     } catch (error) {
       status($('shell-detail'), String(error), true)
     }
-  })
-
-  autoOpenHarness.addEventListener('change', () => {
-    writeSettings({ ...readSettings(), autoOpenHarness: autoOpenHarness.checked })
-    status($('shell-detail'), autoOpenHarness.checked
-      ? '已保存：Runtime 启动后自动打开 Harness Web 界面。'
-      : '已保存：Runtime 启动后停留在外壳设置页，可手动打开 Harness。')
-  })
-
-  $('shell-reset-settings').addEventListener('click', () => {
-    writeSettings(DEFAULT_SETTINGS)
-    applySettings()
-    status($('shell-detail'), '已恢复默认外壳设置：启动后直接打开 Harness Web 界面。')
   })
 
   $('runtime-open').addEventListener('click', async () => {
@@ -338,6 +303,5 @@
     }
   })
 
-  applySettings()
   void boot()
 })()

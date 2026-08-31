@@ -1,3 +1,4 @@
+use crate::harness_shell::INIT_SCRIPT;
 use tauri::{AppHandle, Manager};
 use url::Url;
 
@@ -43,20 +44,12 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
 
         let window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
             .title("HarnessDock · DeepSeek Harness")
+            .initialization_script(INIT_SCRIPT)
             .inner_size(1180.0, 780.0)
             .min_inner_size(720.0, 560.0)
             .resizable(true)
             .build()
             .map_err(|error| format!("无法创建 Harness WebView: {error}"))?;
-        let control_app = app.clone();
-        window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                if let Some(control) = control_app.get_webview_window("main") {
-                    let _ = control.show();
-                    let _ = control.set_focus();
-                }
-            }
-        });
         window
             .show()
             .map_err(|error| format!("无法显示 Harness WebView: {error}"))?;
@@ -112,4 +105,10 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
             .map_err(|error| format!("无法聚焦 HarnessDock 控制页: {error}"))?;
         Ok(())
     }
+}
+
+#[tauri::command]
+pub fn shell_settings_show(app: AppHandle) -> Result<(), String> {
+    // This is the only command exposed to the Harness WebView shell plugin.
+    control_show(app)
 }
