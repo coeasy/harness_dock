@@ -15,8 +15,18 @@ function readJson(relative: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path.join(repoRoot, relative), 'utf8')) as Record<string, unknown>
 }
 
+const unsupportedNativeV02 = [
+  'autoUpdate',
+  'tray',
+  'notifications',
+  'pushNotifications',
+  'deepLinks',
+  'secureCredentials',
+  'backgroundExecution',
+] as const
+
 describe('Tauri v0.2 host contract', () => {
-  it('promotes Tauri desktop and mobile as active product hosts', () => {
+  it('promotes Tauri desktop and mobile as stable product hosts', () => {
     expect(TAURI_HOST_PROFILE.channel).toBe('stable')
     expect(TAURI_HOST_PROFILE.capabilities.runtimes).toEqual(['local', 'remote'])
     expect(TAURI_IOS_HOST_PROFILE.capabilities.runtimes).toEqual(['remote'])
@@ -25,6 +35,14 @@ describe('Tauri v0.2 host contract', () => {
       expect.arrayContaining(['tauri', 'tauri-ios', 'tauri-android']),
     )
     expect(Object.keys(HOST_PROFILES).some((key) => key.startsWith('perry'))).toBe(false)
+  })
+
+  it('does not advertise native services that v0.2 has not implemented', () => {
+    for (const capability of unsupportedNativeV02) {
+      expect(TAURI_HOST_PROFILE.capabilities[capability]).toBe(false)
+      expect(TAURI_IOS_HOST_PROFILE.capabilities[capability]).toBe(false)
+      expect(TAURI_ANDROID_HOST_PROFILE.capabilities[capability]).toBe(false)
+    }
   })
 
   it('keeps the Tauri application and repository version aligned at v0.2.0', () => {
