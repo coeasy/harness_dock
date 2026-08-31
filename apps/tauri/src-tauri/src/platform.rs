@@ -141,7 +141,7 @@ pub fn platform_info() -> PlatformInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::is_supported_node_version;
+    use super::{is_supported_node_version, strip_windows_verbatim_prefix};
 
     #[test]
     fn strips_node_incompatible_windows_verbatim_prefixes() {
