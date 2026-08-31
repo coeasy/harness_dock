@@ -82,7 +82,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -94,11 +93,35 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm sync:dsh
-      - uses: peter-evans/create-pull-request@v8
-        with:
-          branch: chore/sync-dsh-origin
-          title: 'chore: sync HarnessDock dsh origin to latest documented version'
-          commit-message: 'chore: sync HarnessDock dsh origin'
-          body: |
-            Automated docs-sync: git tag ∩ npm exact version, never `latest`.
-            Review changelog before merging.
+      - name: Publish sync branch without requiring Actions PR permission
+        shell: bash
+        env:
+          SYNC_BRANCH: chore/sync-dsh-origin
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "DSH origin is already current; nothing to publish."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$SYNC_BRANCH"
+          git add -A
+          git commit -m 'chore: sync HarnessDock dsh origin'
+
+          remote_sha="$(git ls-remote --heads origin "refs/heads/${SYNC_BRANCH}" | awk '{print $1}')"
+          if [ -n "$remote_sha" ]; then
+            git push --force-with-lease="refs/heads/${SYNC_BRANCH}:${remote_sha}" origin "HEAD:refs/heads/${SYNC_BRANCH}"
+          else
+            git push origin "HEAD:refs/heads/${SYNC_BRANCH}"
+          fi
+
+          {
+            echo '### DSH origin sync ready for review'
+            echo
+            echo "Changes were pushed to \`${SYNC_BRANCH}\`."
+            echo 'The workflow intentionally does not create a pull request with GITHUB_TOKEN, so repository settings that disallow Actions-created PRs cannot fail the scheduled sync.'
+            echo 'Open or update the pull request from this branch with a normal user/app token after reviewing the upstream changelog.'
+          } >> "$GITHUB_STEP_SUMMARY"
