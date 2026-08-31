@@ -38,15 +38,13 @@ import {
   resolveManagedRuntimeSelection,
   rollbackManagedRuntimeSelection,
 } from '../runtime-update-service.ts'
-import { BootProgressTracker } from './progress.ts'
 
 let autoUpdate: AutoUpdateHandle | undefined
 
 export async function bootFlow(): Promise<void> {
-  const progress = new BootProgressTracker()
   await createSplash()
   updateSplash(t('splash.loading'))
-  showSplashProgress(progress.start())
+  showSplashProgress(null)
 
   const runtimeLease = await acquireRuntimeLease({ host: 'electron', protocolVersion: 1 })
   appState.runtimeLease = runtimeLease
@@ -75,9 +73,9 @@ export async function bootFlow(): Promise<void> {
       enableRollback: !managedSelection,
       log: (message) => void bootLog(message),
       onBeforeStart: ({ bundledAvailable }) => {
-        showSplashProgress(progress.preparingRuntime(bundledAvailable))
+        showSplashProgress(null)
         void bootLog(
-          `runtime mode: ${bundledAvailable ? 'bundled (offline)' : 'download (first launch fetches ~300MB over HTTPS)'}`,
+          `runtime mode: ${bundledAvailable ? 'bundled (offline)' : `download (${process.platform}/${process.arch} first-launch runtime only)`}`,
         )
         if (managedSelection) {
           void bootLog(`runtime source: managed canonical artifact ${managedSelection.version}`)
@@ -91,7 +89,10 @@ export async function bootFlow(): Promise<void> {
       },
       onProgress: (event) => {
         if (event.stage === 'fetch') {
-          showSplashProgress(progress.fetching(event.percent))
+          // The bar is the exact percentage shown in the status text. Metadata
+          // resolution / runtime startup use indeterminate mode instead of a
+          // synthetic boot-wide percentage that can disagree with the text.
+          showSplashProgress(event.percent)
           const pct = `${event.percent ?? 0}%`
           const bytes = event.bytes ? formatMb(event.bytes) : '—'
           updateSplash(
@@ -104,14 +105,14 @@ export async function bootFlow(): Promise<void> {
             }),
           )
         } else if (event.stage === 'resolve') {
-          showSplashProgress(progress.resolving(event.done ?? 0, event.total))
+          showSplashProgress(null)
           updateSplash(
             event.total
               ? fmt(t('splash.resolving'), { total: event.total, done: event.done ?? 0 })
               : fmt(t('splash.resolvingUnknown'), { done: event.done ?? 0 }),
           )
         } else if (event.stage === 'done') {
-          showSplashProgress(progress.runtimeInstalled())
+          showSplashProgress(100)
           updateSplash(t('splash.ready'))
         }
       },
@@ -150,12 +151,11 @@ export async function bootFlow(): Promise<void> {
     startRuntimeLeaseHeartbeat()
     startRuntimeSupervisor()
     await bootLog(`dsh web ready at ${redactWebAuthTokens(session.appUrl)} (pid ${result.ready.pid})`)
-    showSplashProgress(progress.runtimeReady())
+    showSplashProgress(null)
     await startRemoteGatewayIfEnabled(session.appUrl)
     updateSplash(t('splash.loadingInterface'))
-    showSplashProgress(progress.loadingInterface())
+    showSplashProgress(null)
     await createWindow(session.appUrl)
-    showSplashProgress(progress.complete())
     showSplashDone()
 
     const runtimeService = createElectronRuntimeService()
