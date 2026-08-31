@@ -63,14 +63,15 @@ jobs:
         run: pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
       - name: Check Tauri Rust host
         run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
-      - name: Verify Tauri v0.2 version contract
+      - name: Verify Tauri version contract
         shell: bash
         run: |
           set -euo pipefail
           root_version="$(node -p "require('./package.json').version")"
           tauri_version="$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")"
-          test "$root_version" = '0.2.0'
+          cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/tauri/src-tauri/Cargo.toml | head -1)"
           test "$tauri_version" = "$root_version"
+          test "$cargo_version" = "$root_version"
           test -s /tmp/harnessdock-gateway-sidecar.mjs
 
   sync:
