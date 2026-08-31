@@ -5,6 +5,16 @@ export interface ConfigDumpRow {
   patchedBy: string[]
 }
 
+export type PluginRecoveryReason = 'diagnostic-match' | 'ambiguous'
+
+export interface PluginRecoveryPlan {
+  /** Complete external safety set isolated for the recovery boot. */
+  isolationRows: ConfigDumpRow[]
+  /** Rows directly named by the startup diagnostic, for observability only. */
+  suspectedRows: ConfigDumpRow[]
+  reason: PluginRecoveryReason
+}
+
 function decodeYamlScalar(raw: string): string {
   const value = raw.trim()
   if (value.startsWith('"') && value.endsWith('"')) {
@@ -107,26 +117,35 @@ function diagnosticMatches(row: ConfigDumpRow, diagnostic: string): boolean {
 }
 
 /**
- * Build the session-only recovery isolation set after a normal startup failure.
+ * Build a bounded, session-safe recovery plan after a normal startup failure.
  *
- * A startup diagnostic commonly reports only the first incompatible plugin. If
- * we disabled just that row, a second stale plugin could fail on the recovery
- * attempt and still keep the whole service offline. For recovery we therefore
- * isolate the complete third-party/user-added set in one bounded retry. This is
- * deliberately session-only: official @deepseek-ai rows and HarnessDock's own
- * embedded bridge are never selected, and the user's persistent config is not
- * changed. `diagnostic` is still evaluated so callers/tests retain the matching
- * contract for future diagnostics, but it never narrows the safety set.
+ * A dsh/Cordis startup diagnostic commonly identifies only the first stale
+ * plugin. Narrowly disabling only that row lets a second incompatible plugin
+ * fail the recovery boot and still keep the service offline. Therefore the
+ * actual recovery isolation set is always the complete third-party/user-added
+ * set. Diagnostic matches are retained separately as `suspectedRows` so the UI
+ * and quarantine layer can explain what most likely caused the failure without
+ * weakening the safety set.
  */
+export function buildPluginRecoveryPlan(
+  rows: readonly ConfigDumpRow[],
+  diagnostic: string,
+): PluginRecoveryPlan {
+  const isolationRows = pluginRecoveryCandidates(rows)
+  const suspectedRows = isolationRows.filter((row) => diagnosticMatches(row, diagnostic))
+  return {
+    isolationRows,
+    suspectedRows,
+    reason: suspectedRows.length > 0 ? 'diagnostic-match' : 'ambiguous',
+  }
+}
+
+/** Backwards-compatible helper used by existing callers. */
 export function selectPluginRecoveryRows(
   rows: readonly ConfigDumpRow[],
   diagnostic: string,
 ): ConfigDumpRow[] {
-  const candidates = pluginRecoveryCandidates(rows)
-  // Evaluate the diagnostic for observability/future ranking without allowing
-  // a single reported plugin to narrow the recovery safety set.
-  candidates.some((row) => diagnosticMatches(row, diagnostic))
-  return candidates
+  return buildPluginRecoveryPlan(rows, diagnostic).isolationRows
 }
 
 export function renderPluginRecoveryPatch(rows: readonly Pick<ConfigDumpRow, 'id'>[]): string {
