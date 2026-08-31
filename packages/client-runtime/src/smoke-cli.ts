@@ -28,6 +28,15 @@ const resolveInput = (value: string): string =>
   path.isAbsolute(value) ? value : path.resolve(repoRoot, value)
 const runtimeDir = resolveInput(values['runtime-dir'])
 const pluginPath = resolveInput(values.plugin)
+const compatibilityPath = path.join(
+  repoRoot,
+  'apps',
+  'tauri',
+  'src-tauri',
+  'resources',
+  'dsh-client-runtime-compat',
+  'index.js',
+)
 const manifest = JSON.parse(
   await readFile(path.join(runtimeDir, 'manifest.json'), 'utf8'),
 ) as { dshVersion?: unknown; platform?: unknown; arch?: unknown }
@@ -62,6 +71,7 @@ const logs: string[] = []
 const runtime = new DshRuntime({
   origin: { dshVersion: manifest.dshVersion },
   pluginPath,
+  compatibilityPath,
   bundledRoot: runtimeDir,
   cacheDir: work,
   readyTimeoutMs: 120_000,

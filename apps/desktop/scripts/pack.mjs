@@ -171,6 +171,15 @@ function verifyPackagedResources() {
       `[pack] packaged embedded-client plugin missing under ${outputRoot}; refusing to publish a broken client`,
     )
   }
+  const compatibilityDirs = resourceDirs.filter((dir) =>
+    existsSync(path.join(dir, 'dsh-client-runtime-compat', 'index.js')) &&
+    existsSync(path.join(dir, 'dsh-client-runtime-compat', 'client.js')),
+  )
+  if (compatibilityDirs.length === 0) {
+    throw new Error(
+      `[pack] packaged client-runtime compatibility layer missing under ${outputRoot}; refusing to publish a plugin-drift-prone package`,
+    )
+  }
   if (scenario === 'full') {
     const runtimeDirs = resourceDirs.filter(
       (dir) =>

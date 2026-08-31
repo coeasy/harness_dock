@@ -56,6 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           test -s packages/plugin-embedded-client/lib/index.js
+          test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/package.json
+          test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/index.js
+          test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/client.js
           test -s /tmp/harnessdock-gateway-sidecar.mjs
           test -s apps/tauri/src-tauri/icons/app-icon.png
           test -s scripts/build-macos-dmg.sh
@@ -263,6 +266,9 @@ jobs:
         run: |
           set -euo pipefail
           test -s packages/plugin-embedded-client/lib/index.js
+          test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/package.json
+          test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/index.js
+          test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/client.js
           test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
           pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
           if [ "${{ runner.os }}" = Linux ]; then

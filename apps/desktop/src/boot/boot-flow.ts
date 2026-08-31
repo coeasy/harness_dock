@@ -19,7 +19,7 @@ import { createTray } from '../tray.ts'
 import { initAutoUpdate, type AutoUpdateHandle } from '../auto-update.ts'
 import { openDiagnosticsWindow } from '../diagnostics/diagnostics.ts'
 import { openMobileManagerWindow } from '../mobile/mobile-window.ts'
-import { bundledRoot, originPath, pluginPath } from '../paths.ts'
+import { bundledRoot, compatibilityPath, originPath, pluginPath } from '../paths.ts'
 import {
   isAllowedVersion,
   listCachedRuntimeVersions,
@@ -66,6 +66,7 @@ export async function bootFlow(): Promise<void> {
     localProvider = new LocalRuntimeProvider({
       originPath: originPath(),
       pluginPath: pluginPath(),
+      compatibilityPath: compatibilityPath(),
       packaged: app.isPackaged,
       bundledRoot: activeBundledRoot,
       userDataDir: resolvedUserDataDir,

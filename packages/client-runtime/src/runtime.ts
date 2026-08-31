@@ -48,6 +48,8 @@ export interface DshRuntimeOptions {
     runtimeBundles?: Record<string, { url: string }>
   }
   pluginPath: string
+  /** optional host-provided bridge for legacy browser client module imports */
+  compatibilityPath?: string
   packaged?: boolean
   env?: NodeJS.ProcessEnv
   cwd?: string
@@ -176,7 +178,13 @@ export class DshRuntime {
         ? inspectBundledRuntime(this.options.bundledRoot, process.platform)
         : null
       if (bundledLayout) {
-        command = { command: bundledLayout.nodeBin, argsPrefix: [downloaded.dshBin] }
+        const bundledCommand = await resolveDshCommand({
+          mode: 'bundled',
+          version,
+          env,
+          bundledRoot: this.options.bundledRoot,
+        })
+        command = { command: bundledCommand.command, argsPrefix: [downloaded.dshBin] }
       } else {
         command = {
           command: process.execPath,
@@ -210,7 +218,13 @@ export class DshRuntime {
         if (downloaded) {
           const bundledLayout = inspectBundledRuntime(this.options.bundledRoot, process.platform)
           if (bundledLayout) {
-            command = { command: bundledLayout.nodeBin, argsPrefix: [downloaded.dshBin] }
+            const bundledCommand = await resolveDshCommand({
+              mode: 'bundled',
+              version,
+              env,
+              bundledRoot: this.options.bundledRoot,
+            })
+            command = { command: bundledCommand.command, argsPrefix: [downloaded.dshBin] }
             this.options.log?.(
               `bundled: using pinned dsh ${version} from cache (seed was ${seedVersion})`,
             )
@@ -222,7 +236,11 @@ export class DshRuntime {
     this.workDir = await mkdtemp(path.join(this.options.cacheDir ?? os.tmpdir(), 'harnessdock-'))
     const patchFile = path.join(this.workDir, 'embedded.patch.yml')
     const readyFile = path.join(this.workDir, 'ready.json')
-    await writeFile(patchFile, renderEmbeddedPatch(this.options.pluginPath), 'utf8')
+    await writeFile(
+      patchFile,
+      renderEmbeddedPatch(this.options.pluginPath, this.options.compatibilityPath),
+      'utf8',
+    )
 
     const childEnv = scrubElectronEnv({
       ...env,

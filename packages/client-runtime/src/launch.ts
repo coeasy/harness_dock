@@ -16,12 +16,15 @@ export function buildLaunchArgs(input: { patchFile: string }): string[] {
   ]
 }
 
-export function renderEmbeddedPatch(pluginAbsolutePath: string): string {
+export function renderEmbeddedPatch(pluginAbsolutePath: string, compatibilityAbsolutePath?: string): string {
   // The include loader imports the entry as a URL. Windows paths must be
   // percent-encoded (especially spaces in the default Program Files install
   // directory), otherwise Node parses the URL but cannot import the module.
   const pluginUrl = toFileUrl(pluginAbsolutePath).replaceAll("'", "''")
-  return `- insert:\n    - id: embedded-client\n      name: '${pluginUrl}'\n`
+  const compatibility = compatibilityAbsolutePath
+    ? `    - id: harnessdock-client-runtime-compat\n      name: '${toFileUrl(compatibilityAbsolutePath).replaceAll("'", "''")}'\n`
+    : ''
+  return `- insert:\n    - id: embedded-client\n      name: '${pluginUrl}'\n${compatibility}`
 }
 
 function toFileUrl(filePath: string): string {

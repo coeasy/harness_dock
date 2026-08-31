@@ -9,6 +9,15 @@ export interface ResolvedCommand {
   extraEnv?: Record<string, string>
 }
 
+/** Matches the dsh package engine range: ^22.19.0 || >=24.0.0. */
+export function isSupportedNodeVersion(raw: string): boolean {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(raw.trim())
+  if (!match) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return (major === 22 && minor >= 19) || major >= 24
+}
+
 export function npxCommand(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
   if (env.NPX_BIN) return env.NPX_BIN
   return platform === 'win32' ? 'npx.cmd' : 'npx'
@@ -21,10 +30,11 @@ export async function resolveDshCommand(input: {
   bundledRoot?: string
   platform?: NodeJS.Platform
   which?: (cmd: string) => Promise<string | null>
+  probeNode?: (nodePath: string) => Promise<string | null>
 }): Promise<ResolvedCommand> {
   const version = rejectFloatingDistTag(input.version)
   const platform = input.platform ?? process.platform
-  const which = input.which ?? defaultWhich
+  const which = input.which ?? ((cmd) => defaultWhich(cmd, platform))
 
   if (input.mode === 'local') {
     const fromEnv = input.env.DSH_BIN
@@ -47,7 +57,14 @@ export async function resolveDshCommand(input: {
         `bundled runtime is incomplete under ${root}. Expected vendored node plus node_modules/@deepseek-ai/dsh/lib/bin.js`,
       )
     }
-    return { command: layout.nodeBin, argsPrefix: [layout.dshBin] }
+    const systemNode = input.env.HARNESSDOCK_USE_SYSTEM_NODE === '0'
+      ? null
+      : await findUsableSystemNode({
+          platform,
+          which,
+          probeNode: input.probeNode ?? defaultNodeVersion,
+        })
+    return { command: systemNode ?? layout.nodeBin, argsPrefix: [layout.dshBin] }
   }
 
   return {
@@ -56,15 +73,38 @@ export async function resolveDshCommand(input: {
   }
 }
 
-async function defaultWhich(cmd: string): Promise<string | null> {
+export async function findUsableSystemNode(input: {
+  platform: NodeJS.Platform
+  which: (cmd: string) => Promise<string | null>
+  probeNode: (nodePath: string) => Promise<string | null>
+}): Promise<string | null> {
+  const found = await input.which('node')
+  if (!found) return null
+  const version = await input.probeNode(found)
+  return version !== null && isSupportedNodeVersion(version) ? found : null
+}
+
+async function defaultWhich(cmd: string, platform: NodeJS.Platform): Promise<string | null> {
   const { execFile } = await import('node:child_process')
   const { promisify } = await import('node:util')
   const execFileAsync = promisify(execFile)
-  const tool = process.platform === 'win32' ? 'where' : 'which'
+  const tool = platform === 'win32' ? 'where' : 'which'
   try {
     const { stdout } = await execFileAsync(tool, [cmd], { windowsHide: true })
     const first = stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean)
     return first ?? null
+  } catch {
+    return null
+  }
+}
+
+async function defaultNodeVersion(nodePath: string): Promise<string | null> {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const execFileAsync = promisify(execFile)
+  try {
+    const { stdout } = await execFileAsync(nodePath, ['--version'], { windowsHide: true })
+    return stdout.trim()
   } catch {
     return null
   }

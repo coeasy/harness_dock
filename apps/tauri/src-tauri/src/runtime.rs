@@ -25,6 +25,7 @@ pub struct RuntimeStatus {
     pub suspected_plugins: Vec<String>,
     pub quarantine_expires_at: Option<u64>,
     pub safe_mode: bool,
+    pub node_source: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,7 +60,8 @@ struct AttemptFailure {
 pub(crate) struct RuntimeProcess {
     child: Child,
     work_dir: PathBuf,
-    runtime_root: PathBuf,
+    node: PathBuf,
+    node_source: String,
     ready: ReadyInfo,
     recovery_source: String,
     isolated_plugins: Vec<String>,
@@ -81,11 +83,12 @@ impl RuntimeProcess {
             suspected_plugins: self.suspected_plugins.clone(),
             quarantine_expires_at: self.quarantine_expires_at,
             safe_mode: self.safe_mode,
+            node_source: self.node_source.clone(),
         }
     }
 
     pub(crate) fn gateway_inputs(&self) -> (PathBuf, String) {
-        (node_path(&self.runtime_root), self.ready.url.clone())
+        (self.node.clone(), self.ready.url.clone())
     }
 
     fn stop(&mut self) {
@@ -113,6 +116,7 @@ fn stopped() -> RuntimeStatus {
         suspected_plugins: Vec::new(),
         quarantine_expires_at: None,
         safe_mode: false,
+        node_source: "none".into(),
     }
 }
 
@@ -144,10 +148,15 @@ fn work_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn embedded_patch(plugin: &Path) -> Result<String, String> {
-    let url = Url::from_file_path(plugin).map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
-    let escaped = url.as_str().replace('\'', "''");
-    Ok(format!("- insert:\n    - id: embedded-client\n      name: '{escaped}'\n"))
+fn embedded_patch(plugin: &Path, compatibility: &Path) -> Result<String, String> {
+    let plugin_url = Url::from_file_path(plugin).map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
+    let compatibility_url = Url::from_file_path(compatibility)
+        .map_err(|_| "无法把客户端兼容层路径转换为 file URL。".to_string())?;
+    let plugin_url = plugin_url.as_str().replace('\'', "''");
+    let compatibility_url = compatibility_url.as_str().replace('\'', "''");
+    Ok(format!(
+        "- insert:\n    - id: embedded-client\n      name: '{plugin_url}'\n    - id: harnessdock-client-runtime-compat\n      name: '{compatibility_url}'\n"
+    ))
 }
 
 fn decode_yaml_scalar(raw: &str) -> String {
@@ -205,7 +214,12 @@ fn is_official_row(row: &ConfigDumpRow) -> bool {
 
 fn recovery_candidates(rows: &[ConfigDumpRow]) -> Vec<ConfigDumpRow> {
     rows.iter()
-        .filter(|row| row.id != "embedded-client" && !row.source.is_empty() && !is_official_row(row))
+        .filter(|row| {
+            row.id != "embedded-client"
+                && row.id != "harnessdock-client-runtime-compat"
+                && !row.source.is_empty()
+                && !is_official_row(row)
+        })
         .cloned()
         .collect()
 }
@@ -399,8 +413,8 @@ fn wait_for_ready(
 /// prevent the official Web UI from opening and the user's real configuration
 /// is never rewritten.
 fn start_safe_profile(
-    runtime_root: PathBuf,
     node: &Path,
+    node_source: &str,
     dsh: &Path,
     patch_file: &Path,
     ready_file: &Path,
@@ -431,7 +445,8 @@ fn start_safe_profile(
         Ok(ready) => Ok(RuntimeProcess {
             child,
             work_dir: dir.to_path_buf(),
-            runtime_root,
+            node: node.to_path_buf(),
+            node_source: node_source.to_string(),
             ready,
             recovery_source: "safe-profile".into(),
             isolated_plugins: Vec::new(),
@@ -546,23 +561,26 @@ fn recovery_rows(node: &Path, dsh: &Path, embedded_patch_file: &Path) -> Result<
 fn start_blocking(
     runtime_root: PathBuf,
     plugin_path: PathBuf,
+    compatibility_path: PathBuf,
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
 ) -> Result<RuntimeProcess, String> {
-    let node = node_path(&runtime_root);
+    let bundled_node = node_path(&runtime_root);
+    let (node, node_source) = platform::resolve_node(&bundled_node);
     let dsh = dsh_path(&runtime_root);
-    if !node.is_file() || !dsh.is_file() {
-        return Err(format!("Tauri Full Runtime 不完整: node={} dsh={}", node.display(), dsh.display()));
+    if !dsh.is_file() || (node_source == "bundled" && !bundled_node.is_file()) {
+        return Err(format!("Tauri Full Runtime 不完整: node={} dsh={}", bundled_node.display(), dsh.display()));
     }
-    if !plugin_path.is_file() || !origin_path.is_file() {
-        return Err("Tauri Runtime 缺少 origin.json 或 embedded-client 插件。".into());
+    if !plugin_path.is_file() || !compatibility_path.is_file() || !origin_path.is_file() {
+        return Err("Tauri Runtime 缺少 origin.json、embedded-client 插件或客户端兼容层。".into());
     }
     let origin: OriginInfo = serde_json::from_str(&fs::read_to_string(&origin_path).map_err(|error| error.to_string())?)
         .map_err(|error| format!("origin.json 无效: {error}"))?;
     let dir = work_dir()?;
     let patch_file = dir.join("embedded.patch.yml");
     let ready_file = dir.join("ready.json");
-    fs::write(&patch_file, embedded_patch(&plugin_path)?).map_err(|error| format!("无法写入 embedded patch: {error}"))?;
+    fs::write(&patch_file, embedded_patch(&plugin_path, &compatibility_path)?)
+        .map_err(|error| format!("无法写入 embedded patch: {error}"))?;
     let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
 
     if recovery_enabled {
@@ -592,7 +610,8 @@ fn start_blocking(
                     return Ok(RuntimeProcess {
                         child: quarantine_child,
                         work_dir: dir,
-                        runtime_root,
+                        node: node.clone(),
+                        node_source: node_source.to_string(),
                         ready,
                         recovery_source: "quarantine".into(),
                         isolated_plugins: quarantine.isolated_plugins,
@@ -626,7 +645,8 @@ fn start_blocking(
             return Ok(RuntimeProcess {
                 child,
                 work_dir: dir,
-                runtime_root,
+                node: node.clone(),
+                node_source: node_source.to_string(),
                 ready,
                 recovery_source: "none".into(),
                 isolated_plugins: Vec::new(),
@@ -649,8 +669,8 @@ fn start_blocking(
                 Err(error) => {
                     let summary = public_diagnostic(&first_failure.diagnostic);
                     return start_safe_profile(
-                        runtime_root,
                         &node,
+                        node_source,
                         &dsh,
                         &patch_file,
                         &ready_file,
@@ -665,8 +685,8 @@ fn start_blocking(
             if selected.is_empty() {
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 return start_safe_profile(
-                    runtime_root,
                     &node,
+                    node_source,
                     &dsh,
                     &patch_file,
                     &ready_file,
@@ -693,8 +713,8 @@ fn start_blocking(
                 Ok(value) => value,
                 Err(error) => {
                     return start_safe_profile(
-                        runtime_root,
                         &node,
+                        node_source,
                         &dsh,
                         &patch_file,
                         &ready_file,
@@ -722,7 +742,8 @@ fn start_blocking(
                     Ok(RuntimeProcess {
                         child: recovery_child,
                         work_dir: dir,
-                        runtime_root,
+                        node: node.clone(),
+                        node_source: node_source.to_string(),
                         ready,
                         recovery_source: "startup-failure".into(),
                         isolated_plugins,
@@ -737,8 +758,8 @@ fn start_blocking(
                     let first_summary = public_diagnostic(&first_failure.diagnostic);
                     let recovery_summary = public_diagnostic(&recovery_failure.diagnostic);
                     start_safe_profile(
-                        runtime_root,
                         &node,
+                        node_source,
                         &dsh,
                         &patch_file,
                         &ready_file,
@@ -773,10 +794,11 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     }
     let runtime_root = resource_path(&app, "dsh-runtime")?;
     let plugin_path = resource_path(&app, "plugin-embedded-client/index.js")?;
+    let compatibility_path = resource_path(&app, "dsh-client-runtime-compat/index.js")?;
     let origin_path = resource_path(&app, "origin.json")?;
     let quarantine_state_path = quarantine_path(&app)?;
     let process = tauri::async_runtime::spawn_blocking(move || {
-        start_blocking(runtime_root, plugin_path, origin_path, quarantine_state_path)
+        start_blocking(runtime_root, plugin_path, compatibility_path, origin_path, quarantine_state_path)
     })
         .await
         .map_err(|error| format!("Runtime 启动任务失败: {error}"))??;
@@ -827,6 +849,14 @@ mod tests {
         let rows = parse_config_dump_rows(DUMP);
         let candidates = recovery_candidates(&rows);
         assert_eq!(candidates.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
+    }
+
+    #[test]
+    fn embedded_patch_includes_the_legacy_client_runtime_compatibility_row() {
+        let patch = embedded_patch(Path::new("/tmp/embedded.js"), Path::new("/tmp/compat/index.js")).unwrap();
+        assert!(patch.contains("id: embedded-client"));
+        assert!(patch.contains("id: harnessdock-client-runtime-compat"));
+        assert!(patch.contains("file:///tmp/compat/index.js"));
     }
 
     #[test]

@@ -245,7 +245,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         cacheDir: dir,
         bundledRoot,
         readyTimeoutMs: READY_TIMEOUT_MS,
-        env: { DSH_RUNTIME: 'bundled', DSH_BUNDLED_FETCH: '1' },
+        env: { DSH_RUNTIME: 'bundled', DSH_BUNDLED_FETCH: '1', HARNESSDOCK_USE_SYSTEM_NODE: '0' },
         downloadImpl: async (input) => {
           expect(input.origin.dshVersion).toBe('0.1.1')
           return { dshBin: downloadedBin, runtimeDir: path.dirname(path.dirname(downloadedBin)) }
@@ -285,7 +285,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         cacheDir: dir,
         bundledRoot,
         readyTimeoutMs: READY_TIMEOUT_MS,
-        env: { DSH_RUNTIME: 'bundled', DSH_BUNDLED_FETCH: '1' },
+        env: { DSH_RUNTIME: 'bundled', DSH_BUNDLED_FETCH: '1', HARNESSDOCK_USE_SYSTEM_NODE: '0' },
         downloadImpl: async () => {
           throw new Error('offline')
         },

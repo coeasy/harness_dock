@@ -56,6 +56,30 @@ describe('bundled runtime integrity', () => {
     expect(await repairKnownRuntimeAssets(runtimeDir)).toEqual([])
   })
 
+  it('keeps the web UI mountable when optional plugin boot rejects', async () => {
+    const runtimeDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-integrity-'))
+    temps.push(runtimeDir)
+    const assetsDir = path.join(
+      runtimeDir,
+      'node_modules',
+      '@deepseek-ai',
+      'dsh-web-frontend',
+      'dist',
+      'assets',
+    )
+    await mkdir(assetsDir, { recursive: true })
+    const bundle = path.join(assetsDir, 'index.js')
+    await writeFile(bundle, 'async run(){await this.runPluginBoot(a,l),await this.mountApp(a)}', 'utf8')
+
+    const repaired = await repairKnownRuntimeAssets(runtimeDir)
+    expect(repaired).toHaveLength(1)
+    expect(repaired[0]).toContain('dsh-web-frontend')
+    expect(await readFile(bundle, 'utf8')).toContain(
+      'await this.runPluginBoot(a,l).catch(n=>{console.error("HarnessDock: plugin boot is degradable",n)}),await this.mountApp(a)',
+    )
+    expect(await repairKnownRuntimeAssets(runtimeDir)).toEqual([])
+  })
+
   it('fails when a target-native package is absent', async () => {
     const runtimeDir = await mkdtemp(path.join(os.tmpdir(), 'dsh-integrity-'))
     temps.push(runtimeDir)

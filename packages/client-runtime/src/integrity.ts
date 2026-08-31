@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const PI_AI_MANIFEST = path.join(
@@ -9,6 +9,18 @@ const PI_AI_MANIFEST = path.join(
   'data',
   '.manifest.json',
 )
+
+const WEB_FRONTEND_ASSETS = path.join(
+  'node_modules',
+  '@deepseek-ai',
+  'dsh-web-frontend',
+  'dist',
+  'assets',
+)
+const WEB_BOOT_PLUGIN_FAILURE_MARKER = 'HarnessDock: plugin boot is degradable'
+const WEB_BOOT_PLUGIN_FAILURE_CALL = 'await this.runPluginBoot(a,l),await this.mountApp(a)'
+const WEB_BOOT_PLUGIN_FAILURE_REPLACEMENT =
+  `await this.runPluginBoot(a,l).catch(n=>{console.error("${WEB_BOOT_PLUGIN_FAILURE_MARKER}",n)}),await this.mountApp(a)`
 
 function modulePath(runtimeDir: string, packageName: string): string {
   return path.join(runtimeDir, 'node_modules', ...packageName.split('/'))
@@ -67,7 +79,7 @@ export function requiredNativePackages(
  *    after runtime preparation/download and remains verifiable before bundle.
  */
 export async function repairKnownRuntimeAssets(runtimeDir: string): Promise<string[]> {
-  const repaired: string[] = []
+  const repaired: string[] = await repairWebBootFailure(runtimeDir)
 
   for (const arch of ['x64', 'arm64']) {
     const helper = landlockHelperPath(runtimeDir, arch)
@@ -127,6 +139,37 @@ export async function repairKnownRuntimeAssets(runtimeDir: string): Promise<stri
     'utf8',
   )
   repaired.push(PI_AI_MANIFEST)
+  return repaired
+}
+
+/**
+ * Keep the official web application mountable when an optional plugin fails
+ * during activation. The upstream boot screen treats every boot exception as
+ * fatal, which makes one incompatible third-party bundle hide the entire UI.
+ * This is deliberately a narrow, idempotent patch for the pinned frontend
+ * bundle; future upstream bundle changes are left untouched rather than
+ * rewritten heuristically.
+ */
+export async function repairWebBootFailure(runtimeDir: string): Promise<string[]> {
+  const assetsDir = path.join(runtimeDir, WEB_FRONTEND_ASSETS)
+  let entries: string[]
+  try {
+    entries = (await readdir(assetsDir, { recursive: true }))
+      .filter((entry) => typeof entry === 'string' && entry.endsWith('.js')) as string[]
+  } catch {
+    return []
+  }
+
+  const repaired: string[] = []
+  for (const entry of entries.sort()) {
+    const file = path.join(assetsDir, entry)
+    const source = await readFile(file, 'utf8')
+    if (source.includes(WEB_BOOT_PLUGIN_FAILURE_MARKER)) continue
+    if (!source.includes(WEB_BOOT_PLUGIN_FAILURE_CALL)) continue
+    const updated = source.replace(WEB_BOOT_PLUGIN_FAILURE_CALL, WEB_BOOT_PLUGIN_FAILURE_REPLACEMENT)
+    await writeFile(file, updated, 'utf8')
+    repaired.push(path.relative(runtimeDir, file))
+  }
   return repaired
 }
 

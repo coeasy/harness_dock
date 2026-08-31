@@ -63,6 +63,25 @@ exports.default = async function afterPack(context) {
     throw new Error('[afterPack] embedded-client plugin copy failed: ' + pluginEntry)
   }
 
+  const compatibilitySrc = path.resolve(
+    projectDir,
+    '..',
+    'tauri',
+    'src-tauri',
+    'resources',
+    'dsh-client-runtime-compat',
+  )
+  const compatibilityEntrySrc = path.join(compatibilitySrc, 'index.js')
+  if (!fs.existsSync(compatibilityEntrySrc)) {
+    throw new Error('[afterPack] client-runtime compatibility source missing: ' + compatibilityEntrySrc)
+  }
+  const compatibilityDst = path.join(resourceDir, 'dsh-client-runtime-compat')
+  fs.rmSync(compatibilityDst, { recursive: true, force: true })
+  fs.cpSync(compatibilitySrc, compatibilityDst, { recursive: true })
+  if (!fs.existsSync(path.join(compatibilityDst, 'client.js'))) {
+    throw new Error('[afterPack] client-runtime compatibility copy failed: ' + compatibilityDst)
+  }
+
   // This hook is attached only to electron-builder.full.yml. Do not depend on
   // extraResources having created dsh-runtime first: that staging step may
   // omit node_modules and leave no destination directory at all. An earlier

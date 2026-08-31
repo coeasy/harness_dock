@@ -1,4 +1,9 @@
 use serde::Serialize;
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 
 /// Keep every packaged helper process attached to the GUI application without
 /// creating a visible Windows console window. `windowsHide` is not available
@@ -11,6 +16,82 @@ pub(crate) fn configure_child_command(command: &mut std::process::Command) {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+}
+
+/// The packaged dsh runtime currently follows `^22.19.0 || >=24.0.0`.
+/// Keep this check in the native launcher so an installed Node can be reused
+/// without ever downloading or installing another system-wide copy.
+pub(crate) fn is_supported_node_version(raw: &str) -> bool {
+    let version = raw.trim().strip_prefix('v').unwrap_or(raw.trim());
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(minor) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(_patch) = parts
+        .next()
+        .and_then(|part| part.split(|ch: char| !ch.is_ascii_digit()).next())
+        .and_then(|part| part.parse::<u64>().ok())
+    else {
+        return false;
+    };
+    (major == 22 && minor >= 19) || major >= 24
+}
+
+fn command_output(command: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    let mut child = Command::new(command);
+    child
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    configure_child_command(&mut child);
+    child.output().ok().filter(|output| output.status.success()).map(|output| output.stdout)
+}
+
+fn system_node_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(value) = env::var_os("HARNESSDOCK_NODE_BIN").filter(|value| !value.is_empty()) {
+        candidates.push(PathBuf::from(value));
+    }
+
+    let locator = if cfg!(windows) { "where.exe" } else { "which" };
+    if let Some(output) = command_output(Path::new(locator), &["node"]) {
+        for line in String::from_utf8_lossy(&output)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            let candidate = PathBuf::from(line);
+            if !candidates.iter().any(|existing| existing == &candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    candidates
+}
+
+/// Return a usable system Node path, if one is already installed. This is
+/// intentionally a probe only: it never mutates PATH, downloads files, or
+/// writes an installer/runtime directory.
+pub(crate) fn find_usable_system_node() -> Option<PathBuf> {
+    system_node_candidates().into_iter().find(|candidate| {
+        candidate.is_file()
+            && command_output(candidate, &["--version"])
+                .map(|output| is_supported_node_version(&String::from_utf8_lossy(&output)))
+                .unwrap_or(false)
+    })
+}
+
+pub(crate) fn resolve_node(bundled: &Path) -> (PathBuf, &'static str) {
+    if env::var("HARNESSDOCK_USE_SYSTEM_NODE").ok().as_deref() == Some("0") {
+        return (bundled.to_path_buf(), "bundled");
+    }
+    find_usable_system_node()
+        .map(|path| (path, "system"))
+        .unwrap_or_else(|| (bundled.to_path_buf(), "bundled"))
 }
 
 #[derive(Debug, Serialize)]
@@ -29,5 +110,19 @@ pub fn platform_info() -> PlatformInfo {
         arch: std::env::consts::ARCH,
         surface: if cfg!(mobile) { "mobile" } else { "desktop" },
         runtime_mode: if cfg!(mobile) { "remote" } else { "local" },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_supported_node_version;
+
+    #[test]
+    fn accepts_the_pinned_dsh_node_engine_range() {
+        assert!(is_supported_node_version("v22.19.0"));
+        assert!(is_supported_node_version("24.1.0"));
+        assert!(!is_supported_node_version("v22.18.0"));
+        assert!(!is_supported_node_version("v23.0.0"));
+        assert!(!is_supported_node_version("node"));
     }
 }

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { npxCommand, resolveDshCommand } from '../src/resolve.ts'
+import { isSupportedNodeVersion, npxCommand, resolveDshCommand } from '../src/resolve.ts'
+
+describe('isSupportedNodeVersion', () => {
+  it('accepts the dsh engine range and rejects unsupported majors', () => {
+    expect(isSupportedNodeVersion('v22.19.0')).toBe(true)
+    expect(isSupportedNodeVersion('22.25.1')).toBe(true)
+    expect(isSupportedNodeVersion('v24.0.0')).toBe(true)
+    expect(isSupportedNodeVersion('v22.18.0')).toBe(false)
+    expect(isSupportedNodeVersion('v23.0.0')).toBe(false)
+    expect(isSupportedNodeVersion('not-node')).toBe(false)
+  })
+})
 
 describe('npxCommand', () => {
   it('uses npx.cmd on Windows so spawn does not ENOENT', () => {
@@ -40,8 +51,34 @@ describe('resolveDshCommand', () => {
       env: {},
       bundledRoot: dir,
       platform: 'win32',
+      which: async () => null,
     })
     expect(resolved.command).toBe(path.join(dir, 'node.exe'))
+    expect(resolved.argsPrefix).toEqual([
+      path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    ])
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('reuses a compatible system Node for the bundled dsh entry', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const os = await import('node:os')
+    const path = await import('node:path')
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-res-system-'))
+    mkdirSync(path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib'), { recursive: true })
+    writeFileSync(path.join(dir, 'node.exe'), '')
+    writeFileSync(path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), '')
+    const resolved = await resolveDshCommand({
+      mode: 'bundled',
+      version: '0.1.1-rc.2',
+      env: {},
+      bundledRoot: dir,
+      platform: 'win32',
+      which: async (command) => command === 'node' ? 'C:\\Program Files\\nodejs\\node.exe' : null,
+      probeNode: async () => 'v22.19.0',
+    })
+    expect(resolved.command).toBe('C:\\Program Files\\nodejs\\node.exe')
     expect(resolved.argsPrefix).toEqual([
       path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
     ])

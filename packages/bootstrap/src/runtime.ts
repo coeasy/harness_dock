@@ -33,6 +33,8 @@ export interface BootstrapOptions {
   versionOverride?: string
   /** path to the embedded-client plugin (cordis patch target) */
   pluginPath: string
+  /** optional host-provided bridge for legacy browser client module imports */
+  compatibilityPath?: string
   /** whether we are running inside a packaged app */
   packaged: boolean
   /** bundled runtime root (resources/dsh-runtime) when present */
@@ -101,6 +103,7 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
       : new DshRuntime({
           origin: o,
           pluginPath: options.pluginPath,
+          compatibilityPath: options.compatibilityPath,
           packaged: options.packaged,
           bundledRoot: options.bundledRoot,
           downloadCacheDir,

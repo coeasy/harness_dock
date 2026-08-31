@@ -7,8 +7,12 @@
 - Windows / macOS / Linux: packaged local runtime + Remote Gateway.
 - Android / iOS: Remote Gateway only; Node/dsh is never started on-device.
 - Third-party plugin failures are isolated by bounded recovery/quarantine and do not terminate the HarnessDock host.
+- The packaged launcher reuses a compatible Node already on PATH; the bundled portable Node is only the offline fallback and is never installed system-wide.
+- A built-in `@deepseek-ai/dsh-client-runtime/client` compatibility layer keeps older plugins such as `dsh-at-file` from failing when the official package is now `dsh-client-modules`.
 - Desktop startup automatically opens the isolated official Harness Web UI; the local control page is used only as a fallback when startup needs attention.
 - If normal plugin recovery cannot complete, a temporary clean DSH profile is used so the Web UI can still open without changing the user's real configuration.
+
+The native application menu contains `HarnessDock → 外壳设置`; the same control page also has a visible settings button. The default is to open the Harness Web UI immediately after Runtime readiness, while the behavior can be changed in the shell settings page.
 
 ## Brand and installation contract
 

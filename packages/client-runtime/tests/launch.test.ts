@@ -34,4 +34,13 @@ describe('renderEmbeddedPatch', () => {
     const yaml = renderEmbeddedPatch('/opt/harnessdock/plugin-embedded-client/index.js')
     expect(yaml).toContain(pathToFileURL('/opt/harnessdock/plugin-embedded-client/index.js').href)
   })
+
+  it('adds the legacy client-runtime compatibility row when provided', () => {
+    const yaml = renderEmbeddedPatch(
+      '/opt/harnessdock/plugin-embedded-client/index.js',
+      '/opt/harnessdock/dsh-client-runtime-compat/index.js',
+    )
+    expect(yaml).toContain('id: harnessdock-client-runtime-compat')
+    expect(yaml).toContain('file:///opt/harnessdock/dsh-client-runtime-compat/index.js')
+  })
 })

@@ -20,6 +20,21 @@ export function pluginPath(): string {
   return path.join(repoRoot, 'packages', 'plugin-embedded-client', 'lib', 'index.js')
 }
 
+export function compatibilityPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'dsh-client-runtime-compat', 'index.js')
+  }
+  return path.join(
+    repoRoot,
+    'apps',
+    'tauri',
+    'src-tauri',
+    'resources',
+    'dsh-client-runtime-compat',
+    'index.js',
+  )
+}
+
 export function bundledRoot(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'dsh-runtime')
