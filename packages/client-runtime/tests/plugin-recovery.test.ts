@@ -40,14 +40,20 @@ describe('plugin recovery config dump parsing', () => {
     expect(pluginRecoveryCandidates(rows).map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
   })
 
-  it('isolates the specific incompatible row when diagnostics identify it', () => {
+  it('isolates the complete external recovery set even when diagnostics identify only the first bad plugin', () => {
     const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), 'Failed to load @legacy/old-market-plugin while mounting old-market-plugin')
-    expect(selected.map((row) => row.id)).toEqual(['old-market-plugin'])
+    expect(selected.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
   })
 
-  it('falls back to all third-party/user-added rows when upstream diagnostics are ambiguous', () => {
+  it('isolates the same external set when upstream diagnostics are ambiguous', () => {
     const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), 'Cordis boot failed during mount')
     expect(selected.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
+  })
+
+  it('keeps official and embedded plugins enabled when multiple third-party plugins are incompatible', () => {
+    const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), 'old-market-plugin failed before user-added could initialize')
+    expect(selected.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
+    expect(selected.some((row) => row.id === 'official-core' || row.id === 'official-web' || row.id === 'embedded-client')).toBe(false)
   })
 
   it('renders a temporary disabled overlay and de-duplicates row ids', () => {
