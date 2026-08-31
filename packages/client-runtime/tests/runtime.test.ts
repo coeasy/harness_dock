@@ -129,6 +129,102 @@ server.listen(0, '127.0.0.1', () => {
     },
     TEST_TIMEOUT_MS,
   )
+
+  it(
+    'isolates multiple incompatible external plugins in one recovery boot and reuses quarantine on next launch',
+    async () => {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-recovery-'))
+      temps.push(dir)
+      const plugin = path.join(dir, 'embedded-client.js')
+      const good = await fakeUrlScript(dir)
+      const fail = path.join(dir, 'plugin-fail.mjs')
+      const quarantine = path.join(dir, 'plugin-quarantine.json')
+      await writeFile(plugin, 'export default {}\n', 'utf8')
+      await writeFile(fail, `process.stderr.write('legacy-a plugin failed\\n'); process.exit(1)\n`, 'utf8')
+      const dump = `# == @deepseek-ai/dsh-bundle-base
+- id: official-core
+  name: '@deepseek-ai/plugin-core'
+# == third-party-a
+- id: legacy-a
+  name: '@legacy/a'
+# == third-party-b
+- id: legacy-b
+  name: '@legacy/b'
+# == C:\\Temp\\embedded.patch.yml
+- id: embedded-client
+  name: 'file:///embedded-client.js'
+`
+
+      const first = new DshRuntime({
+        origin: { dshVersion: '0.1.2-alpha.1' },
+        pluginPath: plugin,
+        packaged: true,
+        cacheDir: dir,
+        pluginQuarantinePath: quarantine,
+        readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 50,
+        env: { DSH_RUNTIME: 'local', DSH_BIN: process.execPath },
+        configDumpImpl: async () => dump,
+        spawnImpl: (_command, args, options) => {
+          const recovering = args.some((value) => value.includes('plugin-recovery.patch.yml'))
+          return spawn(process.execPath, [recovering ? good : fail], {
+            ...options,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        },
+      })
+
+      try {
+        await first.start()
+        expect(first.pluginRecoveryState).toMatchObject({
+          active: true,
+          source: 'startup-failure',
+          isolatedPlugins: ['legacy-a', 'legacy-b'],
+          suspectedPlugins: ['legacy-a'],
+          reason: 'diagnostic-match',
+        })
+      } finally {
+        await first.stop()
+      }
+
+      let normalSpawnCount = 0
+      const second = new DshRuntime({
+        origin: { dshVersion: '0.1.2-alpha.1' },
+        pluginPath: plugin,
+        packaged: true,
+        cacheDir: dir,
+        pluginQuarantinePath: quarantine,
+        readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 50,
+        env: { DSH_RUNTIME: 'local', DSH_BIN: process.execPath },
+        configDumpImpl: async () => {
+          throw new Error('config dump should not be needed for a valid quarantine')
+        },
+        spawnImpl: (_command, args, options) => {
+          const quarantined = args.some((value) => value.includes('plugin-quarantine.patch.yml'))
+          if (!quarantined) normalSpawnCount += 1
+          return spawn(process.execPath, [quarantined ? good : fail], {
+            ...options,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        },
+      })
+
+      try {
+        await second.start()
+        expect(normalSpawnCount).toBe(0)
+        expect(second.pluginRecoveryState).toMatchObject({
+          active: true,
+          source: 'quarantine',
+          isolatedPlugins: ['legacy-a', 'legacy-b'],
+          suspectedPlugins: ['legacy-a'],
+        })
+      } finally {
+        await second.stop()
+      }
+    },
+    TEST_TIMEOUT_MS,
+  )
 })
 
 describe('DshRuntime bundled follow-pin (Phase B)', () => {
@@ -144,7 +240,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       let spawnCommand = ''
       let spawnArgs: string[] = []
       const runtime = new DshRuntime({
-        origin: { dshVersion: '0.1.1' }, // != seed 0.1.0 -> follow-pin must trigger
+        origin: { dshVersion: '0.1.1' },
         pluginPath: path.join(dir, 'plugin.js'),
         cacheDir: dir,
         bundledRoot,
@@ -166,7 +262,6 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       } finally {
         await runtime.stop()
       }
-      // bundled node runs the *downloaded* pinned dsh bin
       expect(spawnCommand).toBe(path.join(bundledRoot, bundledNodeRel(process.platform)))
       expect(spawnArgs[0]).toBe(downloadedBin)
     },
@@ -206,7 +301,6 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       } finally {
         await runtime.stop()
       }
-      // fetch failed -> run the bundled seed as-is
       expect(spawnCommand).toBe(path.join(bundledRoot, bundledNodeRel(process.platform)))
       expect(spawnArgs[0]).toBe(seedBin)
     },
@@ -224,7 +318,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
       let downloadCalled = false
       let spawnArgs: string[] = []
       const runtime = new DshRuntime({
-        origin: { dshVersion: '0.1.1' }, // == seed
+        origin: { dshVersion: '0.1.1' },
         pluginPath: path.join(dir, 'plugin.js'),
         cacheDir: dir,
         bundledRoot,
