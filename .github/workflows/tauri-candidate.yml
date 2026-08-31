@@ -13,9 +13,11 @@ on:
       - 'packages/docs-sync/origin.json'
       - 'tests/parity/**'
       - 'scripts/check-versions.mjs'
+      - 'scripts/generate-nsis-branding.ps1'
+      - 'scripts/verify-windows-installer-icon.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
-      - '.github/release-notes/v0.2.1.md'
+      - '.github/release-notes/**'
       - '.github/workflows/tauri-candidate.yml'
 
 concurrency:
@@ -52,12 +54,11 @@ jobs:
           set -euo pipefail
           test -s packages/plugin-embedded-client/lib/index.js
           test -s /tmp/harnessdock-gateway-sidecar.mjs
+          test -s apps/tauri/src-tauri/icons/app-icon.png
+          test -s scripts/verify-windows-installer-icon.mjs
           root_version="$(node -p "require('./package.json').version")"
           tauri_version="$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")"
-          test "$tauri_version" = "$root_version" || {
-            echo "Tauri version mismatch: root=$root_version tauri=$tauri_version" >&2
-            exit 1
-          }
+          test "$tauri_version" = "$root_version" || { echo "Tauri version mismatch: root=$root_version tauri=$tauri_version" >&2; exit 1; }
 
   pack-upstream:
     needs: validate
@@ -86,10 +87,7 @@ jobs:
           set -euo pipefail
           actual=$(git -C upstream rev-parse HEAD)
           expected='${{ steps.origin.outputs.commit }}'
-          test "$actual" = "$expected" || {
-            echo "upstream source mismatch: expected $expected, got $actual" >&2
-            exit 1
-          }
+          test "$actual" = "$expected" || { echo "upstream source mismatch: expected $expected, got $actual" >&2; exit 1; }
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -176,12 +174,8 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs')
           const manifest = JSON.parse(fs.readFileSync('runtime-prepared/manifest.json', 'utf8'))
-          if (manifest.platform !== process.env.EXPECTED_PLATFORM || manifest.arch !== process.env.EXPECTED_ARCH) {
-            throw new Error(`runtime manifest mismatch: ${manifest.platform}/${manifest.arch}`)
-          }
-          if (!manifest.dshVersion || manifest.runtimeSource !== 'official-source-pack') {
-            throw new Error('runtime manifest is missing pinned official-source metadata')
-          }
+          if (manifest.platform !== process.env.EXPECTED_PLATFORM || manifest.arch !== process.env.EXPECTED_ARCH) throw new Error(`runtime manifest mismatch: ${manifest.platform}/${manifest.arch}`)
+          if (!manifest.dshVersion || manifest.runtimeSource !== 'official-source-pack') throw new Error('runtime manifest is missing pinned official-source metadata')
           NODE
           case "$EXPECTED_PLATFORM" in
             win32)
@@ -274,6 +268,19 @@ jobs:
           fi
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Generate branded Tauri icon set
+        working-directory: apps/tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo tauri icon src-tauri/icons/app-icon.png
+          test -s src-tauri/icons/icon.png
+          test -s src-tauri/icons/icon.ico
+          test -s src-tauri/icons/icon.icns
+      - name: Generate Windows installer branding
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/generate-nsis-branding.ps1
       - name: Pin Linux AppImage bundler
         if: runner.os == 'Linux'
         shell: bash
@@ -281,9 +288,7 @@ jobs:
           set -euo pipefail
           tool="$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
           mkdir -p "$(dirname "$tool")"
-          curl -fL --retry 3 --retry-delay 2 \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage" \
-            -o "$tool"
+          curl -fL --retry 3 --retry-delay 2 "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage" -o "$tool"
           echo "${LINUXDEPLOY_SHA256}  ${tool}" | sha256sum -c -
           chmod +x "$tool"
       - name: Build Tauri desktop candidate
@@ -306,6 +311,13 @@ jobs:
           set -euo pipefail
           mkdir -p ../../.ci-logs
           cargo tauri build --verbose --bundles appimage 2>&1 | tee ../../.ci-logs/tauri-linux-appimage.log
+      - name: Verify Windows installer uses HarnessDock icon
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem 'apps/tauri/src-tauri/target/release/bundle/nsis' -Filter '*.exe' -Recurse | Select-Object -First 1
+          if (-not $setup) { throw 'Windows NSIS installer not found' }
+          node scripts/verify-windows-installer-icon.mjs $setup.FullName apps/tauri/src-tauri/icons/icon.ico
       - name: Upload Linux bundler diagnostics
         if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@v7
@@ -321,16 +333,12 @@ jobs:
           set -euo pipefail
           test -d apps/tauri/src-tauri/target/release/bundle
           case "${{ runner.os }}" in
-            Windows)
-              test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.exe' -print -quit)"
-              ;;
+            Windows) test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.exe' -print -quit)" ;;
             Linux)
               test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.deb' -print -quit)"
               test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.AppImage' -print -quit)"
               ;;
-            macOS)
-              test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.dmg' -print -quit)"
-              ;;
+            macOS) test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.dmg' -print -quit)" ;;
           esac
       - uses: actions/upload-artifact@v7
         with:
@@ -349,22 +357,15 @@ jobs:
       - name: Install Linux Tauri dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10.12.1
+        with: { version: 10.12.1 }
       - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
+        with: { node-version: 24, cache: pnpm }
       - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
+        with: { distribution: temurin, java-version: '17' }
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
+        with: { targets: aarch64-linux-android }
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/tauri/src-tauri
+        with: { workspaces: apps/tauri/src-tauri }
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm --filter @dsh/plugin-embedded-client build
       - name: Install Tauri CLI
@@ -380,6 +381,17 @@ jobs:
       - name: Initialize Android native project
         working-directory: apps/tauri
         run: cargo tauri android init --ci --skip-targets-install
+      - name: Replace default Android launcher icons with HarnessDock
+        working-directory: apps/tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          launcher="$(find src-tauri/gen/android/app/src/main/res -type f -name 'ic_launcher.png' -print | sort | tail -1)"
+          test -n "$launcher"
+          before="$(sha256sum "$launcher" | awk '{print $1}')"
+          cargo tauri icon src-tauri/icons/app-icon.png
+          after="$(sha256sum "$launcher" | awk '{print $1}')"
+          test "$before" != "$after" || { echo 'Android launcher icon still matches Tauri template default' >&2; exit 1; }
       - name: Build Android candidate APK and AAB
         working-directory: apps/tauri
         run: cargo tauri android build --debug --apk --aab --target aarch64 --ci
@@ -404,18 +416,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10.12.1
+        with: { version: 10.12.1 }
       - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
+        with: { node-version: 24, cache: pnpm }
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios-sim
+        with: { targets: aarch64-apple-ios-sim }
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/tauri/src-tauri
+        with: { workspaces: apps/tauri/src-tauri }
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm --filter @dsh/plugin-embedded-client build
       - name: Install Tauri CLI
@@ -423,6 +430,18 @@ jobs:
       - name: Initialize iOS native project
         working-directory: apps/tauri
         run: cargo tauri ios init --ci --skip-targets-install
+      - name: Replace default iOS app icons with HarnessDock
+        working-directory: apps/tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          appicons="$(find src-tauri/gen/apple -type d -name '*.appiconset' -print -quit)"
+          test -n "$appicons"
+          before="$(find "$appicons" -type f -name '*.png' -exec shasum -a 256 {} \; | sort | shasum -a 256 | awk '{print $1}')"
+          cargo tauri icon src-tauri/icons/app-icon.png
+          after="$(find "$appicons" -type f -name '*.png' -exec shasum -a 256 {} \; | sort | shasum -a 256 | awk '{print $1}')"
+          test -n "$after"
+          test "$before" != "$after" || { echo 'iOS AppIcon set still matches Tauri template default' >&2; exit 1; }
       - name: Build iOS simulator candidate
         working-directory: apps/tauri
         run: cargo tauri ios build --debug --target aarch64-sim --ci

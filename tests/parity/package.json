@@ -1,16 +1,12 @@
 {
   "name": "@dsh/parity-tests",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "vitest run --config ../../vitest.config.ts",
     "e2e": "playwright test"
   },
-  "dependencies": {
-    "@dsh/docs-sync": "workspace:*"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.55.0"
-  }
+  "dependencies": { "@dsh/docs-sync": "workspace:*" },
+  "devDependencies": { "@playwright/test": "^1.55.0" }
 }

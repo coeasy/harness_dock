@@ -1,8 +1,8 @@
 {
   "name": "@dsh/e2e-tests",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
-  "description": "Electron E2E smoke tests for the HarnessDock desktop shell (mock dsh, no real runtime)",
+  "description": "Electron E2E smoke tests for the retained HarnessDock compatibility host (mock dsh, no real runtime)",
   "type": "module",
   "scripts": {
     "test": "playwright test",
