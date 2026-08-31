@@ -15,5 +15,31 @@ export {
   repairKnownRuntimeAssets,
   requiredNativePackages,
 } from './integrity.ts'
-export type { DshRuntimeOptions, RuntimeProgressEvent, StopOutcome } from './runtime.ts'
+export {
+  buildPluginRecoveryPlan,
+  isOfficialDshSource,
+  parseConfigDumpRows,
+  pluginRecoveryCandidates,
+  renderPluginRecoveryPatch,
+  selectPluginRecoveryRows,
+} from './plugin-recovery.ts'
+export type {
+  ConfigDumpRow,
+  PluginRecoveryPlan,
+  PluginRecoveryReason,
+} from './plugin-recovery.ts'
+export {
+  clearPluginQuarantine,
+  DEFAULT_QUARANTINE_TTL_MS,
+  readPluginQuarantine,
+  writePluginQuarantine,
+} from './plugin-quarantine.ts'
+export type { PluginQuarantineRecord } from './plugin-quarantine.ts'
+export type {
+  DshRuntimeOptions,
+  PluginRecoverySource,
+  PluginRecoveryState,
+  RuntimeProgressEvent,
+  StopOutcome,
+} from './runtime.ts'
 export type { ReadyInfo, RuntimeMode } from './types.ts'
