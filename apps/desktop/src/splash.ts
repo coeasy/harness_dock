@@ -1,19 +1,31 @@
-import { app, BrowserWindow, clipboard, ipcMain } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage } from 'electron'
 import { t } from './i18n.ts'
 import { openLogDir } from './boot-log.ts'
-import { splashPreloadPath } from './paths.ts'
+import { appIconPath, splashPreloadPath } from './paths.ts'
 
 let splashWindow: BrowserWindow | undefined
 let splashIpcRegistered = false
 let latestSplashError = ''
 let splashRetryAction: (() => void) | undefined
 
+function splashIconDataUrl(): string | undefined {
+  try {
+    const image = nativeImage.createFromPath(appIconPath())
+    if (image.isEmpty()) return undefined
+    return image.resize({ width: 72, height: 72, quality: 'best' }).toDataURL()
+  } catch {
+    return undefined
+  }
+}
+
 // ---------- splash screen shown while dsh boots ----------
 // The template stays inline and loads via a `data:` URL (no pack config change).
 // It gains a download progress bar and an error state with actionable buttons
 // (retry / open log / copy error) wired through the `dshSplash` preload bridge.
-
-function renderSplashHtml(): string {
+function renderSplashHtml(iconDataUrl?: string): string {
+  const iconMarkup = iconDataUrl
+    ? `<img class="logo-image" src="${iconDataUrl}" alt="HarnessDock" draggable="false">`
+    : '<div class="logo-fallback"></div>'
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -22,10 +34,12 @@ html,body{height:100%;overflow:hidden;user-select:none;-webkit-app-region:drag;
   background:radial-gradient(120% 90% at 50% 0%, #142233 0%, #0b1120 55%, #080d18 100%)}
 .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 28px;animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.logo{width:72px;height:72px;min-width:72px;min-height:72px;flex:0 0 72px;border-radius:20px;position:relative;
+.logo-shell{width:72px;height:72px;min-width:72px;min-height:72px;flex:0 0 72px;display:flex;align-items:center;justify-content:center}
+.logo-image{display:block;width:72px;height:72px;min-width:72px;min-height:72px;object-fit:contain;flex:0 0 72px;-webkit-user-drag:none;filter:drop-shadow(0 10px 20px rgba(0,0,0,.35))}
+.logo-fallback{width:72px;height:72px;min-width:72px;min-height:72px;flex:0 0 72px;border-radius:20px;position:relative;
   background:radial-gradient(circle at 35% 28%, #6ee7d8 0%, #14b8a6 55%, #0d9488 100%);
   box-shadow:0 10px 30px rgba(0,0,0,.45),0 0 46px rgba(20,184,166,.28),inset 0 0 0 1px rgba(255,255,255,.18)}
-.logo::after{content:"";position:absolute;inset:16px;border-radius:50%;
+.logo-fallback::after{content:"";position:absolute;inset:16px;border-radius:50%;
   background:radial-gradient(circle at 40% 35%, #d9fff6 0%, #2dd4bf 62%, #0f766e 100%);
   box-shadow:0 0 14px rgba(126,231,214,.6)}
 .title{color:#eef2fa;font-size:19px;font-weight:700;letter-spacing:.05em;flex:0 0 auto}
@@ -49,7 +63,7 @@ button.primary{background:#14b8a6;color:#06201b;border-color:#14b8a6;font-weight
 button.primary:hover{background:#2dd4bf}
 </style></head><body>
 <div class="wrap">
-  <div class="logo"></div>
+  <div class="logo-shell">${iconMarkup}</div>
   <div class="title">HarnessDock</div>
   <div class="sub">DeepSeek Harness · dock</div>
   <div class="spinner" id="splash-spinner"></div>
@@ -82,6 +96,7 @@ button.primary:hover{background:#2dd4bf}
 
 export async function createSplash(): Promise<void> {
   if (splashWindow) return
+  const iconPath = appIconPath()
   splashWindow = new BrowserWindow({
     width: 400,
     height: 430,
@@ -92,6 +107,7 @@ export async function createSplash(): Promise<void> {
     skipTaskbar: true,
     show: false,
     backgroundColor: '#0b1120',
+    icon: iconPath,
     webPreferences: {
       preload: splashPreloadPath,
       sandbox: true,
@@ -100,7 +116,7 @@ export async function createSplash(): Promise<void> {
     },
   })
   splashWindow.center()
-  await splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderSplashHtml())}`)
+  await splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderSplashHtml(splashIconDataUrl()))}`)
   splashWindow.once('ready-to-show', () => splashWindow?.show())
 }
 
@@ -172,7 +188,6 @@ export function closeSplash(): void {
   splashWindow = undefined
   if (w && !w.isDestroyed()) {
     w.removeAllListeners('ready-to-show')
-    // Fade out before closing so the hand-off to the main window is smooth.
     try {
       w.webContents
         .executeJavaScript(
