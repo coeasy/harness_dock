@@ -20,22 +20,22 @@ function renderSplashHtml(): string {
 html,body{height:100%;overflow:hidden;user-select:none;-webkit-app-region:drag;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
   background:radial-gradient(120% 90% at 50% 0%, #142233 0%, #0b1120 55%, #080d18 100%)}
-.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;animation:fadeIn .3s ease}
+.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 28px;animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.logo{width:72px;height:72px;border-radius:20px;position:relative;
+.logo{width:72px;height:72px;min-width:72px;min-height:72px;flex:0 0 72px;border-radius:20px;position:relative;
   background:radial-gradient(circle at 35% 28%, #6ee7d8 0%, #14b8a6 55%, #0d9488 100%);
   box-shadow:0 10px 30px rgba(0,0,0,.45),0 0 46px rgba(20,184,166,.28),inset 0 0 0 1px rgba(255,255,255,.18)}
 .logo::after{content:"";position:absolute;inset:16px;border-radius:50%;
   background:radial-gradient(circle at 40% 35%, #d9fff6 0%, #2dd4bf 62%, #0f766e 100%);
   box-shadow:0 0 14px rgba(126,231,214,.6)}
-.title{color:#eef2fa;font-size:19px;font-weight:700;letter-spacing:.05em}
-.sub{color:#8b9bb8;font-size:12px;letter-spacing:.02em;margin-top:-10px}
-.spinner{width:20px;height:20px;border-radius:50%;border:2px solid rgba(110,231,216,.16);border-top-color:#2dd4bf;animation:spin .8s linear infinite}
+.title{color:#eef2fa;font-size:19px;font-weight:700;letter-spacing:.05em;flex:0 0 auto}
+.sub{color:#8b9bb8;font-size:12px;letter-spacing:.02em;margin-top:-8px;flex:0 0 auto}
+.spinner{width:20px;height:20px;min-width:20px;min-height:20px;flex:0 0 20px;border-radius:50%;border:2px solid rgba(110,231,216,.16);border-top-color:#2dd4bf;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes dsh-indeterminate{0%{transform:translateX(-100%)}100%{transform:translateX(420%)}}
-.status{color:#8b9bb8;font-size:12px;min-height:16px;text-align:center;max-width:330px;white-space:pre-line;letter-spacing:.01em}
-.hint{color:#5d6f8d;font-size:11px;max-width:330px;text-align:center;line-height:1.6;white-space:pre-line}
-.progress-wrap{width:240px;height:6px;border-radius:99px;background:rgba(148,178,214,.14);overflow:hidden;position:relative;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
+.status{color:#8b9bb8;font-size:12px;min-height:16px;text-align:center;max-width:330px;white-space:pre-line;letter-spacing:.01em;flex:0 0 auto}
+.hint{color:#5d6f8d;font-size:11px;max-width:330px;text-align:center;line-height:1.55;white-space:pre-line;flex:0 0 auto}
+.progress-wrap{width:240px;height:6px;min-height:6px;flex:0 0 6px;border-radius:99px;background:rgba(148,178,214,.14);overflow:hidden;position:relative;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
 .progress-bar{height:100%;width:20%;border-radius:99px;background:linear-gradient(90deg,#0d9488,#2dd4bf,#6ee7d8);box-shadow:0 0 10px rgba(45,212,191,.45);transition:width .25s ease}
 .progress-wrap.indeterminate .progress-bar{width:25%;animation:dsh-indeterminate 1.2s ease-in-out infinite}
 .progress-wrap.done .progress-bar{width:100% !important;transition:width .3s ease}
@@ -84,7 +84,7 @@ export async function createSplash(): Promise<void> {
   if (splashWindow) return
   splashWindow = new BrowserWindow({
     width: 400,
-    height: 360,
+    height: 430,
     frame: false,
     resizable: false,
     minimizable: false,
