@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Exact release tag to publish (for example v0.2.0)'
+        description: 'Exact release tag to publish (for example v0.2.1)'
         type: string
         required: true
       candidate_run_id:
@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Validate exact main candidate and release tag
+      - name: Validate exact green main candidate before creating tag
         shell: bash
         run: |
           set -euo pipefail
@@ -72,11 +72,14 @@ jobs:
             exit 1
           }
 
-          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
-          test "$tag_sha" = "$GITHUB_SHA" || {
-            echo "tag SHA mismatch: tag=$tag_sha main=$GITHUB_SHA" >&2
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "release tag already exists; refusing to overwrite ${RELEASE_TAG}" >&2
             exit 1
-          }
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "release already exists; refusing to overwrite ${RELEASE_TAG}" >&2
+            exit 1
+          fi
 
       - name: Download exact candidate artifacts
         shell: bash
@@ -86,7 +89,7 @@ jobs:
           mkdir -p release-input release-assets
           gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-input
 
-      - name: Assemble Tauri v0.2.0 release assets
+      - name: Assemble Tauri release assets
         shell: bash
         run: |
           set -euo pipefail
@@ -142,14 +145,13 @@ jobs:
 
           sha256sum release-assets/* > release-assets/SHA256SUMS
           test -s release-assets/SHA256SUMS
-
-          printf 'Release assets:\n'
           ls -lh release-assets
 
-      - name: Publish HarnessDock Tauri release
+      - name: Publish HarnessDock Tauri release and create tag
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
           name: HarnessDock ${{ inputs.release_tag }}
           body_path: .github/release-notes/${{ inputs.release_tag }}.md
           draft: false
