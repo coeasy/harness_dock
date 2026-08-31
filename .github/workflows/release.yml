@@ -178,14 +178,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          existing_release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '.id' 2>/dev/null || true)"
-          existing_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha' 2>/dev/null || true)"
+          existing_release_id=""
+          if release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>/dev/null)"; then
+            existing_release_id="$(printf '%s' "$release_json" | jq -r '.id')"
+          fi
+
+          existing_tag_sha=""
+          if tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" 2>/dev/null)"; then
+            existing_tag_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha')"
+          fi
 
           if [ -n "$existing_tag_sha" ]; then
             echo "Replacing validated ${RELEASE_TAG}: ${existing_tag_sha} -> ${RELEASE_SHA}"
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" \
               -f sha="$RELEASE_SHA" -F force=true >/dev/null
           else
+            echo "Creating validated ${RELEASE_TAG} at ${RELEASE_SHA}"
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
               -f ref="refs/tags/${RELEASE_TAG}" -f sha="$RELEASE_SHA" >/dev/null
           fi
