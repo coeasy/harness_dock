@@ -2,6 +2,7 @@ mod gateway;
 mod gateway_host;
 mod harness_window;
 mod platform;
+mod plugin_quarantine;
 mod runtime;
 
 use std::sync::Mutex;
@@ -32,6 +33,7 @@ pub fn run() {
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,
+            runtime::runtime_clear_plugin_quarantine,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build HarnessDock Tauri application");
