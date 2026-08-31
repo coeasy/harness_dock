@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +38,15 @@ if (manifest.platform !== process.platform || manifest.arch !== process.arch) {
 }
 if (typeof manifest.dshVersion !== 'string' || manifest.dshVersion === '') {
   throw new Error('runtime manifest has no dshVersion')
+}
+
+// GitHub Actions artifact archives do not preserve POSIX executable bits.
+// The smoke gate runs in the same workspace that Tauri packages afterwards,
+// so restoring the bundled Node launcher here both validates the real runtime
+// and ensures the final Linux/macOS bundle receives an executable launcher.
+if (process.platform !== 'win32') {
+  const nodePath = path.join(runtimeDir, 'bin', 'node')
+  await chmod(nodePath, 0o755)
 }
 
 const home = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-home-'))

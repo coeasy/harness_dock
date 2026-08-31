@@ -1,0 +1,39 @@
+[[permission]]
+identifier = "platform-info"
+description = "Allows the bundled launcher to inspect its HarnessDock platform profile."
+commands.allow = ["platform_info"]
+
+[[permission]]
+identifier = "gateway-health"
+description = "Allows the bundled launcher to probe a user-supplied HarnessDock Gateway origin."
+commands.allow = ["gateway_health"]
+
+[[permission]]
+identifier = "gateway-pair"
+description = "Allows the bundled launcher to exchange an explicit one-time pairing code for a Gateway connection URL."
+commands.allow = ["pair_gateway"]
+
+[[permission]]
+identifier = "gateway-host"
+description = "Allows the local desktop control window to manage its owned Mobile Gateway sidecar."
+commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_create_pairing", "gateway_host_revoke", "gateway_host_revoke_all", "gateway_host_stop"]
+
+[[permission]]
+identifier = "harness-window"
+description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
+commands.allow = ["harness_open", "harness_close"]
+
+[[permission]]
+identifier = "runtime-status"
+description = "Allows the bundled desktop launcher to read local Runtime state."
+commands.allow = ["runtime_status"]
+
+[[permission]]
+identifier = "runtime-start"
+description = "Allows the bundled desktop launcher to start the packaged DeepSeek Harness Runtime."
+commands.allow = ["runtime_start"]
+
+[[permission]]
+identifier = "runtime-stop"
+description = "Allows the bundled desktop launcher to stop its owned DeepSeek Harness Runtime."
+commands.allow = ["runtime_stop"]

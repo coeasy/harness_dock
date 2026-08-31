@@ -11,8 +11,10 @@ const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60_000
 const MAX_BODY_BYTES = 8 * 1024
 
 export interface HarnessGatewayOptions {
-  /** Local dsh ready URL, normally http://127.0.0.1:<port>. */
+  /** Authenticated local dsh Web URL, normally http://127.0.0.1:<port>/. */
   upstreamUrl: string
+  /** Host-private dsh browser cookie. Never returned to or trusted from a mobile client. */
+  upstreamCookie?: string
   /** Defaults to loopback. Use a TLS reverse proxy for remote access. */
   bindHost?: string
   port?: number
@@ -128,13 +130,31 @@ function cookieValue(req: http.IncomingMessage, name: string): string | undefine
   return undefined
 }
 
+function cookiePairs(cookie: string | undefined): string[] {
+  if (!cookie) return []
+  return cookie.split(';').map((part) => part.trim()).filter((part) => part.includes('='))
+}
+
+function cookieName(pair: string): string {
+  const index = pair.indexOf('=')
+  return index < 0 ? pair.trim() : pair.slice(0, index).trim()
+}
+
 function stripSessionCookie(cookie: string | undefined): string | undefined {
-  if (!cookie) return undefined
-  const kept = cookie
-    .split(';')
-    .map((part) => part.trim())
-    .filter((part) => !part.startsWith(`${SESSION_COOKIE}=`))
+  const kept = cookiePairs(cookie).filter((part) => cookieName(part) !== SESSION_COOKIE)
   return kept.length ? kept.join('; ') : undefined
+}
+
+/**
+ * Merge client cookies with the host-owned dsh cookie. The authoritative dsh
+ * cookie always wins and the HarnessDock Gateway session is never forwarded.
+ */
+function upstreamCookieHeader(clientCookie: string | undefined, upstreamCookie: string | undefined): string | undefined {
+  const authoritative = cookiePairs(upstreamCookie)
+  const protectedNames = new Set(authoritative.map(cookieName))
+  const client = cookiePairs(stripSessionCookie(clientCookie)).filter((pair) => !protectedNames.has(cookieName(pair)))
+  const merged = [...client, ...authoritative]
+  return merged.length ? merged.join('; ') : undefined
 }
 
 function combineUpstreamPath(upstream: URL, requestUrl: string): string {
@@ -328,8 +348,8 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     delete headers['keep-alive']
     delete headers['transfer-encoding']
     delete headers.upgrade
-    const upstreamCookie = stripSessionCookie(req.headers.cookie)
-    if (upstreamCookie) headers.cookie = upstreamCookie
+    const cookie = upstreamCookieHeader(req.headers.cookie, options.upstreamCookie)
+    if (cookie) headers.cookie = cookie
     else delete headers.cookie
 
     const requestOptions: http.RequestOptions = {
@@ -383,18 +403,15 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     const onConnected = (upstreamSocket: net.Socket): void => {
       const headerLines: string[] = []
       for (const [name, value] of Object.entries(req.headers)) {
-        if (name.toLowerCase() === 'host' || value === undefined) continue
-        if (name.toLowerCase() === 'cookie') {
-          const cookie = stripSessionCookie(Array.isArray(value) ? value.join('; ') : value)
-          if (cookie) headerLines.push(`Cookie: ${cookie}`)
-          continue
-        }
+        if (name.toLowerCase() === 'host' || name.toLowerCase() === 'cookie' || value === undefined) continue
         if (Array.isArray(value)) {
           for (const item of value) headerLines.push(`${name}: ${item}`)
         } else {
           headerLines.push(`${name}: ${value}`)
         }
       }
+      const cookie = upstreamCookieHeader(req.headers.cookie, options.upstreamCookie)
+      if (cookie) headerLines.push(`Cookie: ${cookie}`)
       const requestHead = `${req.method || 'GET'} ${combineUpstreamPath(upstream, req.url || '/')} HTTP/${req.httpVersion}\r\nHost: ${upstream.host}\r\n${headerLines.join('\r\n')}\r\n\r\n`
       upstreamSocket.write(requestHead)
       if (head.length) upstreamSocket.write(head)

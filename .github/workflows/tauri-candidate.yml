@@ -1,0 +1,392 @@
+name: tauri-candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - refactor/tauri-v0.2.0
+    paths:
+      - 'apps/tauri/**'
+      - 'packages/bootstrap/**'
+      - 'packages/client-runtime/**'
+      - 'packages/plugin-embedded-client/**'
+      - 'packages/docs-sync/origin.json'
+      - 'scripts/check-versions.mjs'
+      - '.github/workflows/tauri-candidate.yml'
+
+concurrency:
+  group: tauri-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm check:versions
+      - run: pnpm check:release
+      - run: pnpm test
+      - name: Build embedded client
+        run: pnpm --filter @dsh/plugin-embedded-client build
+      - name: Bundle Gateway sidecar
+        run: pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
+      - name: Validate shared candidate resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s packages/plugin-embedded-client/lib/index.js
+          test -s /tmp/harnessdock-gateway-sidecar.mjs
+          root_version="$(node -p "require('./package.json').version")"
+          tauri_version="$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")"
+          test "$tauri_version" = "$root_version" || {
+            echo "Tauri version mismatch: root=$root_version tauri=$tauri_version" >&2
+            exit 1
+          }
+
+  pack-upstream:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve pinned upstream source
+        id: origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tag=$(node -p "require('./packages/docs-sync/origin.json').gitTag")" >> "$GITHUB_OUTPUT"
+          echo "commit=$(node -p "require('./packages/docs-sync/origin.json').gitCommit")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.origin.outputs.tag }}
+          path: upstream
+          fetch-depth: 1
+      - name: Verify immutable upstream commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C upstream rev-parse HEAD)
+          expected='${{ steps.origin.outputs.commit }}'
+          test "$actual" = "$expected" || {
+            echo "upstream source mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install upstream dependencies with pinned pnpm
+        working-directory: upstream
+        run: npx --yes pnpm@11.7.0 install --frozen-lockfile
+      - name: Build official upstream profile
+        working-directory: upstream
+        run: npx --yes pnpm@11.7.0 build:official
+      - name: Pack and verify official dsh runtime closure
+        working-directory: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
+          npx --yes pnpm@11.7.0 exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+          test -n "$(find dist/dsh dist/vendor -type f -name '*.tgz' -print -quit)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tauri-upstream-dsh-packed
+          path: |
+            upstream/dist/dsh/*.tgz
+            upstream/dist/vendor/*.tgz
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 0
+
+  prepare-runtime:
+    needs: [validate, pack-upstream]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            artifact: win-x64
+            platform: win32
+            arch: x64
+          - runner: ubuntu-latest
+            artifact: linux-x64
+            platform: linux
+            arch: x64
+          - runner: macos-15-intel
+            artifact: mac-x64
+            platform: darwin
+            arch: x64
+          - runner: macos-latest
+            artifact: mac-arm64
+            platform: darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/download-artifact@v8
+        with:
+          name: tauri-upstream-dsh-packed
+          path: upstream-packed
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Prepare bundled runtime from official source packs
+        run: pnpm --filter @dsh/client-runtime bundle-runtime
+        env:
+          DSH_PACKED_RUNTIME_DIR: upstream-packed
+          DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          DSH_RUNTIME_ARCH: ${{ matrix.arch }}
+          DSH_RUNTIME_DIR: runtime-prepared
+      - name: Verify prepared runtime manifest
+        shell: bash
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test -s runtime-prepared/manifest.json
+          node <<'NODE'
+          const fs = require('node:fs')
+          const manifest = JSON.parse(fs.readFileSync('runtime-prepared/manifest.json', 'utf8'))
+          if (manifest.platform !== process.env.EXPECTED_PLATFORM || manifest.arch !== process.env.EXPECTED_ARCH) {
+            throw new Error(`runtime manifest mismatch: ${manifest.platform}/${manifest.arch}`)
+          }
+          if (!manifest.dshVersion || manifest.runtimeSource !== 'official-source-pack') {
+            throw new Error('runtime manifest is missing pinned official-source metadata')
+          }
+          NODE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tauri-runtime-${{ matrix.artifact }}
+          path: runtime-prepared
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 0
+          include-hidden-files: true
+
+  desktop-candidate:
+    needs: [validate, prepare-runtime]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            artifact: win-x64
+            bundles: nsis
+          - runner: ubuntu-latest
+            artifact: linux-x64
+            bundles: deb,appimage
+          - runner: macos-15-intel
+            artifact: mac-x64
+            bundles: dmg
+          - runner: macos-latest
+            artifact: mac-arm64
+            bundles: dmg
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Build embedded client
+        run: pnpm --filter @dsh/plugin-embedded-client build
+      - name: Bundle Gateway sidecar into Tauri resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apps/tauri/src-tauri/resources
+          pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=../tauri/src-tauri/resources/gateway-sidecar.mjs
+          test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
+      - uses: actions/download-artifact@v8
+        with:
+          name: tauri-runtime-${{ matrix.artifact }}
+          path: apps/tauri/src-tauri/resources/dsh-runtime
+      - name: Verify full runtime before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s packages/plugin-embedded-client/lib/index.js
+          test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
+          pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Build Tauri desktop candidate
+        working-directory: apps/tauri
+        run: cargo tauri build --bundles ${{ matrix.bundles }}
+      - name: Validate desktop bundle exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d apps/tauri/src-tauri/target/release/bundle
+          test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -print -quit)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tauri-desktop-${{ matrix.artifact }}
+          path: apps/tauri/src-tauri/target/release/bundle/**
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 0
+
+  android-candidate:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux Tauri dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm --filter @dsh/plugin-embedded-client build
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Resolve Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$ndk" ]; then ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"; fi
+          test -d "$ndk"
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+      - name: Initialize Android native project
+        working-directory: apps/tauri
+        run: cargo tauri android init --ci --skip-targets-install
+      - name: Build Android candidate APK and AAB
+        working-directory: apps/tauri
+        run: cargo tauri android build --debug --apk --aab --target aarch64 --ci
+      - name: Validate Android outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.apk' -print -quit)"
+          test -n "$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.aab' -print -quit)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tauri-android-arm64-candidate
+          path: apps/tauri/src-tauri/gen/android/app/build/outputs/**
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 0
+
+  ios-candidate:
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm --filter @dsh/plugin-embedded-client build
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Initialize iOS native project
+        working-directory: apps/tauri
+        run: cargo tauri ios init --ci --skip-targets-install
+      - name: Build iOS simulator candidate
+        working-directory: apps/tauri
+        run: cargo tauri ios build --debug --target aarch64-sim --ci
+      - name: Validate iOS native output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find apps/tauri/src-tauri/gen/apple -type d -name '*.app' -print -quit)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tauri-ios-simulator-candidate
+          path: |
+            apps/tauri/src-tauri/gen/apple/build/**
+            apps/tauri/src-tauri/gen/apple/*.xcodeproj/**
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 0
+
+  candidate-gate:
+    needs: [validate, pack-upstream, prepare-runtime, desktop-candidate, android-candidate, ios-candidate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Tauri candidate stage
+        shell: bash
+        env:
+          VALIDATE: ${{ needs.validate.result }}
+          UPSTREAM: ${{ needs.pack-upstream.result }}
+          RUNTIME: ${{ needs.prepare-runtime.result }}
+          DESKTOP: ${{ needs.desktop-candidate.result }}
+          ANDROID: ${{ needs.android-candidate.result }}
+          IOS: ${{ needs.ios-candidate.result }}
+        run: |
+          set -euo pipefail
+          printf 'validate=%s upstream=%s runtime=%s desktop=%s android=%s ios=%s\n' "$VALIDATE" "$UPSTREAM" "$RUNTIME" "$DESKTOP" "$ANDROID" "$IOS"
+          test "$VALIDATE" = success
+          test "$UPSTREAM" = success
+          test "$RUNTIME" = success
+          test "$DESKTOP" = success
+          test "$ANDROID" = success
+          test "$IOS" = success
