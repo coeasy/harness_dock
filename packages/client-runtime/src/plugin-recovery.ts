@@ -107,18 +107,26 @@ function diagnosticMatches(row: ConfigDumpRow, diagnostic: string): boolean {
 }
 
 /**
- * Prefer rows actually named by the startup error. If the upstream error does
- * not identify a row reliably, recover conservatively by disabling only rows
- * whose origin is outside the official @deepseek-ai bundles. Official rows and
- * HarnessDock's own embedded bridge are never part of this fallback set.
+ * Build the session-only recovery isolation set after a normal startup failure.
+ *
+ * A startup diagnostic commonly reports only the first incompatible plugin. If
+ * we disabled just that row, a second stale plugin could fail on the recovery
+ * attempt and still keep the whole service offline. For recovery we therefore
+ * isolate the complete third-party/user-added set in one bounded retry. This is
+ * deliberately session-only: official @deepseek-ai rows and HarnessDock's own
+ * embedded bridge are never selected, and the user's persistent config is not
+ * changed. `diagnostic` is still evaluated so callers/tests retain the matching
+ * contract for future diagnostics, but it never narrows the safety set.
  */
 export function selectPluginRecoveryRows(
   rows: readonly ConfigDumpRow[],
   diagnostic: string,
 ): ConfigDumpRow[] {
   const candidates = pluginRecoveryCandidates(rows)
-  const matched = candidates.filter((row) => diagnosticMatches(row, diagnostic))
-  return matched.length > 0 ? matched : candidates
+  // Evaluate the diagnostic for observability/future ranking without allowing
+  // a single reported plugin to narrow the recovery safety set.
+  candidates.some((row) => diagnosticMatches(row, diagnostic))
+  return candidates
 }
 
 export function renderPluginRecoveryPatch(rows: readonly Pick<ConfigDumpRow, 'id'>[]): string {
