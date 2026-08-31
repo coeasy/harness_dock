@@ -10,7 +10,7 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 use url::Url;
 
-use crate::AppState;
+use crate::{plugin_quarantine, AppState};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,7 +20,10 @@ pub struct RuntimeStatus {
     pub dsh_version: Option<String>,
     pub pid: Option<u32>,
     pub recovery_mode: bool,
+    pub recovery_source: String,
     pub isolated_plugins: Vec<String>,
+    pub suspected_plugins: Vec<String>,
+    pub quarantine_expires_at: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,7 +60,10 @@ pub(crate) struct RuntimeProcess {
     work_dir: PathBuf,
     runtime_root: PathBuf,
     ready: ReadyInfo,
+    recovery_source: String,
     isolated_plugins: Vec<String>,
+    suspected_plugins: Vec<String>,
+    quarantine_expires_at: Option<u64>,
 }
 
 impl RuntimeProcess {
@@ -68,7 +74,10 @@ impl RuntimeProcess {
             dsh_version: Some(self.ready.dsh_version.clone()),
             pid: Some(self.ready.pid),
             recovery_mode: !self.isolated_plugins.is_empty(),
+            recovery_source: self.recovery_source.clone(),
             isolated_plugins: self.isolated_plugins.clone(),
+            suspected_plugins: self.suspected_plugins.clone(),
+            quarantine_expires_at: self.quarantine_expires_at,
         }
     }
 
@@ -96,7 +105,10 @@ fn stopped() -> RuntimeStatus {
         dsh_version: None,
         pid: None,
         recovery_mode: false,
+        recovery_source: "none".into(),
         isolated_plugins: Vec::new(),
+        suspected_plugins: Vec::new(),
+        quarantine_expires_at: None,
     }
 }
 
@@ -104,6 +116,13 @@ fn resource_path(app: &AppHandle, relative: &str) -> Result<PathBuf, String> {
     app.path()
         .resolve(relative, BaseDirectory::Resource)
         .map_err(|error| format!("无法解析应用资源 {relative}: {error}"))
+}
+
+fn quarantine_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join("plugin-quarantine.v1.json"))
+        .map_err(|error| format!("无法解析插件隔离目录: {error}"))
 }
 
 fn node_path(root: &Path) -> PathBuf {
@@ -197,26 +216,34 @@ fn diagnostic_matches(row: &ConfigDumpRow, diagnostic: &str) -> bool {
         .any(|value| haystack.contains(&value))
 }
 
-fn select_recovery_rows(rows: &[ConfigDumpRow], diagnostic: &str) -> Vec<ConfigDumpRow> {
+fn recovery_plan(rows: &[ConfigDumpRow], diagnostic: &str) -> (Vec<ConfigDumpRow>, Vec<String>, String) {
     let candidates = recovery_candidates(rows);
-    // Upstream startup diagnostics commonly mention only the first stale plugin.
-    // Narrowing the recovery patch to that one row can make the retry fail on a
-    // second incompatible plugin. Evaluate matches for diagnostics, but isolate
-    // the complete external set in this session-only recovery attempt. Official
-    // dsh rows and HarnessDock's embedded bridge never enter `candidates`.
-    let _diagnostic_identified_a_candidate = candidates.iter().any(|row| diagnostic_matches(row, diagnostic));
-    candidates
+    let suspected = candidates
+        .iter()
+        .filter(|row| diagnostic_matches(row, diagnostic))
+        .map(|row| row.id.clone())
+        .collect::<Vec<_>>();
+    let reason = if suspected.is_empty() { "ambiguous" } else { "diagnostic-match" }.to_string();
+    (candidates, suspected, reason)
 }
 
-fn recovery_patch(rows: &[ConfigDumpRow]) -> Result<String, String> {
+fn select_recovery_rows(rows: &[ConfigDumpRow], diagnostic: &str) -> Vec<ConfigDumpRow> {
+    recovery_plan(rows, diagnostic).0
+}
+
+fn recovery_patch_ids(ids: &[String]) -> Result<String, String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut output = String::new();
-    for row in rows {
-        if !seen.insert(row.id.clone()) { continue; }
-        let id = serde_json::to_string(&row.id).map_err(|error| error.to_string())?;
+    for value in ids {
+        if !seen.insert(value.clone()) { continue; }
+        let id = serde_json::to_string(value).map_err(|error| error.to_string())?;
         output.push_str(&format!("- id: {id}\n  disabled: true\n"));
     }
     Ok(output)
+}
+
+fn recovery_patch(rows: &[ConfigDumpRow]) -> Result<String, String> {
+    recovery_patch_ids(&rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>())
 }
 
 fn validated_ready(raw: &str, expected_version: &str) -> Result<ReadyInfo, String> {
@@ -368,7 +395,12 @@ fn dump_config(node: &Path, dsh: &Path, embedded_patch_file: &Path) -> Result<St
     String::from_utf8(output.stdout).map_err(|error| format!("dsh --dump-config 输出不是 UTF-8: {error}"))
 }
 
-fn start_blocking(runtime_root: PathBuf, plugin_path: PathBuf, origin_path: PathBuf) -> Result<RuntimeProcess, String> {
+fn start_blocking(
+    runtime_root: PathBuf,
+    plugin_path: PathBuf,
+    origin_path: PathBuf,
+    quarantine_state_path: PathBuf,
+) -> Result<RuntimeProcess, String> {
     let node = node_path(&runtime_root);
     let dsh = dsh_path(&runtime_root);
     if !node.is_file() || !dsh.is_file() {
@@ -383,6 +415,51 @@ fn start_blocking(runtime_root: PathBuf, plugin_path: PathBuf, origin_path: Path
     let patch_file = dir.join("embedded.patch.yml");
     let ready_file = dir.join("ready.json");
     fs::write(&patch_file, embedded_patch(&plugin_path)?).map_err(|error| format!("无法写入 embedded patch: {error}"))?;
+    let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+
+    if recovery_enabled {
+        if let Some(quarantine) = plugin_quarantine::read(&quarantine_state_path, &origin.dsh_version) {
+            let quarantine_file = dir.join("plugin-quarantine.patch.yml");
+            fs::write(&quarantine_file, recovery_patch_ids(&quarantine.isolated_plugins)?)
+                .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
+            let _ = fs::remove_file(&ready_file);
+            let (mut quarantine_child, quarantine_stdout, quarantine_stderr) = spawn_runtime(
+                &node,
+                &dsh,
+                &[patch_file.as_path(), quarantine_file.as_path()],
+                &ready_file,
+                &origin.dsh_version,
+                &dir,
+                "quarantine",
+            )?;
+            match wait_for_ready(
+                &mut quarantine_child,
+                &ready_file,
+                &origin.dsh_version,
+                &quarantine_stdout,
+                &quarantine_stderr,
+            ) {
+                Ok(ready) => {
+                    return Ok(RuntimeProcess {
+                        child: quarantine_child,
+                        work_dir: dir,
+                        runtime_root,
+                        ready,
+                        recovery_source: "quarantine".into(),
+                        isolated_plugins: quarantine.isolated_plugins,
+                        suspected_plugins: quarantine.suspected_plugins,
+                        quarantine_expires_at: Some(quarantine.expires_at),
+                    });
+                }
+                Err(_) => {
+                    let _ = quarantine_child.kill();
+                    let _ = quarantine_child.wait();
+                    let _ = plugin_quarantine::clear(&quarantine_state_path);
+                    let _ = fs::remove_file(&ready_file);
+                }
+            }
+        }
+    }
 
     let (mut child, stdout_path, stderr_path) = spawn_runtime(
         &node,
@@ -395,12 +472,21 @@ fn start_blocking(runtime_root: PathBuf, plugin_path: PathBuf, origin_path: Path
     )?;
     match wait_for_ready(&mut child, &ready_file, &origin.dsh_version, &stdout_path, &stderr_path) {
         Ok(ready) => {
-            return Ok(RuntimeProcess { child, work_dir: dir, runtime_root, ready, isolated_plugins: Vec::new() });
+            return Ok(RuntimeProcess {
+                child,
+                work_dir: dir,
+                runtime_root,
+                ready,
+                recovery_source: "none".into(),
+                isolated_plugins: Vec::new(),
+                suspected_plugins: Vec::new(),
+                quarantine_expires_at: None,
+            });
         }
         Err(first_failure) => {
             let _ = child.kill();
             let _ = child.wait();
-            if std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() == Some("0") {
+            if !recovery_enabled {
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 let _ = fs::remove_dir_all(&dir);
                 return Err(format!("{}\n{}", first_failure.message, summary));
@@ -415,7 +501,7 @@ fn start_blocking(runtime_root: PathBuf, plugin_path: PathBuf, origin_path: Path
                 }
             };
             let rows = parse_config_dump_rows(&config);
-            let selected = select_recovery_rows(&rows, &first_failure.diagnostic);
+            let (selected, suspected_plugins, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 let _ = fs::remove_dir_all(&dir);
@@ -442,13 +528,25 @@ fn start_blocking(runtime_root: PathBuf, plugin_path: PathBuf, origin_path: Path
                 &recovery_stdout,
                 &recovery_stderr,
             ) {
-                Ok(ready) => Ok(RuntimeProcess {
-                    child: recovery_child,
-                    work_dir: dir,
-                    runtime_root,
-                    ready,
-                    isolated_plugins,
-                }),
+                Ok(ready) => {
+                    let quarantine = plugin_quarantine::write(
+                        &quarantine_state_path,
+                        &origin.dsh_version,
+                        isolated_plugins.clone(),
+                        suspected_plugins.clone(),
+                        &reason,
+                    ).ok();
+                    Ok(RuntimeProcess {
+                        child: recovery_child,
+                        work_dir: dir,
+                        runtime_root,
+                        ready,
+                        recovery_source: "startup-failure".into(),
+                        isolated_plugins,
+                        suspected_plugins,
+                        quarantine_expires_at: quarantine.map(|value| value.expires_at),
+                    })
+                }
                 Err(recovery_failure) => {
                     let _ = recovery_child.kill();
                     let _ = recovery_child.wait();
@@ -484,7 +582,10 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     let runtime_root = resource_path(&app, "dsh-runtime")?;
     let plugin_path = resource_path(&app, "plugin-embedded-client/index.js")?;
     let origin_path = resource_path(&app, "origin.json")?;
-    let process = tauri::async_runtime::spawn_blocking(move || start_blocking(runtime_root, plugin_path, origin_path))
+    let quarantine_state_path = quarantine_path(&app)?;
+    let process = tauri::async_runtime::spawn_blocking(move || {
+        start_blocking(runtime_root, plugin_path, origin_path, quarantine_state_path)
+    })
         .await
         .map_err(|error| format!("Runtime 启动任务失败: {error}"))??;
     let status = process.status();
@@ -499,6 +600,11 @@ pub fn runtime_stop(state: State<'_, AppState>) -> Result<RuntimeStatus, String>
         process.stop();
     }
     Ok(stopped())
+}
+
+#[tauri::command]
+pub fn runtime_clear_plugin_quarantine(app: AppHandle) -> Result<(), String> {
+    plugin_quarantine::clear(&quarantine_path(&app)?)
 }
 
 pub(crate) fn stop_managed(runtime: &Mutex<Option<RuntimeProcess>>) {
@@ -532,17 +638,22 @@ mod tests {
     }
 
     #[test]
-    fn recovery_isolates_all_external_rows_when_only_one_failure_is_named() {
+    fn recovery_isolates_all_external_rows_and_attributes_the_first_failure() {
         let rows = parse_config_dump_rows(DUMP);
-        let selected = select_recovery_rows(&rows, "failed to load @legacy/old-market-plugin");
+        let (selected, suspected, reason) = recovery_plan(&rows, "failed to load @legacy/old-market-plugin");
         assert_eq!(selected.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
+        assert_eq!(suspected, vec!["old-market-plugin"]);
+        assert_eq!(reason, "diagnostic-match");
+        assert_eq!(select_recovery_rows(&rows, "failed to load @legacy/old-market-plugin").len(), 2);
     }
 
     #[test]
     fn ambiguous_failure_falls_back_to_external_rows_only() {
         let rows = parse_config_dump_rows(DUMP);
-        let selected = select_recovery_rows(&rows, "Cordis boot failed");
+        let (selected, suspected, reason) = recovery_plan(&rows, "Cordis boot failed");
         assert_eq!(selected.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
+        assert!(suspected.is_empty());
+        assert_eq!(reason, "ambiguous");
         assert!(recovery_patch(&selected).unwrap().contains("disabled: true"));
     }
 }
