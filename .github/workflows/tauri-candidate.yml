@@ -17,7 +17,7 @@ on:
       - 'scripts/check-versions.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
-      - '.github/release-notes/v0.2.0.md'
+      - '.github/release-notes/v0.2.1.md'
       - '.github/workflows/tauri-candidate.yml'
 
 concurrency:
@@ -203,7 +203,7 @@ jobs:
           - runner: windows-latest
             artifact: win-x64
             bundles: nsis
-          - runner: ubuntu-latest
+          - runner: ubuntu-22.04
             artifact: linux-x64
             bundles: deb,appimage
           - runner: macos-15-intel
@@ -256,8 +256,34 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
       - name: Build Tauri desktop candidate
+        if: runner.os != 'Linux'
         working-directory: apps/tauri
         run: cargo tauri build --verbose --bundles ${{ matrix.bundles }}
+      - name: Build Tauri Linux DEB candidate
+        if: runner.os == 'Linux'
+        working-directory: apps/tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../../.ci-logs
+          cargo tauri build --verbose --bundles deb 2>&1 | tee ../../.ci-logs/tauri-linux-deb.log
+      - name: Build Tauri Linux AppImage candidate
+        if: runner.os == 'Linux'
+        working-directory: apps/tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../../.ci-logs
+          cargo tauri build --verbose --bundles appimage 2>&1 | tee ../../.ci-logs/tauri-linux-appimage.log
+      - name: Upload Linux bundler diagnostics
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tauri-linux-bundler-logs
+          path: .ci-logs/*.log
+          retention-days: 7
+          if-no-files-found: warn
+          compression-level: 0
       - name: Validate desktop bundle exists
         shell: bash
         run: |
