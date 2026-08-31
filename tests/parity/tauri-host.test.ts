@@ -45,11 +45,12 @@ describe('Tauri v0.2 host contract', () => {
     }
   })
 
-  it('keeps the Tauri application and repository version aligned at v0.2.0', () => {
+  it('keeps repository, Tauri application and Rust crate versions aligned', () => {
     const root = readJson('package.json')
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
-    expect(root.version).toBe('0.2.0')
-    expect(tauri.version).toBe('0.2.0')
+    const cargo = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/Cargo.toml'), 'utf8')
+    expect(tauri.version).toBe(root.version)
+    expect(cargo).toContain(`version = "${root.version}"`)
     expect(tauri.identifier).toBe('com.harnessdock.client')
   })
 
