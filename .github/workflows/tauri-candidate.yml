@@ -13,6 +13,7 @@ on:
       - 'packages/docs-sync/origin.json'
       - 'tests/parity/**'
       - 'scripts/check-versions.mjs'
+      - 'scripts/build-macos-dmg.sh'
       - 'scripts/generate-nsis-branding.ps1'
       - 'scripts/verify-windows-installer-icon.mjs'
       - 'package.json'
@@ -55,6 +56,7 @@ jobs:
           test -s packages/plugin-embedded-client/lib/index.js
           test -s /tmp/harnessdock-gateway-sidecar.mjs
           test -s apps/tauri/src-tauri/icons/app-icon.png
+          test -s scripts/build-macos-dmg.sh
           test -s scripts/verify-windows-installer-icon.mjs
           root_version="$(node -p "require('./package.json').version")"
           tauri_version="$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")"
@@ -214,10 +216,10 @@ jobs:
             bundles: deb,appimage
           - runner: macos-15-intel
             artifact: mac-x64
-            bundles: dmg
+            bundles: app
           - runner: macos-latest
             artifact: mac-arm64
-            bundles: dmg
+            bundles: app
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -295,6 +297,11 @@ jobs:
         if: runner.os != 'Linux'
         working-directory: apps/tauri
         run: cargo tauri build --verbose --bundles ${{ matrix.bundles }}
+      - name: Assemble macOS DMG without mount cycle
+        if: runner.os == 'macOS'
+        working-directory: apps/tauri
+        shell: bash
+        run: bash ../../scripts/build-macos-dmg.sh .
       - name: Build Tauri Linux DEB candidate
         if: runner.os == 'Linux'
         working-directory: apps/tauri
