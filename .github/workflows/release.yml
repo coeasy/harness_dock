@@ -1,6 +1,11 @@
 name: release
 
 on:
+  workflow_run:
+    workflows:
+      - tauri-candidate
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       release_tag:
@@ -13,7 +18,7 @@ on:
         required: true
 
 concurrency:
-  group: release-${{ inputs.release_tag }}
+  group: release-${{ github.event.workflow_run.id || inputs.release_tag || github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -22,31 +27,43 @@ permissions:
 
 jobs:
   publish:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.candidate_run_id }}
+      RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
 
       - name: Validate exact green main candidate before creating tag
+        id: release
         shell: bash
         run: |
           set -euo pipefail
 
-          version="$(node -p "require('./package.json').version")"
-          expected_tag="v${version}"
-          test "$RELEASE_TAG" = "$expected_tag" || {
-            echo "release tag mismatch: expected $expected_tag, got $RELEASE_TAG" >&2
+          candidate_sha="$(git rev-parse HEAD)"
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$candidate_sha" = "$main_sha" || {
+            echo "candidate is stale: candidate=$candidate_sha main=$main_sha" >&2
             exit 1
           }
-          test -s ".github/release-notes/${RELEASE_TAG}.md"
+
+          version="$(node -p "require('./package.json').version")"
+          expected_tag="v${version}"
+          release_tag="${RELEASE_TAG_INPUT:-$expected_tag}"
+          test "$release_tag" = "$expected_tag" || {
+            echo "release tag mismatch: expected $expected_tag, got $release_tag" >&2
+            exit 1
+          }
+          test -s ".github/release-notes/${release_tag}.md"
 
           run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
           run_sha="$(printf '%s' "$run_json" | jq -r '.head_sha')"
@@ -55,8 +72,8 @@ jobs:
           run_conclusion="$(printf '%s' "$run_json" | jq -r '.conclusion')"
           run_path="$(printf '%s' "$run_json" | jq -r '.path')"
 
-          test "$run_sha" = "$GITHUB_SHA" || {
-            echo "candidate SHA mismatch: release=$GITHUB_SHA candidate=$run_sha" >&2
+          test "$run_sha" = "$candidate_sha" || {
+            echo "candidate SHA mismatch: checkout=$candidate_sha candidate=$run_sha" >&2
             exit 1
           }
           test "$run_branch" = main || {
@@ -72,14 +89,17 @@ jobs:
             exit 1
           }
 
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "release tag already exists; refusing to overwrite ${RELEASE_TAG}" >&2
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" >/dev/null 2>&1; then
+            echo "release tag already exists; refusing to overwrite ${release_tag}" >&2
             exit 1
           fi
-          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "release already exists; refusing to overwrite ${RELEASE_TAG}" >&2
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" >/dev/null 2>&1; then
+            echo "release already exists; refusing to overwrite ${release_tag}" >&2
             exit 1
           fi
+
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
 
       - name: Download exact candidate artifacts
         shell: bash
@@ -150,10 +170,10 @@ jobs:
       - name: Publish HarnessDock Tauri release and create tag
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ inputs.release_tag }}
-          target_commitish: ${{ github.sha }}
-          name: HarnessDock ${{ inputs.release_tag }}
-          body_path: .github/release-notes/${{ inputs.release_tag }}.md
+          tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ steps.release.outputs.sha }}
+          name: HarnessDock ${{ steps.release.outputs.tag }}
+          body_path: .github/release-notes/${{ steps.release.outputs.tag }}.md
           draft: false
           prerelease: false
           make_latest: true
