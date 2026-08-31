@@ -149,8 +149,11 @@ fn work_dir() -> Result<PathBuf, String> {
 }
 
 fn embedded_patch(plugin: &Path, compatibility: &Path) -> Result<String, String> {
-    let plugin_url = Url::from_file_path(plugin).map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
-    let compatibility_url = Url::from_file_path(compatibility)
+    let plugin_path = platform::node_cli_path(plugin);
+    let compatibility_path = platform::node_cli_path(compatibility);
+    let plugin_url = Url::from_file_path(plugin_path)
+        .map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
+    let compatibility_url = Url::from_file_path(compatibility_path)
         .map_err(|_| "无法把客户端兼容层路径转换为 file URL。".to_string())?;
     let plugin_url = plugin_url.as_str().replace('\'', "''");
     let compatibility_url = compatibility_url.as_str().replace('\'', "''");
@@ -331,20 +334,20 @@ fn spawn_runtime(
     let stdout = fs::File::create(&stdout_path).map_err(|error| format!("无法创建 Runtime stdout 日志: {error}"))?;
     let stderr = fs::File::create(&stderr_path).map_err(|error| format!("无法创建 Runtime stderr 日志: {error}"))?;
 
-    let mut command = Command::new(node);
-    command.arg(dsh).args(["--profile", "web"]);
+    let mut command = Command::new(platform::node_cli_path(node));
+    command.arg(platform::node_cli_path(dsh)).args(["--profile", "web"]);
     for patch in patches {
-        command.arg("--patch").arg(patch);
+        command.arg("--patch").arg(platform::node_cli_path(patch));
     }
     command
         .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
-        .env("DSH_EMBEDDED_READY_FILE", ready_file)
+        .env("DSH_EMBEDDED_READY_FILE", platform::node_cli_path(ready_file))
         .env("DSH_EMBEDDED_VERSION", version)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
     if let Some(home) = dsh_home {
-        command.env("DSH_HOME", home);
+        command.env("DSH_HOME", platform::node_cli_path(home));
     }
     platform::configure_child_command(&mut command);
     let child = command
@@ -473,14 +476,14 @@ fn dump_config(
     embedded_patch_file: &Path,
     default_only: bool,
 ) -> Result<String, String> {
-    let mut command = Command::new(node);
-    command.arg(dsh).args(["--profile", "web"]);
+    let mut command = Command::new(platform::node_cli_path(node));
+    command.arg(platform::node_cli_path(dsh)).args(["--profile", "web"]);
     if default_only {
         command.arg("--dump-default-config");
     } else {
         command
             .args(["--patch"])
-            .arg(embedded_patch_file)
+            .arg(platform::node_cli_path(embedded_patch_file))
             .arg("--dump-config");
     }
     command.stdin(Stdio::null());
@@ -565,6 +568,13 @@ fn start_blocking(
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
 ) -> Result<RuntimeProcess, String> {
+    // Tauri can return verbatim Windows paths (\\?\\C:\\...). Node's
+    // entry-point resolver on affected releases cannot execute those paths.
+    let runtime_root = platform::node_cli_path(&runtime_root);
+    let plugin_path = platform::node_cli_path(&plugin_path);
+    let compatibility_path = platform::node_cli_path(&compatibility_path);
+    let origin_path = platform::node_cli_path(&origin_path);
+    let quarantine_state_path = platform::node_cli_path(&quarantine_state_path);
     let bundled_node = node_path(&runtime_root);
     let (node, node_source) = platform::resolve_node(&bundled_node);
     let dsh = dsh_path(&runtime_root);

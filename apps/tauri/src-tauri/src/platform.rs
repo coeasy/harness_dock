@@ -41,7 +41,7 @@ pub(crate) fn is_supported_node_version(raw: &str) -> bool {
 }
 
 fn command_output(command: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let mut child = Command::new(command);
+    let mut child = Command::new(node_cli_path(command));
     child
         .args(args)
         .stdin(Stdio::null())
@@ -54,7 +54,7 @@ fn command_output(command: &Path, args: &[&str]) -> Option<Vec<u8>> {
 fn system_node_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(value) = env::var_os("HARNESSDOCK_NODE_BIN").filter(|value| !value.is_empty()) {
-        candidates.push(PathBuf::from(value));
+        candidates.push(node_cli_path(&PathBuf::from(value)));
     }
 
     let locator = if cfg!(windows) { "where.exe" } else { "which" };
@@ -64,13 +64,39 @@ fn system_node_candidates() -> Vec<PathBuf> {
             .map(str::trim)
             .filter(|line| !line.is_empty())
         {
-            let candidate = PathBuf::from(line);
+            let candidate = node_cli_path(&PathBuf::from(line));
             if !candidates.iter().any(|existing| existing == &candidate) {
                 candidates.push(candidate);
             }
         }
     }
     candidates
+}
+
+
+/// Remove the Windows verbatim path prefix before handing a path to Node's
+/// CLI/module loader. Node 24 currently mishandles \\?\\ paths as the main
+/// script and reports EISDIR for a drive root such as C:\\.
+#[cfg(any(windows, test))]
+fn strip_windows_verbatim_prefix(raw: &str) -> String {
+    if let Some(rest) = raw.strip_prefix("\\\\?\\UNC\\") {
+        return format!("\\\\{rest}");
+    }
+    raw.strip_prefix("\\\\?\\").unwrap_or(raw).to_string()
+}
+
+/// Tauri may return extended Windows paths. Keep filesystem access unchanged,
+/// but pass ordinary Win32 paths to Node because Node's entry-point resolver
+/// does not accept the verbatim \\?\\ prefix on affected releases.
+pub(crate) fn node_cli_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        return PathBuf::from(strip_windows_verbatim_prefix(&path.to_string_lossy()));
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
 }
 
 /// Return a usable system Node path, if one is already installed. This is
@@ -116,6 +142,22 @@ pub fn platform_info() -> PlatformInfo {
 #[cfg(test)]
 mod tests {
     use super::is_supported_node_version;
+
+    #[test]
+    fn strips_node_incompatible_windows_verbatim_prefixes() {
+        assert_eq!(
+            strip_windows_verbatim_prefix(r"\\?\C:\Program Files\HarnessDock\bin.js"),
+            r"C:\Program Files\HarnessDock\bin.js"
+        );
+        assert_eq!(
+            strip_windows_verbatim_prefix(r"\\?\UNC\server\share\bin.js"),
+            r"\\server\share\bin.js"
+        );
+        assert_eq!(
+            strip_windows_verbatim_prefix(r"C:\HarnessDock\bin.js"),
+            r"C:\HarnessDock\bin.js"
+        );
+    }
 
     #[test]
     fn accepts_the_pinned_dsh_node_engine_range() {
