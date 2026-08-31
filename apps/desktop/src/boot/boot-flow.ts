@@ -53,6 +53,7 @@ export async function bootFlow(): Promise<void> {
   let managedSelection: { version: string; directory: string } | null = null
   let userDataDir: string | undefined
   let runtimeConnected = false
+  let runtimeStartAttempted = false
 
   try {
     const resolvedUserDataDir = app.getPath('userData')
@@ -89,9 +90,6 @@ export async function bootFlow(): Promise<void> {
       },
       onProgress: (event) => {
         if (event.stage === 'fetch') {
-          // The bar is the exact percentage shown in the status text. Metadata
-          // resolution / runtime startup use indeterminate mode instead of a
-          // synthetic boot-wide percentage that can disagree with the text.
           showSplashProgress(event.percent)
           const pct = `${event.percent ?? 0}%`
           const bytes = event.bytes ? formatMb(event.bytes) : '—'
@@ -129,16 +127,20 @@ export async function bootFlow(): Promise<void> {
       },
     })
 
+    runtimeStartAttempted = true
     const session = await localProvider.connect()
     runtimeConnected = true
     const result = localProvider.bootstrapResult
     if (!result) throw new Error('LocalRuntimeProvider connected without a bootstrap result.')
 
+    appState.runtimeProvider = localProvider
     appState.runtime = result.runtime
     appState.dshPid = result.ready.pid
     appState.dshVersion = result.ready.dshVersion
+    appState.runtimeAppUrl = session.appUrl
     appState.runtimeEndpoint = new URL(session.appUrl).origin
-    appState.runtimeState = 'ready'
+    const pluginRecovery = result.runtime.pluginRecoveryState
+    appState.runtimeState = pluginRecovery.active ? 'degraded' : 'ready'
     appState.mode = result.mode
     appState.bundledAvailable = result.bundledAvailable
     await runtimeLease.updateRuntime({
@@ -151,6 +153,19 @@ export async function bootFlow(): Promise<void> {
     startRuntimeLeaseHeartbeat()
     startRuntimeSupervisor()
     await bootLog(`dsh web ready at ${redactWebAuthTokens(session.appUrl)} (pid ${result.ready.pid})`)
+    if (pluginRecovery.active) {
+      await bootLog(
+        `plugin fault containment active: source=${pluginRecovery.source} isolated=${pluginRecovery.isolatedPlugins.join(', ') || 'none'} suspected=${pluginRecovery.suspectedPlugins.join(', ') || 'unknown'}`,
+      )
+      try {
+        new Notification({
+          title: t('common.appTitle'),
+          body: `HarnessDock 已以兼容模式启动；本次隔离 ${pluginRecovery.isolatedPlugins.length} 个第三方插件。`,
+        }).show()
+      } catch {
+        // notifications unavailable
+      }
+    }
     showSplashProgress(null)
     await startRemoteGatewayIfEnabled(session.appUrl)
     updateSplash(t('splash.loadingInterface'))
@@ -195,10 +210,12 @@ export async function bootFlow(): Promise<void> {
     await appState.gateway?.stop().catch(() => undefined)
     appState.gateway = undefined
     await localProvider?.disconnect().catch(() => undefined)
+    appState.runtimeProvider = undefined
     appState.runtime = undefined
     appState.dshPid = undefined
     appState.dshVersion = undefined
     appState.runtimeEndpoint = undefined
+    appState.runtimeAppUrl = undefined
     appState.runtimeState = 'stopped'
     appState.mode = undefined
     appState.bundledAvailable = undefined
@@ -214,6 +231,50 @@ export async function bootFlow(): Promise<void> {
         app.exit(0)
         return
       }
+    }
+
+    // A dsh/plugin failure is not an Electron host failure. Keep the control
+    // plane alive so the user can inspect diagnostics, clear/update plugins and
+    // retry the runtime without entering an app-level crash/relaunch loop.
+    if (runtimeStartAttempted && !runtimeConnected && userDataDir) {
+      const message = error instanceof Error ? error.message : String(error)
+      appState.runtimeState = 'degraded'
+      await bootLog(`boot: runtime unavailable; continuing with host recovery shell: ${message}`)
+      updateSplash('Runtime 启动失败，HarnessDock 已进入安全诊断模式。')
+      showSplashProgress(null)
+
+      const runtimeService = createElectronRuntimeService()
+      try {
+        appState.updates = createElectronRuntimeUpdateService(runtimeService, userDataDir)
+      } catch (updateError) {
+        await bootLog(`degraded shell update service failed: ${updateError instanceof Error ? updateError.message : String(updateError)}`)
+      }
+      try {
+        appState.tray = createTray({
+          onToggle: () => openDiagnosticsWindow('info'),
+          onOpenLog: () => void openLogDir(),
+          onMobileDevices: openMobileManagerWindow,
+          onDiagnostics: () => openDiagnosticsWindow('info'),
+          onVersions: () => openDiagnosticsWindow('versions'),
+          onQuit: () => app.quit(),
+          onCheckUpdate: () => autoUpdate?.checkNow(),
+          onRestartRuntime: () => {
+            void runtimeService.connect().then((session) => createWindow(session.appUrl)).catch((restartError) => {
+              void bootLog(`degraded runtime retry failed: ${String(restartError)}`)
+              openDiagnosticsWindow('info')
+            })
+          },
+          onStopRuntime: () => {
+            void runtimeService.stop().catch((stopError) => void bootLog(`runtime stop failed: ${String(stopError)}`))
+          },
+          getRuntimeStatus: () => ({ state: appState.runtimeState, version: appState.dshVersion }),
+        })
+      } catch (trayError) {
+        await bootLog(`degraded shell tray creation failed: ${trayError instanceof Error ? trayError.message : String(trayError)}`)
+      }
+      showSplashDone()
+      openDiagnosticsWindow('info')
+      return
     }
     throw error
   }
