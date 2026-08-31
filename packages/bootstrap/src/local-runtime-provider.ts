@@ -30,6 +30,7 @@ export class LocalRuntimeProvider implements RuntimeProvider {
       }
       this.webSession = authenticated
     }
+    const recovery = this.result.runtime.pluginRecoveryState
     return {
       provider: 'local',
       appUrl: this.webSession.url,
@@ -44,6 +45,10 @@ export class LocalRuntimeProvider implements RuntimeProvider {
         mode: this.result.mode,
         bundledAvailable: this.result.bundledAvailable,
         rolledBack: this.result.rolledBack !== null,
+        pluginRecovery: recovery.active,
+        pluginRecoverySource: recovery.source,
+        isolatedPluginCount: recovery.isolatedPlugins.length,
+        suspectedPluginCount: recovery.suspectedPlugins.length,
       },
     }
   }
