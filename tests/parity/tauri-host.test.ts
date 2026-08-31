@@ -54,14 +54,19 @@ describe('Tauri v0.2 host contract', () => {
     expect(tauri.identifier).toBe('com.harnessdock.client')
   })
 
-  it('publishes only after an exact successful main Tauri candidate', () => {
+  it('publishes or replaces v0.2 only after exact successful main candidate and same-SHA CI', () => {
     const workflow = readFileSync(path.join(repoRoot, '.github/workflows/release.yml'), 'utf8')
     expect(workflow).toContain('workflow_run:')
     expect(workflow).toContain('- tauri-candidate')
     expect(workflow).toContain('candidate is stale:')
     expect(workflow).toContain('candidate is not green:')
-    expect(workflow).toContain('refusing to overwrite')
-    expect(workflow).toContain('target_commitish: ${{ steps.release.outputs.sha }}')
+    expect(workflow).toContain('no successful same-SHA main CI found')
+    expect(workflow).toContain('gh release upload "$RELEASE_TAG" release-assets/* --clobber')
+    expect(workflow).toContain('git/refs/tags/${RELEASE_TAG}')
+    expect(workflow).toContain('-f target_commitish="$RELEASE_SHA"')
+    expect(workflow).toContain('test "$tag_sha" = "$RELEASE_SHA"')
+    expect(workflow).toContain('expected 13 non-empty assets')
+    expect(workflow).not.toContain('--method DELETE')
     expect(workflow).not.toMatch(/\npush:\s*\n\s*tags:/)
   })
 
