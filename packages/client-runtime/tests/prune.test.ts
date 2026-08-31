@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   planDevFilesToPrune,
+  planKoffiVariantPrune,
   planPrebuildPrune,
   planRuntimeDocFilesToPrune,
   planRuntimePrune,
@@ -55,20 +56,19 @@ describe('planRuntimePrune', () => {
     expect(toDelete).toContain('@img/sharp-libvips-darwin-arm64')
     expect(toDelete).toContain('@img/sharp-libvips-linuxmusl-x64')
     expect(toDelete).toContain('@img/sharp-win32-ia32')
-    // everything except the win32-x64 pair and wasm32 is pruned
     expect(toDelete.length).toBe(allVariants.length - 3)
   })
 
-  it('keeps linux and linuxmusl variants on linux hosts', () => {
+  it('keeps only glibc linux variants on linux hosts', () => {
     const toDelete = planRuntimePrune(allVariants, 'linux', 'x64')
     expect(toDelete).not.toContain('@img/sharp-linux-x64')
-    expect(toDelete).not.toContain('@img/sharp-linuxmusl-x64')
     expect(toDelete).not.toContain('@img/sharp-libvips-linux-x64')
-    expect(toDelete).not.toContain('@img/sharp-libvips-linuxmusl-x64')
     expect(toDelete).not.toContain('@img/sharp-wasm32')
+    expect(toDelete).toContain('@img/sharp-linuxmusl-x64')
+    expect(toDelete).toContain('@img/sharp-libvips-linuxmusl-x64')
     expect(toDelete).toContain('@img/sharp-win32-x64')
     expect(toDelete).toContain('@img/sharp-darwin-arm64')
-    expect(toDelete.length).toBe(allVariants.length - 5)
+    expect(toDelete.length).toBe(allVariants.length - 3)
   })
 
   it('keeps the arm64 variant on darwin/arm64', () => {
@@ -111,8 +111,9 @@ describe('planPrebuildPrune', () => {
     ])
   })
 
-  it('keeps linux and linuxmusl on linux hosts', () => {
+  it('keeps only glibc linux prebuilds on linux hosts', () => {
     expect(planPrebuildPrune(['linux-x64', 'linuxmusl-x64', 'linux-arm64'], 'linux', 'x64')).toEqual([
+      'linuxmusl-x64',
       'linux-arm64',
     ])
   })
@@ -124,6 +125,16 @@ describe('planPrebuildPrune', () => {
       'darwin-x64',
       'linux-x64',
       'linux-arm64',
+    ])
+  })
+})
+
+describe('planKoffiVariantPrune', () => {
+  it('keeps glibc x64 and removes musl/cross-arch Koffi variants', () => {
+    expect(planKoffiVariantPrune(['linux_x64', 'musl_x64', 'linux_arm64', 'musl_arm64'], 'x64')).toEqual([
+      'musl_x64',
+      'linux_arm64',
+      'musl_arm64',
     ])
   })
 })
@@ -162,7 +173,7 @@ describe('planSdkDirsToPrune', () => {
       '@types/node/tests',
       'some-pkg/src/test',
       '@scope/pkg/src/__tests__',
-      'some-pkg/dist/test', // deeper than package top level
+      'some-pkg/dist/test',
     ]
     expect(planSdkDirsToPrune(names)).toEqual([])
   })
@@ -220,7 +231,6 @@ describe('pruneBundledRuntime', () => {
     temps.push(root)
     const nm = path.join(root, 'node_modules')
 
-    // cross-platform sharp variant (host pair + wasm32 kept by planRuntimePrune)
     await mkdir(path.join(nm, '@img', 'sharp-darwin-x64', 'lib'), { recursive: true })
     await writeFile(path.join(nm, '@img', 'sharp-darwin-x64', 'lib', 'x.node'), 'x'.repeat(100))
     await mkdir(path.join(nm, '@img', 'sharp-win32-x64', 'lib'), { recursive: true })
@@ -228,23 +238,19 @@ describe('pruneBundledRuntime', () => {
     await mkdir(path.join(nm, '@img', 'sharp-wasm32', 'lib'), { recursive: true })
     await writeFile(path.join(nm, '@img', 'sharp-wasm32', 'lib', 'z.node.wasm'), 'z'.repeat(100))
 
-    // node-pty prebuilds: host kept, arm64 + darwin pruned
     for (const variant of ['win32-x64', 'win32-arm64', 'darwin-x64']) {
       await mkdir(path.join(nm, 'node-pty', 'prebuilds', variant), { recursive: true })
       await writeFile(path.join(nm, 'node-pty', 'prebuilds', variant, 'pty.node'), 'p'.repeat(50))
     }
 
-    // dev files to prune
     await mkdir(path.join(nm, '@google', 'genai', 'dist'), { recursive: true })
     await writeFile(path.join(nm, '@google', 'genai', 'dist', 'index.mjs.map'), 'm'.repeat(30))
     await mkdir(path.join(nm, '@anthropic-ai', 'sdk', 'src'), { recursive: true })
     await writeFile(path.join(nm, '@anthropic-ai', 'sdk', 'src', 'types.d.ts'), 't'.repeat(20))
-    // runtime files that must survive
     await writeFile(path.join(nm, '@anthropic-ai', 'sdk', 'src', 'client.ts'), 'c'.repeat(10))
     await mkdir(path.join(nm, 'some-pkg'), { recursive: true })
     await writeFile(path.join(nm, 'some-pkg', 'index.js'), 'j'.repeat(5))
 
-    // SDK dev dir + docs: tests/ and README.md pruned, LICENSE.md kept
     await mkdir(path.join(nm, 'some-pkg', 'tests'), { recursive: true })
     await writeFile(path.join(nm, 'some-pkg', 'tests', 'x.test.js'), 't'.repeat(7))
     await writeFile(path.join(nm, 'some-pkg', 'README.md'), 'r'.repeat(9))
@@ -253,8 +259,6 @@ describe('pruneBundledRuntime', () => {
 
     const { removedBytes } = await pruneBundledRuntime(root, 'win32', 'x64')
 
-    // removed: darwin sharp (100) + arm64/darwin prebuilds (100) + map (30) + d.ts (20)
-    //          + tests/ dir (7) + README.md (9) + types.d.mts (13) = 279
     expect(removedBytes).toBe(279)
     expect(await pathExists(path.join(nm, '@img', 'sharp-darwin-x64'))).toBe(false)
     expect(await pathExists(path.join(nm, '@img', 'sharp-win32-x64'))).toBe(true)
@@ -269,6 +273,28 @@ describe('pruneBundledRuntime', () => {
     expect(await pathExists(path.join(nm, 'some-pkg', 'README.md'))).toBe(false)
     expect(await pathExists(path.join(nm, 'some-pkg', 'types.d.mts'))).toBe(false)
     expect(await pathExists(path.join(nm, 'some-pkg', 'LICENSE.md'))).toBe(true)
+  })
+
+  it('removes musl native variants from a Linux glibc runtime', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-prune-linux-'))
+    temps.push(root)
+    const nm = path.join(root, 'node_modules')
+
+    await mkdir(path.join(nm, '@img', 'sharp-linux-x64', 'lib'), { recursive: true })
+    await writeFile(path.join(nm, '@img', 'sharp-linux-x64', 'lib', 'sharp.node'), 'g'.repeat(10))
+    await mkdir(path.join(nm, '@img', 'sharp-linuxmusl-x64', 'lib'), { recursive: true })
+    await writeFile(path.join(nm, '@img', 'sharp-linuxmusl-x64', 'lib', 'sharp.node'), 'm'.repeat(11))
+    await mkdir(path.join(nm, '@koromix', 'koffi-linux-x64', 'linux_x64'), { recursive: true })
+    await writeFile(path.join(nm, '@koromix', 'koffi-linux-x64', 'linux_x64', 'koffi.node'), 'k'.repeat(12))
+    await mkdir(path.join(nm, '@koromix', 'koffi-linux-x64', 'musl_x64'), { recursive: true })
+    await writeFile(path.join(nm, '@koromix', 'koffi-linux-x64', 'musl_x64', 'koffi.node'), 'u'.repeat(13))
+
+    await pruneBundledRuntime(root, 'linux', 'x64')
+
+    expect(await pathExists(path.join(nm, '@img', 'sharp-linux-x64'))).toBe(true)
+    expect(await pathExists(path.join(nm, '@img', 'sharp-linuxmusl-x64'))).toBe(false)
+    expect(await pathExists(path.join(nm, '@koromix', 'koffi-linux-x64', 'linux_x64'))).toBe(true)
+    expect(await pathExists(path.join(nm, '@koromix', 'koffi-linux-x64', 'musl_x64'))).toBe(false)
   })
 })
 
