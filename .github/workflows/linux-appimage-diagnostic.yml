@@ -1,0 +1,83 @@
+name: linux-appimage-diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/linux-appimage-diagnostic.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  appimage-diagnostic:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+      SOURCE_CANDIDATE_RUN: '33351120052'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux Tauri dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Build embedded client
+        run: pnpm --filter @dsh/plugin-embedded-client build
+      - name: Bundle Gateway sidecar into Tauri resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apps/tauri/src-tauri/resources
+          pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=../tauri/src-tauri/resources/gateway-sidecar.mjs
+      - name: Reuse verified Linux runtime artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p apps/tauri/src-tauri/resources/dsh-runtime
+          gh run download "$SOURCE_CANDIDATE_RUN" --repo "$GITHUB_REPOSITORY" --name tauri-runtime-linux-x64 --dir apps/tauri/src-tauri/resources/dsh-runtime
+          test -s apps/tauri/src-tauri/resources/dsh-runtime/manifest.json
+      - name: Verify full runtime before packaging
+        shell: bash
+        run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Build AppImage and surface exact failure
+        working-directory: apps/tauri
+        shell: bash
+        run: |
+          LOG="$GITHUB_WORKSPACE/tauri-linux-appimage.log"
+          set +e
+          cargo tauri build --verbose --bundles appimage >"$LOG" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo '===== TAURI APPIMAGE FAILURE TAIL ====='
+            tail -n 350 "$LOG" || true
+            echo '===== ERROR-LIKE LINES ====='
+            grep -E -i 'error|failed|AppImage|linuxdeploy|appimagetool|strip|patchelf|FUSE|GLIBC' "$LOG" | tail -n 120 || true
+          fi
+          exit "$status"
+      - name: Upload AppImage diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage-diagnostic-log
+          path: tauri-linux-appimage.log
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
