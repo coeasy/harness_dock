@@ -51,10 +51,15 @@ jobs:
 
           candidate_sha="$(git rev-parse HEAD)"
           main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
-          test "$candidate_sha" = "$main_sha" || {
+          if [ "$candidate_sha" != "$main_sha" ]; then
+            if [ "$GITHUB_EVENT_NAME" = 'workflow_run' ]; then
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping stale automatic candidate: candidate=${candidate_sha} main=${main_sha}"
+              exit 0
+            fi
             echo "candidate is stale: candidate=$candidate_sha main=$main_sha" >&2
             exit 1
-          }
+          fi
 
           version="$(node -p "require('./package.json').version")"
           expected_tag="v${version}"
@@ -99,11 +104,13 @@ jobs:
             exit 1
           }
 
+          echo "publish=true" >> "$GITHUB_OUTPUT"
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
           echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
 
       - name: Download exact candidate artifacts
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -112,6 +119,7 @@ jobs:
           gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-input
 
       - name: Assemble Tauri release assets
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -171,6 +179,7 @@ jobs:
           ls -lh release-assets
 
       - name: Publish or replace validated HarnessDock release
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -214,6 +223,7 @@ jobs:
           fi
 
       - name: Verify published tag and assets
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
