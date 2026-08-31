@@ -30,12 +30,18 @@
   }
 
   function runtimeDetailText(current) {
-    if (!current?.appUrl) return 'Runtime 尚未启动。'
+    if (!current?.appUrl) return 'Runtime 尚未启动。HarnessDock 主程序仍可用，可检查配置后重试。'
     const base = `${current.dshVersion || ''} · ${current.appUrl}`
     if (!current.recoveryMode) return base
     const plugins = Array.isArray(current.isolatedPlugins) ? current.isolatedPlugins : []
-    const detail = plugins.length > 0 ? plugins.join(', ') : '未知第三方插件'
-    return `${base}\n兼容模式：本次会话已临时隔离不兼容插件：${detail}\n用户配置未被修改；下次启动仍会先尝试完整插件配置。`
+    const suspects = Array.isArray(current.suspectedPlugins) ? current.suspectedPlugins : []
+    const isolated = plugins.length > 0 ? plugins.join(', ') : '未知第三方插件'
+    const suspected = suspects.length > 0 ? suspects.join(', ') : '诊断未能唯一定位'
+    const source = current.recoverySource === 'quarantine' ? '已验证隔离记录' : '本次启动故障恢复'
+    const expiry = Number(current.quarantineExpiresAt) > 0
+      ? new Date(Number(current.quarantineExpiresAt) * 1000).toLocaleString()
+      : '当前会话结束后失效'
+    return `${base}\n兼容模式：${source}\n已隔离：${isolated}\n疑似故障插件：${suspected}\n隔离有效期：${expiry}\n用户 DSH 配置未被修改；可清除隔离后在下次启动重新尝试完整插件配置。`
   }
 
   async function refreshRuntime() {
@@ -123,8 +129,8 @@
       await refreshRuntime()
       if (currentRuntime.appUrl) await call('harness_open', { url: currentRuntime.appUrl })
     } catch (error) {
-      runtimeState.textContent = 'error'
-      status(runtimeDetail, String(error), true)
+      runtimeState.textContent = 'degraded'
+      status(runtimeDetail, `Runtime 启动失败，但 HarnessDock 主程序仍可用。\n${String(error)}`, true)
     } finally {
       $('runtime-start').disabled = false
     }
@@ -152,6 +158,18 @@
       status(runtimeDetail, String(error), true)
     } finally {
       $('runtime-stop').disabled = false
+    }
+  })
+
+  $('runtime-clear-quarantine').addEventListener('click', async () => {
+    $('runtime-clear-quarantine').disabled = true
+    try {
+      await call('runtime_clear_plugin_quarantine')
+      status(runtimeDetail, '已清除持久化插件隔离记录。当前运行会话保持不变；下次启动会重新尝试完整插件配置。')
+    } catch (error) {
+      status(runtimeDetail, String(error), true)
+    } finally {
+      $('runtime-clear-quarantine').disabled = false
     }
   })
 
