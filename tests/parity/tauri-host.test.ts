@@ -54,6 +54,17 @@ describe('Tauri v0.2 host contract', () => {
     expect(tauri.identifier).toBe('com.harnessdock.client')
   })
 
+  it('publishes only after an exact successful main Tauri candidate', () => {
+    const workflow = readFileSync(path.join(repoRoot, '.github/workflows/release.yml'), 'utf8')
+    expect(workflow).toContain('workflow_run:')
+    expect(workflow).toContain('- tauri-candidate')
+    expect(workflow).toContain('candidate is stale:')
+    expect(workflow).toContain('candidate is not green:')
+    expect(workflow).toContain('refusing to overwrite')
+    expect(workflow).toContain('target_commitish: ${{ steps.release.outputs.sha }}')
+    expect(workflow).not.toMatch(/\npush:\s*\n\s*tags:/)
+  })
+
   it('never grants remote Harness/Gateway documents local Tauri IPC permissions', () => {
     const capability = readJson('apps/tauri/src-tauri/capabilities/local-main.json')
     expect(capability.remote).toBeUndefined()
