@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-      - integrate/tauri-v0.2.0
-      - refactor/tauri-v0.2.0
     paths:
       - 'apps/tauri/**'
       - 'packages/bootstrap/**'
@@ -167,7 +165,7 @@ jobs:
           DSH_RUNTIME_PLATFORM: ${{ matrix.platform }}
           DSH_RUNTIME_ARCH: ${{ matrix.arch }}
           DSH_RUNTIME_DIR: runtime-prepared
-      - name: Verify prepared runtime manifest
+      - name: Verify prepared runtime manifest and platform isolation
         shell: bash
         env:
           EXPECTED_PLATFORM: ${{ matrix.platform }}
@@ -185,6 +183,20 @@ jobs:
             throw new Error('runtime manifest is missing pinned official-source metadata')
           }
           NODE
+          case "$EXPECTED_PLATFORM" in
+            win32)
+              test ! -e runtime-prepared/node_modules/@koromix/koffi-linux-x64
+              test ! -e runtime-prepared/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64
+              ;;
+            linux)
+              test ! -e runtime-prepared/node_modules/@koromix/koffi-linux-x64/musl_x64
+              test ! -e runtime-prepared/node_modules/@img/sharp-linuxmusl-x64
+              ;;
+            darwin)
+              test ! -e runtime-prepared/node_modules/@koromix/koffi-linux-x64
+              test ! -e runtime-prepared/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64
+              ;;
+          esac
       - uses: actions/upload-artifact@v7
         with:
           name: tauri-runtime-${{ matrix.artifact }}
@@ -216,6 +228,8 @@ jobs:
     timeout-minutes: 60
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
+      LINUXDEPLOY_VERSION: '1-alpha-20251107-1'
+      LINUXDEPLOY_SHA256: 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d'
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux Tauri dependencies
@@ -253,8 +267,25 @@ jobs:
           test -s packages/plugin-embedded-client/lib/index.js
           test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
           pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
+          if [ "${{ runner.os }}" = Linux ]; then
+            test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@koromix/koffi-linux-x64/musl_x64
+            test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@img/sharp-linuxmusl-x64
+            test -x apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64/bin/landlock-run
+          fi
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Pin Linux AppImage bundler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool="$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+          mkdir -p "$(dirname "$tool")"
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage" \
+            -o "$tool"
+          echo "${LINUXDEPLOY_SHA256}  ${tool}" | sha256sum -c -
+          chmod +x "$tool"
       - name: Build Tauri desktop candidate
         if: runner.os != 'Linux'
         working-directory: apps/tauri
@@ -289,7 +320,18 @@ jobs:
         run: |
           set -euo pipefail
           test -d apps/tauri/src-tauri/target/release/bundle
-          test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -print -quit)"
+          case "${{ runner.os }}" in
+            Windows)
+              test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.exe' -print -quit)"
+              ;;
+            Linux)
+              test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.deb' -print -quit)"
+              test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.AppImage' -print -quit)"
+              ;;
+            macOS)
+              test -n "$(find apps/tauri/src-tauri/target/release/bundle -type f -name '*.dmg' -print -quit)"
+              ;;
+          esac
       - uses: actions/upload-artifact@v7
         with:
           name: tauri-desktop-${{ matrix.artifact }}
