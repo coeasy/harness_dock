@@ -19,6 +19,8 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/release-notes/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
       - '.github/workflows/tauri-candidate.yml'
 
 concurrency:
