@@ -43,7 +43,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Validate exact green main candidate before creating tag
+      - name: Validate exact green main candidate and CI before publishing
         id: release
         shell: bash
         run: |
@@ -89,17 +89,19 @@ jobs:
             exit 1
           }
 
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" >/dev/null 2>&1; then
-            echo "release tag already exists; refusing to overwrite ${release_tag}" >&2
+          # Candidate is slower than the normal CI, but explicitly require a
+          # successful same-SHA CI instead of relying on timing.
+          ci_run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&per_page=100" \
+            --jq ".workflow_runs[] | select(.head_sha == \"${candidate_sha}\" and .path == \".github/workflows/ci.yml\" and .status == \"completed\" and .conclusion == \"success\") | .id" \
+            | head -1)"
+          test -n "$ci_run_id" || {
+            echo "no successful same-SHA main CI found for ${candidate_sha}" >&2
             exit 1
-          fi
-          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" >/dev/null 2>&1; then
-            echo "release already exists; refusing to overwrite ${release_tag}" >&2
-            exit 1
-          fi
+          }
 
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+          echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
 
       - name: Download exact candidate artifacts
         shell: bash
@@ -165,17 +167,59 @@ jobs:
 
           sha256sum release-assets/* > release-assets/SHA256SUMS
           test -s release-assets/SHA256SUMS
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 13
           ls -lh release-assets
 
-      - name: Publish HarnessDock Tauri release and create tag
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.release.outputs.tag }}
-          target_commitish: ${{ steps.release.outputs.sha }}
-          name: HarnessDock ${{ steps.release.outputs.tag }}
-          body_path: .github/release-notes/${{ steps.release.outputs.tag }}.md
-          draft: false
-          prerelease: false
-          make_latest: true
-          fail_on_unmatched_files: true
-          files: release-assets/*
+      - name: Publish or replace validated HarnessDock release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          existing_release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '.id' 2>/dev/null || true)"
+          existing_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha' 2>/dev/null || true)"
+
+          if [ -n "$existing_tag_sha" ]; then
+            echo "Replacing validated ${RELEASE_TAG}: ${existing_tag_sha} -> ${RELEASE_SHA}"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" \
+              -f sha="$RELEASE_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${RELEASE_TAG}" -f sha="$RELEASE_SHA" >/dev/null
+          fi
+
+          if [ -n "$existing_release_id" ]; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
+              -f target_commitish="$RELEASE_SHA" \
+              -f name="HarnessDock ${RELEASE_TAG}" \
+              -f body="$(cat ".github/release-notes/${RELEASE_TAG}.md")" \
+              -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+          else
+            gh release create "$RELEASE_TAG" release-assets/* \
+              --target "$RELEASE_SHA" \
+              --title "HarnessDock ${RELEASE_TAG}" \
+              --notes-file ".github/release-notes/${RELEASE_TAG}.md" \
+              --latest
+          fi
+
+      - name: Verify published tag and assets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
+          test "$tag_sha" = "$RELEASE_SHA"
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
+          test "$(printf '%s' "$release_json" | jq -r '.draft')" = false
+          test "$(printf '%s' "$release_json" | jq -r '.prerelease')" = false
+          asset_count="$(printf '%s' "$release_json" | jq '[.assets[] | select(.size > 0)] | length')"
+          test "$asset_count" -eq 13 || {
+            echo "expected 13 non-empty assets, got $asset_count" >&2
+            exit 1
+          }
+          printf '%s' "$release_json" | jq -e '.assets[] | select(.name == "SHA256SUMS" and .size > 0)' >/dev/null
