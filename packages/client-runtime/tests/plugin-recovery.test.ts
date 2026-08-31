@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPluginRecoveryPlan,
   isOfficialDshSource,
   parseConfigDumpRows,
   pluginRecoveryCandidates,
@@ -40,14 +41,23 @@ describe('plugin recovery config dump parsing', () => {
     expect(pluginRecoveryCandidates(rows).map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
   })
 
-  it('isolates the complete external recovery set even when diagnostics identify only the first bad plugin', () => {
-    const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), 'Failed to load @legacy/old-market-plugin while mounting old-market-plugin')
-    expect(selected.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
+  it('isolates the complete external set while attributing the plugin named by diagnostics', () => {
+    const plan = buildPluginRecoveryPlan(
+      parseConfigDumpRows(dump),
+      'Failed to load @legacy/old-market-plugin while mounting old-market-plugin',
+    )
+    expect(plan.isolationRows.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
+    expect(plan.suspectedRows.map((row) => row.id)).toEqual(['old-market-plugin'])
+    expect(plan.reason).toBe('diagnostic-match')
+    expect(selectPluginRecoveryRows(parseConfigDumpRows(dump), 'old-market-plugin failed').map((row) => row.id))
+      .toEqual(['old-market-plugin', 'user-added'])
   })
 
-  it('isolates the same external set when upstream diagnostics are ambiguous', () => {
-    const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), 'Cordis boot failed during mount')
-    expect(selected.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
+  it('marks ambiguous failures without narrowing the external safety set', () => {
+    const plan = buildPluginRecoveryPlan(parseConfigDumpRows(dump), 'Cordis boot failed during mount')
+    expect(plan.isolationRows.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
+    expect(plan.suspectedRows).toEqual([])
+    expect(plan.reason).toBe('ambiguous')
   })
 
   it('keeps official and embedded plugins enabled when multiple third-party plugins are incompatible', () => {
