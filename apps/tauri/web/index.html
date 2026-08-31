@@ -12,7 +12,7 @@
   <main class="shell">
     <section class="hero">
       <div class="brand">HarnessDock</div>
-      <h1>Tauri v0.2.0</h1>
+      <h1>Tauri v0.2.1</h1>
       <p id="platform-summary" class="muted">正在检测运行环境…</p>
     </section>
 
@@ -20,7 +20,7 @@
       <div class="card-heading">
         <div>
           <h2>本地 Runtime</h2>
-          <p>桌面端托管完整 DeepSeek Harness Runtime；Harness 在独立、无 Tauri IPC 权限的 WebView 中运行。</p>
+          <p>桌面端托管完整 DeepSeek Harness Runtime；Harness 在独立、无 Tauri IPC 权限的 WebView 中运行。第三方插件异常只会触发 Runtime 降级，不会关闭 HarnessDock。</p>
         </div>
         <span id="runtime-state" class="badge">stopped</span>
       </div>
@@ -28,6 +28,7 @@
         <button id="runtime-start" class="primary">启动并打开 Harness</button>
         <button id="runtime-open" class="secondary">打开 Harness</button>
         <button id="runtime-stop" class="secondary">停止 Runtime</button>
+        <button id="runtime-clear-quarantine" class="secondary">清除插件隔离（下次启动）</button>
       </div>
       <p id="runtime-detail" class="status"></p>
     </section>
@@ -90,7 +91,7 @@
       <p id="gateway-detail" class="status"></p>
     </section>
 
-    <footer>HarnessDock v0.2.0 · Tauri Windows / macOS / Linux / Android / iOS</footer>
+    <footer>HarnessDock v0.2.1 · Tauri Windows / macOS / Linux / Android / iOS</footer>
   </main>
   <script src="./app.js" defer></script>
 </body>
