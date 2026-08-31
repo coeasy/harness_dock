@@ -7,6 +7,8 @@
 - Windows / macOS / Linux: packaged local runtime + Remote Gateway.
 - Android / iOS: Remote Gateway only; Node/dsh is never started on-device.
 - Third-party plugin failures are isolated by bounded recovery/quarantine and do not terminate the HarnessDock host.
+- Desktop startup automatically opens the isolated official Harness Web UI; the local control page is used only as a fallback when startup needs attention.
+- If normal plugin recovery cannot complete, a temporary clean DSH profile is used so the Web UI can still open without changing the user's real configuration.
 
 ## Brand and installation contract
 

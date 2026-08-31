@@ -11,6 +11,7 @@ fn main() {
         "gateway_host_stop",
         "harness_open",
         "harness_close",
+        "control_show",
         "runtime_status",
         "runtime_start",
         "runtime_stop",

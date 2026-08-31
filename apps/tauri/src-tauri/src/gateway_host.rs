@@ -10,7 +10,7 @@ use std::{
 };
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
-use crate::AppState;
+use crate::{platform, AppState};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +155,7 @@ fn spawn_sidecar(
     {
         command.env("HARNESSDOCK_GATEWAY_PUBLIC_URL", value);
     }
+    platform::configure_child_command(&mut command);
     let mut child = command
         .spawn()
         .map_err(|error| format!("无法启动 Gateway sidecar: {error}"))?;

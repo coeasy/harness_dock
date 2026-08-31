@@ -30,6 +30,7 @@ pub fn run() {
             gateway_host::gateway_host_stop,
             harness_window::harness_open,
             harness_window::harness_close,
+            harness_window::control_show,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,

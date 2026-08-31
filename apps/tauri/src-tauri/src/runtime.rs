@@ -10,7 +10,7 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 use url::Url;
 
-use crate::{plugin_quarantine, AppState};
+use crate::{platform, plugin_quarantine, AppState};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +24,7 @@ pub struct RuntimeStatus {
     pub isolated_plugins: Vec<String>,
     pub suspected_plugins: Vec<String>,
     pub quarantine_expires_at: Option<u64>,
+    pub safe_mode: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,20 +65,22 @@ pub(crate) struct RuntimeProcess {
     isolated_plugins: Vec<String>,
     suspected_plugins: Vec<String>,
     quarantine_expires_at: Option<u64>,
+    safe_mode: bool,
 }
 
 impl RuntimeProcess {
     fn status(&self) -> RuntimeStatus {
         RuntimeStatus {
-            state: if self.isolated_plugins.is_empty() { "ready".into() } else { "degraded".into() },
+            state: if self.safe_mode || !self.isolated_plugins.is_empty() { "degraded".into() } else { "ready".into() },
             app_url: Some(self.ready.url.clone()),
             dsh_version: Some(self.ready.dsh_version.clone()),
             pid: Some(self.ready.pid),
-            recovery_mode: !self.isolated_plugins.is_empty(),
+            recovery_mode: self.safe_mode || !self.isolated_plugins.is_empty(),
             recovery_source: self.recovery_source.clone(),
             isolated_plugins: self.isolated_plugins.clone(),
             suspected_plugins: self.suspected_plugins.clone(),
             quarantine_expires_at: self.quarantine_expires_at,
+            safe_mode: self.safe_mode,
         }
     }
 
@@ -109,6 +112,7 @@ fn stopped() -> RuntimeStatus {
         isolated_plugins: Vec::new(),
         suspected_plugins: Vec::new(),
         quarantine_expires_at: None,
+        safe_mode: false,
     }
 }
 
@@ -192,9 +196,16 @@ fn is_official_source(source: &str) -> bool {
     source.starts_with("@deepseek-ai/") || normalized.contains("/node_modules/@deepseek-ai/")
 }
 
+fn is_official_row(row: &ConfigDumpRow) -> bool {
+    is_official_source(&row.source)
+        || row.name.as_deref().is_some_and(|name| {
+            name.starts_with("@deepseek-ai/") || name.contains("/node_modules/@deepseek-ai/")
+        })
+}
+
 fn recovery_candidates(rows: &[ConfigDumpRow]) -> Vec<ConfigDumpRow> {
     rows.iter()
-        .filter(|row| row.id != "embedded-client" && !row.source.is_empty() && !is_official_source(&row.source))
+        .filter(|row| row.id != "embedded-client" && !row.source.is_empty() && !is_official_row(row))
         .cloned()
         .collect()
 }
@@ -295,6 +306,7 @@ fn spawn_runtime(
     node: &Path,
     dsh: &Path,
     patches: &[&Path],
+    dsh_home: Option<&Path>,
     ready_file: &Path,
     version: &str,
     dir: &Path,
@@ -310,13 +322,18 @@ fn spawn_runtime(
     for patch in patches {
         command.arg("--patch").arg(patch);
     }
-    let child = command
+    command
         .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
         .env("DSH_EMBEDDED_READY_FILE", ready_file)
         .env("DSH_EMBEDDED_VERSION", version)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stderr(Stdio::from(stderr));
+    if let Some(home) = dsh_home {
+        command.env("DSH_HOME", home);
+    }
+    platform::configure_child_command(&mut command);
+    let child = command
         .spawn()
         .map_err(|error| format!("无法启动本地 dsh Runtime: {error}"))?;
     Ok((child, stdout_path, stderr_path))
@@ -377,22 +394,153 @@ fn wait_for_ready(
     }
 }
 
-fn dump_config(node: &Path, dsh: &Path, embedded_patch_file: &Path) -> Result<String, String> {
-    let output = Command::new(node)
-        .arg(dsh)
-        .args(["--profile", "web", "--patch"])
-        .arg(embedded_patch_file)
-        .arg("--dump-config")
-        .stdin(Stdio::null())
+/// Last-resort boot path for a broken user profile. It uses a temporary,
+/// host-owned DSH_HOME, so a malformed or crashing third-party plugin cannot
+/// prevent the official Web UI from opening and the user's real configuration
+/// is never rewritten.
+fn start_safe_profile(
+    runtime_root: PathBuf,
+    node: &Path,
+    dsh: &Path,
+    patch_file: &Path,
+    ready_file: &Path,
+    origin: &OriginInfo,
+    dir: &Path,
+    failure_context: &str,
+) -> Result<RuntimeProcess, String> {
+    let safe_home = dir.join("safe-dsh-home");
+    fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建 Runtime 安全配置目录: {error}"))?;
+    let _ = fs::remove_file(ready_file);
+    let (mut child, stdout_path, stderr_path) = spawn_runtime(
+        node,
+        dsh,
+        &[patch_file],
+        Some(safe_home.as_path()),
+        ready_file,
+        &origin.dsh_version,
+        dir,
+        "safe",
+    )?;
+    match wait_for_ready(
+        &mut child,
+        ready_file,
+        &origin.dsh_version,
+        &stdout_path,
+        &stderr_path,
+    ) {
+        Ok(ready) => Ok(RuntimeProcess {
+            child,
+            work_dir: dir.to_path_buf(),
+            runtime_root,
+            ready,
+            recovery_source: "safe-profile".into(),
+            isolated_plugins: Vec::new(),
+            suspected_plugins: Vec::new(),
+            quarantine_expires_at: None,
+            safe_mode: true,
+        }),
+        Err(safe_failure) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let summary = public_diagnostic(&safe_failure.diagnostic);
+            let _ = fs::remove_dir_all(dir);
+            Err(format!(
+                "{failure_context}\n安全配置启动也失败: {}\n{}",
+                safe_failure.message, summary
+            ))
+        }
+    }
+}
+
+fn dump_config(
+    node: &Path,
+    dsh: &Path,
+    embedded_patch_file: &Path,
+    default_only: bool,
+) -> Result<String, String> {
+    let mut command = Command::new(node);
+    command.arg(dsh).args(["--profile", "web"]);
+    if default_only {
+        command.arg("--dump-default-config");
+    } else {
+        command
+            .args(["--patch"])
+            .arg(embedded_patch_file)
+            .arg("--dump-config");
+    }
+    command.stdin(Stdio::null());
+    platform::configure_child_command(&mut command);
+    let output = command
         .output()
-        .map_err(|error| format!("无法运行 dsh --dump-config: {error}"))?;
+        .map_err(|error| format!("无法运行 dsh config dump: {error}"))?;
     if !output.status.success() {
         return Err(format!(
-            "dsh --dump-config 失败: {}",
+            "dsh {} 失败: {}",
+            if default_only { "--dump-default-config" } else { "--dump-config" },
             String::from_utf8_lossy(&output.stderr).chars().take(2_000).collect::<String>()
         ));
     }
     String::from_utf8(output.stdout).map_err(|error| format!("dsh --dump-config 输出不是 UTF-8: {error}"))
+}
+
+fn dsh_home_path() -> Option<PathBuf> {
+    std::env::var_os("DSH_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+            std::env::var_os(variable)
+                .filter(|value| !value.is_empty())
+                .map(|value| PathBuf::from(value).join(".dsh"))
+        })
+}
+
+/// Read only the user patch IDs when the upstream boot-free full dump is
+/// blocked by a malformed user layer. This parser intentionally understands
+/// IDs/names only; it never evaluates YAML `!!js` or imports plugin modules.
+fn user_patch_rows() -> Vec<ConfigDumpRow> {
+    let Some(home) = dsh_home_path() else { return Vec::new() };
+    let paths = [
+        home.join("profiles").join("web").join("cordis.patch.yml"),
+        home.join("cordis.patch.yml"),
+    ];
+    let mut rows = Vec::new();
+    for path in paths {
+        let Ok(raw) = fs::read_to_string(&path) else { continue };
+        let source = path.to_string_lossy().into_owned();
+        let mut current: Option<ConfigDumpRow> = None;
+        for line in raw.lines() {
+            let line = line.trim_start();
+            if let Some(raw_id) = line.strip_prefix("- id:") {
+                if let Some(row) = current.take() { rows.push(row); }
+                current = Some(ConfigDumpRow {
+                    id: decode_yaml_scalar(raw_id),
+                    name: None,
+                    source: source.clone(),
+                });
+            } else if let Some(row) = current.as_mut() {
+                if let Some(raw_name) = line.strip_prefix("name:") {
+                    row.name = Some(decode_yaml_scalar(raw_name));
+                }
+            }
+        }
+        if let Some(row) = current { rows.push(row); }
+    }
+    rows
+}
+
+fn recovery_rows(node: &Path, dsh: &Path, embedded_patch_file: &Path) -> Result<Vec<ConfigDumpRow>, String> {
+    match dump_config(node, dsh, embedded_patch_file, false) {
+        Ok(config) => Ok(parse_config_dump_rows(&config)),
+        Err(full_error) => {
+            let default_config = dump_config(node, dsh, embedded_patch_file, true).map_err(|default_error| {
+                format!("{full_error}; 默认配置转储也失败: {default_error}")
+            })?;
+            let mut rows = parse_config_dump_rows(&default_config);
+            rows.extend(user_patch_rows());
+            Ok(rows)
+        }
+    }
 }
 
 fn start_blocking(
@@ -427,6 +575,7 @@ fn start_blocking(
                 &node,
                 &dsh,
                 &[patch_file.as_path(), quarantine_file.as_path()],
+                None,
                 &ready_file,
                 &origin.dsh_version,
                 &dir,
@@ -449,6 +598,7 @@ fn start_blocking(
                         isolated_plugins: quarantine.isolated_plugins,
                         suspected_plugins: quarantine.suspected_plugins,
                         quarantine_expires_at: Some(quarantine.expires_at),
+                        safe_mode: false,
                     });
                 }
                 Err(_) => {
@@ -465,6 +615,7 @@ fn start_blocking(
         &node,
         &dsh,
         &[patch_file.as_path()],
+        None,
         &ready_file,
         &origin.dsh_version,
         &dir,
@@ -481,6 +632,7 @@ fn start_blocking(
                 isolated_plugins: Vec::new(),
                 suspected_plugins: Vec::new(),
                 quarantine_expires_at: None,
+                safe_mode: false,
             });
         }
         Err(first_failure) => {
@@ -492,35 +644,66 @@ fn start_blocking(
                 return Err(format!("{}\n{}", first_failure.message, summary));
             }
 
-            let config = match dump_config(&node, &dsh, &patch_file) {
+            let config = match recovery_rows(&node, &dsh, &patch_file) {
                 Ok(value) => value,
                 Err(error) => {
                     let summary = public_diagnostic(&first_failure.diagnostic);
-                    let _ = fs::remove_dir_all(&dir);
-                    return Err(format!("{}\n{}\n插件兼容恢复未运行: {error}", first_failure.message, summary));
+                    return start_safe_profile(
+                        runtime_root,
+                        &node,
+                        &dsh,
+                        &patch_file,
+                        &ready_file,
+                        &origin,
+                        &dir,
+                        &format!("{}\n{}\n插件兼容恢复未运行: {error}", first_failure.message, summary),
+                    );
                 }
             };
-            let rows = parse_config_dump_rows(&config);
+            let rows = config;
             let (selected, suspected_plugins, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 let summary = public_diagnostic(&first_failure.diagnostic);
-                let _ = fs::remove_dir_all(&dir);
-                return Err(format!("{}\n{}", first_failure.message, summary));
+                return start_safe_profile(
+                    runtime_root,
+                    &node,
+                    &dsh,
+                    &patch_file,
+                    &ready_file,
+                    &origin,
+                    &dir,
+                    &format!("{}\n{}\n未找到可隔离的第三方插件", first_failure.message, summary),
+                );
             }
 
             let recovery_file = dir.join("plugin-recovery.patch.yml");
             fs::write(&recovery_file, recovery_patch(&selected)?).map_err(|error| format!("无法写入插件兼容恢复 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
             let isolated_plugins: Vec<String> = selected.iter().map(|row| row.id.clone()).collect();
-            let (mut recovery_child, recovery_stdout, recovery_stderr) = spawn_runtime(
+            let (mut recovery_child, recovery_stdout, recovery_stderr) = match spawn_runtime(
                 &node,
                 &dsh,
                 &[patch_file.as_path(), recovery_file.as_path()],
+                None,
                 &ready_file,
                 &origin.dsh_version,
                 &dir,
                 "recovery",
-            )?;
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return start_safe_profile(
+                        runtime_root,
+                        &node,
+                        &dsh,
+                        &patch_file,
+                        &ready_file,
+                        &origin,
+                        &dir,
+                        &format!("插件兼容恢复进程无法启动: {error}"),
+                    );
+                }
+            };
             match wait_for_ready(
                 &mut recovery_child,
                 &ready_file,
@@ -545,6 +728,7 @@ fn start_blocking(
                         isolated_plugins,
                         suspected_plugins,
                         quarantine_expires_at: quarantine.map(|value| value.expires_at),
+                        safe_mode: false,
                     })
                 }
                 Err(recovery_failure) => {
@@ -552,14 +736,22 @@ fn start_blocking(
                     let _ = recovery_child.wait();
                     let first_summary = public_diagnostic(&first_failure.diagnostic);
                     let recovery_summary = public_diagnostic(&recovery_failure.diagnostic);
-                    let _ = fs::remove_dir_all(&dir);
-                    Err(format!(
-                        "dsh 正常启动失败，插件兼容恢复也失败。\n正常启动: {}\n{}\n恢复启动: {}\n{}",
-                        first_failure.message,
-                        first_summary,
-                        recovery_failure.message,
-                        recovery_summary,
-                    ))
+                    start_safe_profile(
+                        runtime_root,
+                        &node,
+                        &dsh,
+                        &patch_file,
+                        &ready_file,
+                        &origin,
+                        &dir,
+                        &format!(
+                            "dsh 正常启动失败，插件兼容恢复也失败。\n正常启动: {}\n{}\n恢复启动: {}\n{}",
+                            first_failure.message,
+                            first_summary,
+                            recovery_failure.message,
+                            recovery_summary,
+                        ),
+                    )
                 }
             }
         }

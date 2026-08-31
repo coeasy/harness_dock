@@ -3,7 +3,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "HarnessDock"
+        "title": "HarnessDock",
+        "visible": true
       }
     ]
   },

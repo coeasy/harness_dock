@@ -86,6 +86,38 @@ describe('Tauri v0.2 host contract', () => {
     expect(capability.windows).toEqual(['main'])
   })
 
+  it('boots directly into the isolated Harness WebView on desktop', () => {
+    const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
+    const android = readJson('apps/tauri/src-tauri/tauri.android.conf.json')
+    const ios = readJson('apps/tauri/src-tauri/tauri.ios.conf.json')
+    expect(tauri.app.windows[0].visible).toBe(false)
+    expect(android.app.windows[0].visible).toBe(true)
+    expect(ios.app.windows[0].visible).toBe(true)
+
+    const launcher = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/main.rs'), 'utf8')
+    const harnessWindow = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/harness_window.rs'), 'utf8')
+    const web = readFileSync(path.join(repoRoot, 'apps/tauri/web/app.js'), 'utf8')
+    expect(launcher).toContain('windows_subsystem = "windows"')
+    expect(harnessWindow).toContain('let _ = control.hide()')
+    expect(harnessWindow).toContain('control_show')
+    expect(web).toContain('autoStartDesktopRuntime')
+    expect(web).toContain("call('runtime_start')")
+    expect(web).toContain("call('harness_open'")
+  })
+
+  it('keeps Windows helper processes console-free and has a final Web UI safe profile', () => {
+    const platform = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/platform.rs'), 'utf8')
+    const runtime = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/runtime.rs'), 'utf8')
+    const gatewayHost = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'), 'utf8')
+    expect(platform).toContain('CREATE_NO_WINDOW')
+    expect(runtime).toContain('platform::configure_child_command')
+    expect(gatewayHost).toContain('platform::configure_child_command')
+    expect(runtime).toContain('--dump-default-config')
+    expect(runtime).toContain('start_safe_profile')
+    expect(runtime).toContain('safe-dsh-home')
+    expect(runtime).toContain('recovery_source: "safe-profile"')
+  })
+
   it('declares mobile as remote-runtime-only in the Rust launcher UI contract', () => {
     const source = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/platform.rs'), 'utf8')
     expect(source).toContain('if cfg!(mobile) { "remote" } else { "local" }')

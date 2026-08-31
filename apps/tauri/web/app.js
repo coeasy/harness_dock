@@ -12,6 +12,7 @@
   const pairingCode = $('pairing-code')
   const deviceName = $('device-name')
   let currentRuntime
+  let desktopStartup
 
   function status(element, value, bad = false) {
     if (!element) return
@@ -33,6 +34,9 @@
     if (!current?.appUrl) return 'Runtime 尚未启动。HarnessDock 主程序仍可用，可检查配置后重试。'
     const base = `${current.dshVersion || ''} · ${current.appUrl}`
     if (!current.recoveryMode) return base
+    if (current.recoverySource === 'safe-profile') {
+      return `${base}\n安全启动：已绕过用户插件配置，确保 Harness Web 界面可用。用户配置未修改；可在修复插件后停止并重新启动 Runtime。`
+    }
     const plugins = Array.isArray(current.isolatedPlugins) ? current.isolatedPlugins : []
     const suspects = Array.isArray(current.suspectedPlugins) ? current.suspectedPlugins : []
     const isolated = plugins.length > 0 ? plugins.join(', ') : '未知第三方插件'
@@ -103,6 +107,33 @@
     return current
   }
 
+  async function showControl() {
+    try { await call('control_show') } catch { /* the window may already be visible */ }
+  }
+
+  function autoStartDesktopRuntime() {
+    if (desktopStartup) return desktopStartup
+    desktopStartup = (async () => {
+      $('runtime-start').disabled = true
+      runtimeState.textContent = 'starting'
+      status(runtimeDetail, '正在启动 Harness Web Runtime…')
+      try {
+        currentRuntime = await call('runtime_start')
+        if (!currentRuntime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
+        status(runtimeDetail, runtimeDetailText(currentRuntime))
+        await call('harness_open', { url: currentRuntime.appUrl })
+      } catch (error) {
+        desktopStartup = undefined
+        runtimeState.textContent = 'error'
+        status(runtimeDetail, `Harness Web Runtime 启动失败，但控制页仍可用。\n${String(error)}`, true)
+        await showControl()
+      } finally {
+        $('runtime-start').disabled = false
+      }
+    })()
+    return desktopStartup
+  }
+
   async function boot() {
     try {
       const platform = await call('platform_info')
@@ -110,30 +141,20 @@
       if (platform.runtimeMode === 'local') {
         $('desktop-card').classList.remove('hidden')
         $('gateway-host-card').classList.remove('hidden')
-        await refreshRuntime()
-        await refreshGatewayHost()
+        await autoStartDesktopRuntime()
+        await refreshGatewayHost().catch((error) => status(hostDetail, String(error), true))
       } else {
         $('mobile-remote-card').classList.remove('hidden')
         deviceName.value = defaultDeviceName(platform)
       }
     } catch (error) {
       status(runtimeDetail || gatewayDetail, String(error), true)
+      await showControl()
     }
   }
 
   $('runtime-start').addEventListener('click', async () => {
-    $('runtime-start').disabled = true
-    status(runtimeDetail, '正在启动本地 Runtime…')
-    try {
-      currentRuntime = await call('runtime_start')
-      await refreshRuntime()
-      if (currentRuntime.appUrl) await call('harness_open', { url: currentRuntime.appUrl })
-    } catch (error) {
-      runtimeState.textContent = 'degraded'
-      status(runtimeDetail, `Runtime 启动失败，但 HarnessDock 主程序仍可用。\n${String(error)}`, true)
-    } finally {
-      $('runtime-start').disabled = false
-    }
+    await autoStartDesktopRuntime()
   })
 
   $('runtime-open').addEventListener('click', async () => {
@@ -152,6 +173,7 @@
       await call('gateway_host_stop').catch(() => undefined)
       await call('harness_close').catch(() => undefined)
       await call('runtime_stop')
+      desktopStartup = undefined
       await refreshRuntime()
       await refreshGatewayHost()
     } catch (error) {
