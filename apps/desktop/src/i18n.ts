@@ -30,13 +30,13 @@ export const messages: Record<string, MessageEntry> = {
   'boot.failed.retry': { 'zh-CN': '重试', en: 'Retry' },
   'boot.failed.message': {
     'zh-CN':
-      '首次启动需联网下载运行时（约 300 MB）。\n\n常见修复：\n' +
+      '首次启动需联网下载当前系统与 CPU 架构所需运行时，实际体积因平台而异。\n\n常见修复：\n' +
       '  • 检查网络连接 / 代理 / 防火墙；\n' +
       '  • 重启应用——部分下载会自动续传；\n' +
       '  • 公司网络：设置环境变量 DSH_NPM_MIRROR 指向 npm 镜像。\n\n' +
       '日志文件：{logFile}',
     en:
-      'First launch requires network access to download the runtime (~300 MB).\n\n' +
+      'First launch downloads only the runtime required for this OS and CPU architecture; size varies by platform.\n\n' +
       'Common fixes:\n' +
       '  • Check your internet connection / proxy / firewall;\n' +
       '  • Restart the app — partial downloads are retried automatically;\n' +
@@ -111,23 +111,23 @@ export const messages: Record<string, MessageEntry> = {
   'splash.loading': { 'zh-CN': '正在加载配置…', en: 'Loading configuration…' },
   'splash.startingRuntime': { 'zh-CN': '正在启动运行时…', en: 'Starting runtime…' },
   'splash.firstLaunch': {
-    'zh-CN': '首次启动：正在下载运行时（约 300 MB，可能需要几分钟）…',
-    en: 'First launch: downloading runtime (~300 MB, this can take a few minutes)…',
+    'zh-CN': '首次启动：正在下载当前平台运行时，体积因系统与 CPU 架构而异…',
+    en: 'First launch: downloading the runtime for this OS/CPU; size varies by platform…',
   },
   'splash.downloading': {
-    'zh-CN': '正在下载运行时：{pct}（{done}/{total}，{bytes}）\n{name}',
-    en: 'Downloading runtime: {pct} ({done}/{total}, {bytes} downloaded)\n{name}',
+    'zh-CN': '正在下载当前平台运行时：{pct}（组件 {done}/{total}，已下载 {bytes}）\n{name}',
+    en: 'Downloading runtime for this platform: {pct} ({done}/{total} components, {bytes} downloaded)\n{name}',
   },
-  'splash.resolving': { 'zh-CN': '正在解析 {total} 个运行时包…', en: 'Resolving {total} runtime packages…' },
+  'splash.resolving': { 'zh-CN': '正在解析 {total} 个当前平台运行时包…', en: 'Resolving {total} platform runtime packages…' },
   'splash.resolvingUnknown': {
-    'zh-CN': '正在解析运行时包…（{done}）',
-    en: 'Resolving runtime packages… ({done})',
+    'zh-CN': '正在解析当前平台运行时包…（{done}）',
+    en: 'Resolving platform runtime packages… ({done})',
   },
   'splash.ready': { 'zh-CN': '运行时就绪，正在启动…', en: 'Runtime ready, starting…' },
   'splash.loadingInterface': { 'zh-CN': '正在加载界面…', en: 'Loading interface…' },
   'splash.hint.network': {
-    'zh-CN': '首次启动需联网下载运行时（约 300 MB），通常需要几分钟，\n请保持网络畅通并耐心等待。',
-    en: 'First launch downloads the runtime (~300 MB) over the network, usually a few minutes.\nPlease keep your connection stable and wait.',
+    'zh-CN': '首次启动仅下载当前系统与 CPU 架构所需运行时，体积因平台而异；\n请保持网络畅通并耐心等待。',
+    en: 'First launch downloads only the runtime required for this OS/CPU; size varies by platform.\nPlease keep your connection stable and wait.',
   },
   'splash.hint.stuck': {
     'zh-CN': '如长时间停留在当前步骤：检查网络 / 代理与防火墙；\n也可设置镜像环境变量 DSH_NPM_MIRROR 后重试。',
