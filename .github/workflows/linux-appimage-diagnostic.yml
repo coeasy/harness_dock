@@ -19,6 +19,8 @@ jobs:
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
       SOURCE_CANDIDATE_RUN: '33351120052'
+      LINUXDEPLOY_VERSION: '1-alpha-20251107-1'
+      LINUXDEPLOY_SHA256: 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d'
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux Tauri dependencies
@@ -52,15 +54,35 @@ jobs:
           mkdir -p apps/tauri/src-tauri/resources/dsh-runtime
           gh run download "$SOURCE_CANDIDATE_RUN" --repo "$GITHUB_REPOSITORY" --name tauri-runtime-linux-x64 --dir apps/tauri/src-tauri/resources/dsh-runtime
           test -s apps/tauri/src-tauri/resources/dsh-runtime/manifest.json
+      - name: Apply current glibc-only runtime prune
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx packages/client-runtime/src/prepare-cli.ts --prune-only --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --platform linux --arch x64
+          test -d apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@koromix/koffi-linux-x64/linux_x64
+          test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@koromix/koffi-linux-x64/musl_x64
+          test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@img/sharp-linuxmusl-x64
       - name: Verify full runtime before packaging
         shell: bash
         run: pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
-      - name: Build AppImage and surface exact failure
+      - name: Pin linuxdeploy with static ELF fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool="$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+          mkdir -p "$(dirname "$tool")"
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage" \
+            -o "$tool"
+          echo "${LINUXDEPLOY_SHA256}  ${tool}" | sha256sum -c -
+          chmod +x "$tool"
+      - name: Build AppImage with pinned linuxdeploy
         working-directory: apps/tauri
         shell: bash
         run: |
+          set -euo pipefail
           LOG="$GITHUB_WORKSPACE/tauri-linux-appimage.log"
           set +e
           cargo tauri build --verbose --bundles appimage >"$LOG" 2>&1
@@ -69,9 +91,16 @@ jobs:
             echo '===== TAURI APPIMAGE FAILURE TAIL ====='
             tail -n 350 "$LOG" || true
             echo '===== ERROR-LIKE LINES ====='
-            grep -E -i 'error|failed|AppImage|linuxdeploy|appimagetool|strip|patchelf|FUSE|GLIBC' "$LOG" | tail -n 120 || true
+            grep -E -i 'error|failed|AppImage|linuxdeploy|appimagetool|strip|patchelf|FUSE|GLIBC|musl|landlock' "$LOG" | tail -n 160 || true
           fi
           exit "$status"
+      - name: Validate AppImage output and retained Landlock helper
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find apps/tauri/src-tauri/target/release/bundle/appimage -type f -name '*.AppImage' -print -quit)"
+          test -x apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64/bin/landlock-run
       - name: Upload AppImage diagnostic log
         if: always()
         uses: actions/upload-artifact@v7
