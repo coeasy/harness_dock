@@ -7,6 +7,11 @@ import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './ensure-runti
 import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
 import { parseWebUrl, redactWebAuthTokens } from './output.ts'
+import {
+  parseConfigDumpRows,
+  renderPluginRecoveryPatch,
+  selectPluginRecoveryRows,
+} from './plugin-recovery.ts'
 import { shutdownLadder, isProcessAlive, type ShutdownResult } from './process.ts'
 import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
@@ -182,39 +187,151 @@ export class DshRuntime {
       DSH_EMBEDDED_READY_FILE: readyFile,
       DSH_EMBEDDED_VERSION: version,
     })
-    const args = [...command.argsPrefix, ...buildLaunchArgs({ patchFile })]
-    const spawnRequest = buildSpawnRequest(command.command, args)
-    this.options.log?.(
-      `runtime: spawning ${[spawnRequest.command, ...spawnRequest.args]
-        .map((value) => JSON.stringify(value))
-        .join(' ')}`,
-    )
+    const dumpEnv = scrubElectronEnv({ ...env, ...command.extraEnv })
     const spawnImpl = this.options.spawnImpl ?? spawn
-    const child = spawnImpl(spawnRequest.command, spawnRequest.args, {
-      cwd: this.options.cwd ?? process.cwd(),
-      env: childEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    }) as unknown as ChildProcessWithoutNullStreams
-    this.child = child
+
+    const spawnRuntime = (recoveryPatchFile?: string): ChildProcessWithoutNullStreams => {
+      const launchArgs = buildLaunchArgs({ patchFile })
+      if (recoveryPatchFile) {
+        const hostIndex = launchArgs.indexOf('--host')
+        launchArgs.splice(hostIndex < 0 ? launchArgs.length : hostIndex, 0, '--patch', recoveryPatchFile)
+      }
+      const args = [...command.argsPrefix, ...launchArgs]
+      const spawnRequest = buildSpawnRequest(command.command, args)
+      this.options.log?.(
+        `runtime: spawning ${[spawnRequest.command, ...spawnRequest.args]
+          .map((value) => JSON.stringify(value))
+          .join(' ')}`,
+      )
+      return spawnImpl(spawnRequest.command, spawnRequest.args, {
+        cwd: this.options.cwd ?? process.cwd(),
+        env: childEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      }) as unknown as ChildProcessWithoutNullStreams
+    }
+
+    const captureConfigDump = async (): Promise<string> => {
+      const args = [
+        ...command.argsPrefix,
+        '--profile',
+        'web',
+        '--patch',
+        patchFile,
+        '--dump-config',
+      ]
+      const spawnRequest = buildSpawnRequest(command.command, args)
+      return new Promise<string>((resolve, reject) => {
+        let stdout = ''
+        let stderr = ''
+        let settled = false
+        const child = spawn(spawnRequest.command, spawnRequest.args, {
+          cwd: this.options.cwd ?? process.cwd(),
+          env: dumpEnv,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+        const finish = (error?: Error) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          if (error) reject(error)
+          else resolve(stdout)
+        }
+        child.stdout?.on('data', (chunk: Buffer | string) => {
+          stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+          if (stdout.length > 1_000_000) stdout = stdout.slice(-1_000_000)
+        })
+        child.stderr?.on('data', (chunk: Buffer | string) => {
+          stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+          if (stderr.length > 64_000) stderr = stderr.slice(-64_000)
+        })
+        child.once('error', (error) => finish(error))
+        child.once('exit', (code) => {
+          if (code === 0) finish()
+          else finish(new Error(`dsh --dump-config exited with code ${code}: ${redactWebAuthTokens(stderr.slice(-4_000))}`))
+        })
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          finish(new Error('dsh --dump-config timed out after 15s'))
+        }, 15_000)
+        timer.unref?.()
+      })
+    }
 
     const timeoutMs = this.options.readyTimeoutMs ?? 120_000
+    const stabilityMs = this.options.readyStabilityMs ?? 1_000
+    const child = spawnRuntime()
+    this.child = child
+
     try {
       const ready = await waitForReady(
         child,
         readyFile,
         version,
         timeoutMs,
-        this.options.readyStabilityMs ?? 1_000,
+        stabilityMs,
         this.options.log,
       )
       drainOutput(child, this.options.log)
       return ready
     } catch (error) {
+      const diagnostic = error instanceof Error ? error.message : String(error)
+      this.options.log?.(`runtime: dsh did not become ready: ${diagnostic}`)
+      await terminateRuntimeChild(child)
+      this.child = undefined
+
+      const recoveryEnabled = this.options.packaged === true && env.HARNESSDOCK_PLUGIN_RECOVERY !== '0'
+      if (!recoveryEnabled) throw error
+
+      let dump = ''
+      try {
+        dump = await captureConfigDump()
+      } catch (dumpError) {
+        this.options.log?.(
+          `runtime: plugin recovery skipped because config dump failed: ${dumpError instanceof Error ? dumpError.message : String(dumpError)}`,
+        )
+        throw error
+      }
+      const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), diagnostic)
+      if (selected.length === 0) {
+        this.options.log?.('runtime: plugin recovery found no third-party/user-added rows; preserving original failure')
+        throw error
+      }
+
+      const recoveryPatchFile = path.join(this.workDir, 'plugin-recovery.patch.yml')
+      await writeFile(recoveryPatchFile, renderPluginRecoveryPatch(selected), 'utf8')
+      await rm(readyFile, { force: true }).catch(() => undefined)
+      const ids = selected.map((row) => row.id)
       this.options.log?.(
-        `runtime: dsh did not become ready: ${error instanceof Error ? error.message : String(error)}`,
+        `runtime: compatibility recovery isolating ${ids.length} row(s) for this session only: ${ids.join(', ')}`,
       )
-      throw error
+
+      const recoveryChild = spawnRuntime(recoveryPatchFile)
+      this.child = recoveryChild
+      try {
+        const ready = await waitForReady(
+          recoveryChild,
+          readyFile,
+          version,
+          timeoutMs,
+          stabilityMs,
+          this.options.log,
+        )
+        drainOutput(recoveryChild, this.options.log)
+        this.options.log?.(
+          `runtime: compatibility recovery succeeded; user configuration was not modified; isolated: ${ids.join(', ')}`,
+        )
+        return ready
+      } catch (recoveryError) {
+        const recoveryDiagnostic = recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+        await terminateRuntimeChild(recoveryChild)
+        this.child = undefined
+        throw new Error(
+          `dsh failed to start normally and compatibility recovery also failed. ` +
+            `Normal failure: ${diagnostic}\nRecovery failure: ${recoveryDiagnostic}`,
+        )
+      }
     }
   }
 
@@ -251,6 +368,15 @@ export class DshRuntime {
     }
     if (!this.stopOutcome) this.stopOutcome = { clean: true }
   }
+}
+
+async function terminateRuntimeChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (!child.pid || !isProcessAlive(child.pid)) return
+  await shutdownLadder(child, {
+    termMs: 1_500,
+    killMs: 1_500,
+    isAlive: () => isProcessAlive(child.pid),
+  }).catch(() => undefined)
 }
 
 const DRAIN_CHUNK_LIMIT = 2000

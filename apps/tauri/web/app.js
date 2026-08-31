@@ -29,10 +29,19 @@
     return `HarnessDock ${label}`
   }
 
+  function runtimeDetailText(current) {
+    if (!current?.appUrl) return 'Runtime 尚未启动。'
+    const base = `${current.dshVersion || ''} · ${current.appUrl}`
+    if (!current.recoveryMode) return base
+    const plugins = Array.isArray(current.isolatedPlugins) ? current.isolatedPlugins : []
+    const detail = plugins.length > 0 ? plugins.join(', ') : '未知第三方插件'
+    return `${base}\n兼容模式：本次会话已临时隔离不兼容插件：${detail}\n用户配置未被修改；下次启动仍会先尝试完整插件配置。`
+  }
+
   async function refreshRuntime() {
     currentRuntime = await call('runtime_status')
-    runtimeState.textContent = currentRuntime.state
-    status(runtimeDetail, currentRuntime.appUrl ? `${currentRuntime.dshVersion || ''} · ${currentRuntime.appUrl}` : 'Runtime 尚未启动。')
+    runtimeState.textContent = currentRuntime.recoveryMode ? 'degraded · plugin recovery' : currentRuntime.state
+    status(runtimeDetail, runtimeDetailText(currentRuntime))
     $('runtime-open').disabled = !currentRuntime.appUrl
     $('gateway-host-start').disabled = !currentRuntime.appUrl
     return currentRuntime

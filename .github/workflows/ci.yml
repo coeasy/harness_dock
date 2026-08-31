@@ -63,6 +63,8 @@ jobs:
         run: pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
       - name: Check Tauri Rust host
         run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Test Tauri runtime recovery logic
+        run: cargo test --manifest-path apps/tauri/src-tauri/Cargo.toml --lib
       - name: Verify Tauri version contract
         shell: bash
         run: |
