@@ -37,12 +37,14 @@ export interface BootstrapOptions {
   packaged: boolean
   /** bundled runtime root (resources/dsh-runtime) when present */
   bundledRoot?: string
-  /** host user-data dir; used for previous-origin backup + runtime cache */
+  /** host user-data dir; used for rollback, runtime cache and plugin quarantine */
   userDataDir?: string
   /** override for the runtime download cache dir (defaults to userDataDir/runtime-cache) */
   downloadCacheDir?: string
   /** override for the previous-origin backup path (defaults to userDataDir/previous-origin.json) */
   previousOriginPath?: string
+  /** override for host-owned plugin quarantine state */
+  pluginQuarantinePath?: string
   readyTimeoutMs?: number
   stopTimeoutMs?: number
   env?: NodeJS.ProcessEnv
@@ -87,6 +89,9 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
   const downloadCacheDir =
     options.downloadCacheDir ??
     (options.userDataDir ? path.join(options.userDataDir, 'runtime-cache') : undefined)
+  const pluginQuarantinePath =
+    options.pluginQuarantinePath ??
+    (options.userDataDir ? path.join(options.userDataDir, 'plugin-quarantine.json') : undefined)
 
   options.onBeforeStart?.({ origin, mode, bundledAvailable })
 
@@ -99,6 +104,7 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
           packaged: options.packaged,
           bundledRoot: options.bundledRoot,
           downloadCacheDir,
+          pluginQuarantinePath,
           readyTimeoutMs: options.readyTimeoutMs,
           stopTimeoutMs: options.stopTimeoutMs,
           log,
@@ -111,10 +117,6 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
   let rolledBack: { from: string; to: string } | null = null
   try {
     ready = await runtime.start()
-    // Record last-known-good AFTER a successful start: previous-origin.json must
-    // always hold the version that actually ran, otherwise a failing new version
-    // would overwrite the good one before it even boots (the rollback would find
-    // the failing version and never fire).
     if (previousOriginPath) {
       await backupOrigin(options.originPath, previousOriginPath, log)
     }
@@ -134,7 +136,6 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
         ready = await fallbackRuntime.start()
         runtime = fallbackRuntime
         rolledBack = { from: origin.dshVersion, to: previous.dshVersion }
-        // previous-origin.json already holds the fallback (last-known-good) version
         log?.(`bootstrap: rolled back to last-known-good dsh ${previous.dshVersion}`)
         options.onRollback?.(rolledBack)
       } catch (fallbackError) {
