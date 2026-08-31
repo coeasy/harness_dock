@@ -199,8 +199,13 @@ fn diagnostic_matches(row: &ConfigDumpRow, diagnostic: &str) -> bool {
 
 fn select_recovery_rows(rows: &[ConfigDumpRow], diagnostic: &str) -> Vec<ConfigDumpRow> {
     let candidates = recovery_candidates(rows);
-    let matched: Vec<_> = candidates.iter().filter(|row| diagnostic_matches(row, diagnostic)).cloned().collect();
-    if matched.is_empty() { candidates } else { matched }
+    // Upstream startup diagnostics commonly mention only the first stale plugin.
+    // Narrowing the recovery patch to that one row can make the retry fail on a
+    // second incompatible plugin. Evaluate matches for diagnostics, but isolate
+    // the complete external set in this session-only recovery attempt. Official
+    // dsh rows and HarnessDock's embedded bridge never enter `candidates`.
+    let _diagnostic_identified_a_candidate = candidates.iter().any(|row| diagnostic_matches(row, diagnostic));
+    candidates
 }
 
 fn recovery_patch(rows: &[ConfigDumpRow]) -> Result<String, String> {
@@ -527,10 +532,10 @@ mod tests {
     }
 
     #[test]
-    fn recovery_prefers_the_row_named_by_the_failure() {
+    fn recovery_isolates_all_external_rows_when_only_one_failure_is_named() {
         let rows = parse_config_dump_rows(DUMP);
         let selected = select_recovery_rows(&rows, "failed to load @legacy/old-market-plugin");
-        assert_eq!(selected.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin"]);
+        assert_eq!(selected.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
     }
 
     #[test]
