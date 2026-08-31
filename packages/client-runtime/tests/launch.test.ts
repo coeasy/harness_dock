@@ -41,6 +41,8 @@ describe('renderEmbeddedPatch', () => {
       '/opt/harnessdock/dsh-client-runtime-compat/index.js',
     )
     expect(yaml).toContain('id: harnessdock-client-runtime-compat')
-    expect(yaml).toContain('file:///opt/harnessdock/dsh-client-runtime-compat/index.js')
+    expect(yaml).toContain(
+      pathToFileURL('/opt/harnessdock/dsh-client-runtime-compat/index.js').href,
+    )
   })
 })
