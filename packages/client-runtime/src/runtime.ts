@@ -8,10 +8,16 @@ import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
 import { parseWebUrl, redactWebAuthTokens } from './output.ts'
 import {
+  buildPluginRecoveryPlan,
   parseConfigDumpRows,
   renderPluginRecoveryPatch,
-  selectPluginRecoveryRows,
+  type PluginRecoveryReason,
 } from './plugin-recovery.ts'
+import {
+  clearPluginQuarantine,
+  readPluginQuarantine,
+  writePluginQuarantine,
+} from './plugin-quarantine.ts'
 import { shutdownLadder, isProcessAlive, type ShutdownResult } from './process.ts'
 import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
@@ -19,6 +25,17 @@ import { resolveRuntimeMode } from './process.ts'
 import { buildSpawnRequest } from './shell.ts'
 import { openWebUiSession } from './web-auth.ts'
 import type { ParsedUrl, ReadyInfo, RuntimeMode } from './types.ts'
+
+export type PluginRecoverySource = 'none' | 'startup-failure' | 'quarantine'
+
+export interface PluginRecoveryState {
+  active: boolean
+  source: PluginRecoverySource
+  isolatedPlugins: string[]
+  suspectedPlugins: string[]
+  reason?: PluginRecoveryReason
+  quarantineExpiresAt?: string
+}
 
 export interface DshRuntimeOptions {
   origin: {
@@ -42,6 +59,12 @@ export interface DshRuntimeOptions {
   cacheDir?: string
   /** where the download mode vendors the dsh tarball (defaults to defaultDownloadCacheDir) */
   downloadCacheDir?: string
+  /** host-owned state; never modifies the user's dsh configuration */
+  pluginQuarantinePath?: string
+  /** quarantine lifetime; defaults to 24h */
+  pluginQuarantineTtlMs?: number
+  /** test seam for the boot-free config discovery command */
+  configDumpImpl?: () => Promise<string>
   /** hard ceiling for stop(); defaults to 20s so the app can always quit */
   stopTimeoutMs?: number
   /** optional diagnostic sink (boot log in the desktop client) */
@@ -82,11 +105,16 @@ export interface StopOutcome {
   ladder?: ShutdownResult
 }
 
+function emptyRecoveryState(): PluginRecoveryState {
+  return { active: false, source: 'none', isolatedPlugins: [], suspectedPlugins: [] }
+}
+
 export class DshRuntime {
   private child: ChildProcessWithoutNullStreams | undefined
   private workDir: string | undefined
   private stopping = false
   private stopOutcome: StopOutcome | undefined
+  private recoveryState: PluginRecoveryState = emptyRecoveryState()
 
   constructor(private readonly options: DshRuntimeOptions) {}
 
@@ -95,7 +123,24 @@ export class DshRuntime {
     return this.stopOutcome
   }
 
+  /** Structured plugin fault-containment state for UI/diagnostics. */
+  get pluginRecoveryState(): PluginRecoveryState {
+    return {
+      ...this.recoveryState,
+      isolatedPlugins: [...this.recoveryState.isolatedPlugins],
+      suspectedPlugins: [...this.recoveryState.suspectedPlugins],
+    }
+  }
+
+  async clearPluginQuarantine(): Promise<void> {
+    if (this.options.pluginQuarantinePath) {
+      await clearPluginQuarantine(this.options.pluginQuarantinePath)
+    }
+  }
+
   async start(): Promise<ReadyInfo> {
+    this.stopping = false
+    this.recoveryState = emptyRecoveryState()
     const env = { ...process.env, ...this.options.env }
     if (this.options.packaged) {
       await verifyPackagedPlugin(this.options.pluginPath, this.options.log)
@@ -121,8 +166,6 @@ export class DshRuntime {
     })
 
     if (mode === 'download') {
-      // Prefer a pinned HarnessDock runtime bundle when the exact upstream dsh
-      // version is GitHub-only; otherwise retain the npm closure downloader.
       const downloaded = await ensureDownloadedRuntime({
         origin: this.options.origin,
         env,
@@ -212,6 +255,7 @@ export class DshRuntime {
     }
 
     const captureConfigDump = async (): Promise<string> => {
+      if (this.options.configDumpImpl) return this.options.configDumpImpl()
       const args = [
         ...command.argsPrefix,
         '--profile',
@@ -261,6 +305,58 @@ export class DshRuntime {
 
     const timeoutMs = this.options.readyTimeoutMs ?? 120_000
     const stabilityMs = this.options.readyStabilityMs ?? 1_000
+    const recoveryEnabled = this.options.packaged === true && env.HARNESSDOCK_PLUGIN_RECOVERY !== '0'
+
+    // Circuit breaker: a recently proven external-plugin isolation set may be
+    // applied before the normal boot. It is host-owned, version-scoped and
+    // expiring; an invalid quarantine is cleared and never blocks normal boot.
+    if (recoveryEnabled && this.options.pluginQuarantinePath) {
+      const quarantine = await readPluginQuarantine(this.options.pluginQuarantinePath, version)
+      if (quarantine) {
+        const quarantinePatchFile = path.join(this.workDir, 'plugin-quarantine.patch.yml')
+        await writeFile(
+          quarantinePatchFile,
+          renderPluginRecoveryPatch(quarantine.isolatedPlugins.map((id) => ({ id }))),
+          'utf8',
+        )
+        await rm(readyFile, { force: true }).catch(() => undefined)
+        this.options.log?.(
+          `runtime: applying plugin quarantine before boot (${quarantine.isolatedPlugins.length} external row(s), expires ${quarantine.expiresAt})`,
+        )
+        const quarantineChild = spawnRuntime(quarantinePatchFile)
+        this.child = quarantineChild
+        try {
+          const ready = await waitForReady(
+            quarantineChild,
+            readyFile,
+            version,
+            timeoutMs,
+            stabilityMs,
+            this.options.log,
+          )
+          this.recoveryState = {
+            active: true,
+            source: 'quarantine',
+            isolatedPlugins: [...quarantine.isolatedPlugins],
+            suspectedPlugins: [...quarantine.suspectedPlugins],
+            reason: quarantine.reason,
+            quarantineExpiresAt: quarantine.expiresAt,
+          }
+          drainOutput(quarantineChild, this.options.log)
+          return ready
+        } catch (quarantineError) {
+          this.options.log?.(
+            `runtime: quarantined boot failed; clearing stale quarantine and retrying normal configuration: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`,
+          )
+          await terminateRuntimeChild(quarantineChild)
+          this.child = undefined
+          await clearPluginQuarantine(this.options.pluginQuarantinePath).catch(() => undefined)
+          await rm(readyFile, { force: true }).catch(() => undefined)
+          this.recoveryState = emptyRecoveryState()
+        }
+      }
+    }
+
     const child = spawnRuntime()
     this.child = child
 
@@ -281,7 +377,6 @@ export class DshRuntime {
       await terminateRuntimeChild(child)
       this.child = undefined
 
-      const recoveryEnabled = this.options.packaged === true && env.HARNESSDOCK_PLUGIN_RECOVERY !== '0'
       if (!recoveryEnabled) throw error
 
       let dump = ''
@@ -293,7 +388,8 @@ export class DshRuntime {
         )
         throw error
       }
-      const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), diagnostic)
+      const plan = buildPluginRecoveryPlan(parseConfigDumpRows(dump), diagnostic)
+      const selected = plan.isolationRows
       if (selected.length === 0) {
         this.options.log?.('runtime: plugin recovery found no third-party/user-added rows; preserving original failure')
         throw error
@@ -303,8 +399,9 @@ export class DshRuntime {
       await writeFile(recoveryPatchFile, renderPluginRecoveryPatch(selected), 'utf8')
       await rm(readyFile, { force: true }).catch(() => undefined)
       const ids = selected.map((row) => row.id)
+      const suspectedIds = plan.suspectedRows.map((row) => row.id)
       this.options.log?.(
-        `runtime: compatibility recovery isolating ${ids.length} row(s) for this session only: ${ids.join(', ')}`,
+        `runtime: compatibility recovery isolating ${ids.length} external row(s) for this session: ${ids.join(', ')}`,
       )
 
       const recoveryChild = spawnRuntime(recoveryPatchFile)
@@ -318,6 +415,31 @@ export class DshRuntime {
           stabilityMs,
           this.options.log,
         )
+        let quarantineExpiresAt: string | undefined
+        if (this.options.pluginQuarantinePath) {
+          try {
+            const record = await writePluginQuarantine(this.options.pluginQuarantinePath, {
+              dshVersion: version,
+              isolatedPlugins: ids,
+              suspectedPlugins: suspectedIds,
+              reason: plan.reason,
+              ttlMs: this.options.pluginQuarantineTtlMs,
+            })
+            quarantineExpiresAt = record.expiresAt
+          } catch (quarantineError) {
+            this.options.log?.(
+              `runtime: failed to persist non-fatal plugin quarantine: ${quarantineError instanceof Error ? quarantineError.message : String(quarantineError)}`,
+            )
+          }
+        }
+        this.recoveryState = {
+          active: true,
+          source: 'startup-failure',
+          isolatedPlugins: ids,
+          suspectedPlugins: suspectedIds,
+          reason: plan.reason,
+          ...(quarantineExpiresAt ? { quarantineExpiresAt } : {}),
+        }
         drainOutput(recoveryChild, this.options.log)
         this.options.log?.(
           `runtime: compatibility recovery succeeded; user configuration was not modified; isolated: ${ids.join(', ')}`,
