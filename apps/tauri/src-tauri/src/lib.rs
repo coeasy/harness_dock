@@ -12,13 +12,15 @@ mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::Manager;
 
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
     pub(crate) runtime_starting: AtomicBool,
     pub(crate) runtime_restarting: AtomicBool,
-    pub(crate) web_restarting: AtomicBool,
+    pub(crate) web_action: AtomicBool,
+    pub(crate) settings_opening: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: AtomicBool,
@@ -30,7 +32,8 @@ impl Default for AppState {
             runtime: Mutex::new(None),
             runtime_starting: AtomicBool::new(false),
             runtime_restarting: AtomicBool::new(false),
-            web_restarting: AtomicBool::new(false),
+            web_action: AtomicBool::new(false),
+            settings_opening: AtomicBool::new(false),
             gateway: Mutex::new(None),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: AtomicBool::new(false),
@@ -40,13 +43,37 @@ impl Default for AppState {
 
 pub(crate) fn request_exit(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    state.quitting.store(true, Ordering::SeqCst);
-    // Stop startup tasks that have spawned a child but have not yet published
-    // it into the Runtime/Gateway state slots, then stop the published hosts.
-    process::stop_starting_processes(&state.starting_processes);
-    gateway_host::stop_managed(&state.gateway);
-    runtime::stop_managed(&state.runtime);
-    app.exit(0);
+    if state.quitting.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    // Do not terminate the Tauri process until every managed child has had a
+    // chance to leave. Runtime/Gateway startup uses blocking tasks, so an
+    // immediate app.exit() here can race the task after it has spawned Node but
+    // before it has published the Child into AppState.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let cleanup_handle = handle.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let state = cleanup_handle.state::<AppState>();
+            for _ in 0..50 {
+                process::stop_starting_processes(&state.starting_processes);
+                gateway_host::stop_managed(&state.gateway);
+                runtime::stop_managed(&state.runtime);
+                if process::starting_processes_empty(&state.starting_processes) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            // One final idempotent pass covers a startup task that published
+            // its Child just as the last registry check completed.
+            process::stop_starting_processes(&state.starting_processes);
+            gateway_host::stop_managed(&state.gateway);
+            runtime::stop_managed(&state.runtime);
+        })
+        .await;
+        handle.exit(0);
+    });
 }
 
 #[cfg(not(mobile))]
@@ -67,7 +94,12 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     app.on_menu_event(|app_handle: &tauri::AppHandle, event| {
         match event.id().0.as_str() {
             "shell-refresh-web" => {
-                let _ = harness_window::harness_reload_web(app_handle.clone());
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::harness_reload_web(handle).await {
+                        eprintln!("Web refresh from app menu failed: {error}");
+                    }
+                });
             }
             "shell-restart-web" => {
                 let handle = app_handle.clone();
@@ -78,7 +110,12 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
                 });
             }
             "shell-settings" => {
-                let _ = harness_window::shell_settings_show(app_handle.clone());
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::shell_settings_show(handle).await {
+                        eprintln!("Shell settings from app menu failed: {error}");
+                    }
+                });
             }
             _ => {}
         }
@@ -143,10 +180,10 @@ pub fn run() {
                 .state::<AppState>()
                 .quitting
                 .load(std::sync::atomic::Ordering::SeqCst)
-                && (label == "main" || label == "harness") =>
+                && (label == "main" || label == "harness" || label == "settings") =>
             {
-                // Closing a window means "hide to tray". Only the explicit
-                // tray/menu Exit action terminates the application.
+                // Closing any client window means "hide to tray". Only the
+                // explicit tray/settings Exit action terminates the process.
                 api.prevent_close();
                 if let Some(window) = app_handle.get_webview_window(&label) {
                     let _ = window.hide();

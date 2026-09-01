@@ -47,6 +47,10 @@ pub(crate) fn stop_starting_processes(registry: &StartingProcessRegistry) {
     }
 }
 
+pub(crate) fn starting_processes_empty(registry: &StartingProcessRegistry) -> bool {
+    registry.lock().map(|pids| pids.is_empty()).unwrap_or(true)
+}
+
 /// Stop a managed child and all descendants. Runtime and Gateway are Node
 /// processes, so killing only `Child` can leave worker processes behind.
 pub(crate) fn stop_child_tree(child: &mut Child) {

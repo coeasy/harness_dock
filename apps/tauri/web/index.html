@@ -16,10 +16,7 @@
       <p id="platform-summary" class="muted">正在检测运行环境…</p>
       <div id="boot-status" class="boot-status" role="status" aria-live="polite"><span class="boot-dot" aria-hidden="true"></span><span>界面已就绪，正在准备运行环境…</span></div>
       <div class="hero-actions"><button id="shell-settings-entry" class="secondary">⚙ 外壳设置</button><button id="shell-open-harness" class="primary">打开 Harness</button></div>
-    </section>
-    <section id="shell-settings" class="card">
-      <div class="card-heading"><div><h2>外壳设置插件</h2><p>这是按需加载的独立外壳设置插件窗口，只在用户点击 Harness 顶部按钮或应用菜单后打开；正常启动始终优先进入 Harness Web。</p></div><span class="badge">on demand</span></div>
-      <p id="shell-detail" class="status">Harness Web 是必开的主工作窗口；插件异常只进入兼容/安全模式，不会阻止 Web 使用。外壳设置本身不会参与启动。</p>
+      <p id="shell-detail" class="status" role="status" aria-live="polite">正常启动将直接打开 Harness Web；此页面只在启动失败时作为恢复入口。</p>
     </section>
     <section id="desktop-card" class="card hidden">
       <div class="card-heading"><div><h2>本地 Runtime</h2><p>桌面端托管完整 DeepSeek Harness Runtime；第三方插件异常只会触发 Runtime 降级，不会关闭 HarnessDock。</p></div><span id="runtime-state" class="badge">stopped</span></div>

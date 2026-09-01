@@ -33,7 +33,12 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "tray-open" => show_primary(app),
             "tray-settings" => {
-                let _ = harness_window::shell_settings_show(app.clone());
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::shell_settings_show(handle).await {
+                        eprintln!("shell settings from tray failed: {error}");
+                    }
+                });
             }
             "tray-restart" => {
                 let handle = app.clone();
@@ -47,7 +52,12 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             "tray-update" => {
                 // The settings plugin owns the update UI. Keeping this action
                 // non-blocking makes the tray responsive even during Runtime boot.
-                let _ = harness_window::shell_settings_show(app.clone());
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::shell_settings_show(handle).await {
+                        eprintln!("shell settings from tray failed: {error}");
+                    }
+                });
             }
             "tray-quit" => {
                 crate::request_exit(app);
