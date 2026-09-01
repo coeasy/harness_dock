@@ -78,9 +78,9 @@ pub(crate) const INIT_SCRIPT: &str = r##"
       '#harnessdock-shell-toast{position:fixed;top:52px;right:12px;max-width:min(360px,calc(100vw - 24px));padding:9px 12px;border:1px solid rgba(248,113,113,.45);border-radius:10px;background:rgba(49,19,28,.96);color:#fecaca;font-size:12px;line-height:1.45;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}',
       '#harnessdock-shell-toast[data-bad="false"]{border-color:rgba(45,212,191,.42);background:rgba(7,47,38,.96);color:#b8fff2}',
       '#harnessdock-shell-toast.is-visible{opacity:1;transform:translateY(0)}',
-      'html.harnessdock-shell-mounted{scroll-padding-top:var(--harnessdock-shell-top-inset);scroll-padding-bottom:var(--harnessdock-shell-bottom-inset)}',
-      'html.harnessdock-shell-mounted body{box-sizing:border-box!important;min-height:100vh!important;padding-top:var(--harnessdock-shell-top-inset)!important;padding-bottom:var(--harnessdock-shell-bottom-inset)!important;overflow-x:hidden!important}',
-      'html.harnessdock-shell-mounted body #root,html.harnessdock-shell-mounted body #app,html.harnessdock-shell-mounted body [data-reactroot]{box-sizing:border-box!important;min-height:calc(100vh - var(--harnessdock-shell-top-inset) - var(--harnessdock-shell-bottom-inset))!important}',
+      'html.harnessdock-shell-mounted{height:100%!important;overflow:hidden!important;scroll-padding-top:var(--harnessdock-shell-top-inset);scroll-padding-bottom:var(--harnessdock-shell-bottom-inset)}',
+      'html.harnessdock-shell-mounted body{box-sizing:border-box!important;height:100vh!important;min-height:0!important;margin:0!important;padding-top:var(--harnessdock-shell-top-inset)!important;padding-bottom:var(--harnessdock-shell-bottom-inset)!important;overflow:hidden!important}',
+      'html.harnessdock-shell-mounted body #root,html.harnessdock-shell-mounted body #app,html.harnessdock-shell-mounted body [data-reactroot]{box-sizing:border-box!important;height:100%!important;min-height:0!important;max-height:100%!important;overflow:auto!important}',
       '@media (max-width:720px){#harnessdock-shell{padding-left:10px;padding-right:7px}#harnessdock-shell .harnessdock-shell-brand span:last-child{display:none}#harnessdock-shell .harnessdock-shell-actions{max-width:calc(100vw - 34px);gap:3px}#harnessdock-shell button{padding-left:7px;padding-right:7px;font-size:11px}}'
     ].join('');
     document.documentElement.appendChild(style);

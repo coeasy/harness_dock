@@ -45,7 +45,7 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let _window = WebviewWindowBuilder::new(
         app,
         "settings",
         WebviewUrl::App("settings.html".into()),
@@ -58,14 +58,16 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     // the page hidden until the native window exists also prevents a half-built
     // settings surface from flashing during startup.
     .visible(false)
+    .on_page_load(|window, payload| {
+        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+            // Do not expose an unpainted WebView. The settings plugin becomes
+            // visible only after its HTML/CSS/JS document has finished loading.
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    })
     .build()
     .map_err(|error| format!("无法创建外壳设置插件窗口: {error}"))?;
-    window
-        .show()
-        .map_err(|error| format!("无法显示外壳设置插件: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("无法聚焦外壳设置插件: {error}"))?;
     Ok(())
 }
 
@@ -93,7 +95,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
             return Ok(());
         }
 
-        let window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
+        let _window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
             .title("HarnessDock · DeepSeek Harness")
             .initialization_script(INIT_SCRIPT)
             // Navigation replaces the document and therefore does not rerun
@@ -321,6 +323,28 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
             .set_focus()
             .map_err(|error| format!("无法聚焦 HarnessDock 控制页: {error}"))?;
         Ok(())
+    }
+}
+
+/// The bundled control page is a hidden bootstrap/recovery surface on desktop.
+/// Hiding it explicitly at boot also covers upgrades from builds that showed
+/// the page by default, so the first user-visible surface is always Harness Web.
+#[tauri::command]
+pub fn control_hide(app: AppHandle) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        let control = app
+            .get_webview_window("main")
+            .ok_or_else(|| "HarnessDock 启动控制页窗口不存在。".to_string())?;
+        control
+            .hide()
+            .map_err(|error| format!("无法隐藏 HarnessDock 启动控制页: {error}"))
     }
 }
 

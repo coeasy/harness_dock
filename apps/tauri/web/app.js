@@ -172,7 +172,11 @@
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
       if (platform.runtimeMode === 'local') {
-        bootStatus('正在准备本地 Runtime，控制页已就绪…')
+        // The bundled page is a hidden bootstrap/recovery surface. Explicitly
+        // hide it before starting Runtime so upgrades from older builds cannot
+        // flash the virtual settings page before Harness Web is ready.
+        await call('control_hide')
+        bootStatus('正在准备本地 Runtime，稍后直接打开 Harness Web…')
         await autoStartDesktopRuntime()
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')

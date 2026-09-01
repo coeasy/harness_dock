@@ -12,7 +12,7 @@
 
 ## 当前版本
 
-- **HarnessDock v0.2.6**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
+- **HarnessDock v0.2.7**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
 - Electron Thin/Full 构建逻辑暂时保留在 `apps/desktop` 作为兼容与迁移参考，**不进入正式 candidate / Release**；稳定后可独立删除。
 - 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
 
@@ -27,7 +27,7 @@
 | Android arm64 | Remote-only | release-optimized `.apk` + `.aab` |
 | iOS Simulator arm64 | Remote-only | Simulator `.zip` |
 
-## v0.2.6 安装与升级体验
+## v0.2.7 安装与升级体验
 
 - 统一 1024x1024 HarnessDock 品牌源图，candidate 自动生成桌面、Android、iOS 所需图标。
 - Windows NSIS 安装器和卸载器显式使用 HarnessDock 图标，并使用品牌化 header/sidebar；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
