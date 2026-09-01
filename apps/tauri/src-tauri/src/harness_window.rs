@@ -127,6 +127,12 @@ pub async fn harness_close(app: AppHandle) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+pub fn app_quit(app: AppHandle) -> Result<(), String> {
+    crate::request_exit(&app);
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessWindowState {

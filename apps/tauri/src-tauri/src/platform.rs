@@ -10,11 +10,21 @@ use std::{
 /// to Rust's `std::process::Command`, so the native creation flag is required
 /// for the bundled Node Runtime and Gateway sidecar.
 pub(crate) fn configure_child_command(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Give every managed helper its own process group so shutdown can
+        // terminate Node workers and any descendants as one unit.
+        command.process_group(0);
+    }
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        // The process tree is terminated explicitly by process.rs. Keep the
+        // helper hidden from users while preserving a separate group boundary.
+        command.creation_flags(CREATE_NO_WINDOW | 0x0000_0200);
     }
 }
 

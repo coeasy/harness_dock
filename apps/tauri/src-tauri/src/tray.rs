@@ -1,15 +1,9 @@
-use crate::{harness_window, AppState};
+use crate::harness_window;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
-
-fn mark_quitting(app: &AppHandle) {
-    if let Some(state) = app.try_state::<AppState>() {
-        state.quitting.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-}
 
 fn show_primary(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("harness") {
@@ -60,8 +54,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                 let _ = harness_window::shell_settings_show(app.clone());
             }
             "tray-quit" => {
-                mark_quitting(app);
-                app.exit(0);
+                crate::request_exit(app);
             }
             _ => {}
         })

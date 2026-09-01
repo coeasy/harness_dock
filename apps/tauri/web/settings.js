@@ -137,12 +137,29 @@
     }
   }
 
+  async function quit() {
+    if (busy) return
+    busy = true
+    $('settings-quit').disabled = true
+    setStatus($('runtime-detail'), '正在关闭 HarnessDock 及其全部后台进程…')
+    try {
+      await call('app_quit')
+    } catch (error) {
+      // The native process may exit before the IPC response is delivered.
+      // Only render an error while the window is still alive.
+      setStatus($('runtime-detail'), message(error), true)
+      $('settings-quit').disabled = false
+      busy = false
+    }
+  }
+
   $('settings-open-harness').addEventListener('click', openHarness)
   $('runtime-refresh').addEventListener('click', refresh)
   $('runtime-restart').addEventListener('click', () => restart(false))
   $('runtime-clear-restart').addEventListener('click', () => restart(true))
   $('runtime-stop').addEventListener('click', stop)
   $('update-check').addEventListener('click', checkUpdate)
+  $('settings-quit').addEventListener('click', quit)
   $('settings-close').addEventListener('click', async () => {
     try { await call('shell_settings_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
   })

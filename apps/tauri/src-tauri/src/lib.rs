@@ -4,19 +4,21 @@ mod harness_shell;
 mod harness_window;
 mod platform;
 mod plugin_quarantine;
+mod process;
 mod runtime;
 mod update;
 #[cfg(not(mobile))]
 mod tray;
 
-use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
     pub(crate) runtime_starting: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
+    pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: AtomicBool,
 }
 
@@ -26,9 +28,21 @@ impl Default for AppState {
             runtime: Mutex::new(None),
             runtime_starting: AtomicBool::new(false),
             gateway: Mutex::new(None),
+            starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: AtomicBool::new(false),
         }
     }
+}
+
+pub(crate) fn request_exit(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    state.quitting.store(true, Ordering::SeqCst);
+    // Stop startup tasks that have spawned a child but have not yet published
+    // it into the Runtime/Gateway state slots, then stop the published hosts.
+    process::stop_starting_processes(&state.starting_processes);
+    gateway_host::stop_managed(&state.gateway);
+    runtime::stop_managed(&state.runtime);
+    app.exit(0);
 }
 
 #[cfg(not(mobile))]
@@ -84,6 +98,7 @@ pub fn run() {
             harness_window::control_show,
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,
+            harness_window::app_quit,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_restart,
@@ -118,6 +133,7 @@ pub fn run() {
             }
             tauri::RunEvent::Exit => {
                 let state = app_handle.state::<AppState>();
+                process::stop_starting_processes(&state.starting_processes);
                 gateway_host::stop_managed(&state.gateway);
                 runtime::stop_managed(&state.runtime);
             }
