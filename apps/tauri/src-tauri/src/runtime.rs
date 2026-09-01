@@ -948,7 +948,7 @@ pub(crate) async fn restart_managed(app: AppHandle) -> Result<RuntimeStatus, Str
     let _restarting = RuntimeRestartGuard(&state.runtime_restarting);
     {
         crate::gateway_host::stop_managed(&state.gateway);
-        runtime_stop(state)?;
+        runtime_stop(app.state::<AppState>())?;
     }
     let state = app.state::<AppState>();
     runtime_start_impl(app.clone(), state).await
