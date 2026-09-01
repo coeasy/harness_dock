@@ -36,45 +36,47 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             "tray-open" => show_primary(app),
             "tray-settings" => {
                 let handle = app.clone();
+                let report_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::shell_settings_show(handle).await {
-                        eprintln!("plugin diagnostics from tray failed: {error}");
+                        crate::report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "tray-refresh" => {
                 let handle = app.clone();
+                let report_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::harness_reload_web(handle).await {
-                        eprintln!("Web refresh from tray failed: {error}");
+                        crate::report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "tray-restart" => {
                 let handle = app.clone();
+                let report_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     match harness_window::harness_restart_web(handle).await {
                         Ok(_) => {}
-                        Err(error) => eprintln!("runtime restart from tray failed: {error}"),
+                        Err(error) => crate::report_shell_error(&report_handle, &error),
                     }
                 });
             }
             "tray-clear-quarantine" => {
                 let handle = app.clone();
+                let report_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::harness_clear_quarantine_restart(handle).await {
-                        eprintln!("plugin recovery from tray failed: {error}");
+                        crate::report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "tray-update" => {
                 let handle = app.clone();
+                let report_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = crate::update::update_install(handle.clone()).await {
-                        eprintln!("Automatic update from tray failed: {error}");
-                        if let Err(open_error) = harness_window::shell_settings_show(handle).await {
-                            eprintln!("Plugin diagnostics fallback failed: {open_error}");
-                        }
+                        crate::report_shell_error(&report_handle, &error);
                     }
                 });
             }

@@ -3,21 +3,6 @@
 
   const $ = (id) => document.getElementById(id)
   let currentRuntime
-  let busy = false
-
-  function setButtonBusy(button, value, label = '处理中') {
-    if (!button) return
-    if (value) {
-      button.dataset.idleLabel = button.textContent || ''
-      button.textContent = `${label}…`
-      button.classList.add('is-busy')
-      button.setAttribute('aria-busy', 'true')
-    } else {
-      button.textContent = button.dataset.idleLabel || button.textContent
-      button.classList.remove('is-busy')
-      button.removeAttribute('aria-busy')
-    }
-  }
 
   function call(command, args) {
     const invoke = window.__TAURI__?.core?.invoke
@@ -36,7 +21,7 @@
   }
 
   function runtimeDescription(runtime) {
-    if (!runtime?.appUrl) return 'Runtime 尚未就绪。可以点击“重启 Runtime”执行一次完整启动。'
+    if (!runtime?.appUrl) return 'Runtime 尚未就绪。请关闭诊断窗口后从主界面的“操作”菜单执行重启。'
     const lines = [
       '状态：' + (runtime.recoveryMode ? '兼容模式（Web 可用）' : runtime.state),
       'Node：' + (runtime.nodeSource || 'unknown'),
@@ -53,18 +38,12 @@
     currentRuntime = runtime
     const label = runtime?.recoveryMode ? 'degraded' : (runtime?.state || 'stopped')
     $('runtime-state').textContent = label
-    $('settings-open-harness').disabled = !runtime?.appUrl || busy
-    $('settings-refresh-web').disabled = !runtime?.appUrl || busy
-    $('runtime-restart').disabled = busy
-    $('runtime-clear-restart').disabled = busy
-    $('runtime-stop').disabled = busy || !runtime?.appUrl
-    $('update-install').disabled = busy
     setStatus($('runtime-detail'), runtimeDescription(runtime))
     setStatus(
       $('web-detail'),
       runtime?.appUrl
-        ? 'Harness Web 已有可用地址；点击“打开 Harness Web”即可回到主工作窗口。'
-        : 'Runtime 尚未提供 Web 地址；设置页保持可用，可从这里重试安全启动。',
+        ? 'Harness Web 正在使用本地 Runtime；刷新、重启和插件恢复请从主界面的“操作”菜单执行。'
+        : 'Runtime 尚未提供 Web 地址；请关闭诊断窗口后从主界面的“操作”菜单重试。',
     )
   }
 
@@ -76,134 +55,7 @@
     }
   }
 
-  async function openHarness() {
-    try {
-      const runtime = await call('runtime_status')
-      if (!runtime?.appUrl) throw new Error('Runtime 尚未启动。')
-      await call('harness_open', { url: runtime.appUrl })
-      setStatus($('web-detail'), 'Harness Web 已打开。')
-    } catch (error) {
-      setStatus($('web-detail'), message(error), true)
-    }
-  }
-
-  async function refreshWeb() {
-    if (busy) return
-    const button = $('settings-refresh-web')
-    button.disabled = true
-    setButtonBusy(button, true, '刷新中')
-    setStatus($('web-detail'), '正在刷新 Harness Web（Runtime 保持运行）…')
-    try {
-      await call('harness_reload_web')
-      setStatus($('web-detail'), 'Harness Web 已刷新，Runtime 和当前会话保持不变。')
-    } catch (error) {
-      setStatus($('web-detail'), message(error), true)
-    } finally {
-      setButtonBusy(button, false)
-      button.disabled = busy || !currentRuntime?.appUrl
-    }
-  }
-
-  async function restart(clearQuarantine = false) {
-    if (busy) return
-    busy = true
-    const actionButton = $(clearQuarantine ? 'runtime-clear-restart' : 'runtime-restart')
-    setButtonBusy(actionButton, true, clearQuarantine ? '恢复中' : '重启中')
-    render(currentRuntime || { state: 'starting' })
-    setStatus($('runtime-detail'), clearQuarantine ? '正在清除隔离并重启 Runtime…' : '正在重启 Runtime 并刷新 Harness Web…')
-    try {
-      const runtime = await call(clearQuarantine ? 'harness_clear_quarantine_restart' : 'harness_restart_web')
-      if (!runtime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
-      render(runtime)
-      setStatus($('web-detail'), 'Runtime 已重启，Harness Web 已重新打开；插件诊断窗口保持按需关闭。')
-    } catch (error) {
-      setStatus($('runtime-detail'), message(error), true)
-    } finally {
-      busy = false
-      setButtonBusy(actionButton, false)
-      await refresh()
-    }
-  }
-
-  async function stop() {
-    if (busy) return
-    busy = true
-    const button = $('runtime-stop')
-    setButtonBusy(button, true, '停止中')
-    render(currentRuntime || { state: 'stopping' })
-    try {
-      await call('harness_close').catch(() => undefined)
-      await call('runtime_stop')
-      setStatus($('runtime-detail'), 'Runtime 已停止。再次使用时点击“重启 Runtime”。')
-    } catch (error) {
-      setStatus($('runtime-detail'), message(error), true)
-    } finally {
-      busy = false
-      setButtonBusy(button, false)
-      await refresh()
-    }
-  }
-
-  async function checkUpdate() {
-    const button = $('update-check')
-    const link = $('update-release-link')
-    button.disabled = true
-    setButtonBusy(button, true, '检查中')
-    $('update-state').textContent = 'checking'
-    setStatus($('update-detail'), '正在检查稳定版本…')
-    link.classList.add('hidden')
-    try {
-      const update = await call('update_check')
-      $('update-state').textContent = update.available ? 'available' : 'latest'
-      setStatus(
-        $('update-detail'),
-        update.available
-          ? `发现 HarnessDock v${update.latestVersion}（当前 v${update.currentVersion}）。可点击“自动更新并重启”安装已签名版本；当前运行不会被打断。`
-          : `当前已是最新稳定版本 v${update.currentVersion}。`,
-      )
-      if (update.available && update.releaseUrl) {
-        link.href = update.releaseUrl
-        link.classList.remove('hidden')
-      }
-    } catch (error) {
-      $('update-state').textContent = 'error'
-      setStatus($('update-detail'), message(error), true)
-    } finally {
-      setButtonBusy(button, false)
-      button.disabled = false
-    }
-  }
-
-  async function installUpdate() {
-    if (busy) return
-    busy = true
-    const button = $('update-install')
-    setButtonBusy(button, true, '更新中')
-    $('update-state').textContent = 'installing'
-    setStatus($('update-detail'), '正在检查、下载并校验签名更新；完成后将安全重启客户端…')
-    try {
-      const result = await call('update_install')
-      $('update-state').textContent = result?.status === 'latest' ? 'latest' : 'restarting'
-      setStatus(
-        $('update-detail'),
-        result?.status === 'latest'
-          ? '当前已是最新版本。'
-          : '更新已安装，HarnessDock 正在重启；Runtime 和 Gateway 会随退出流程一起关闭。',
-      )
-    } catch (error) {
-      $('update-state').textContent = 'error'
-      setStatus($('update-detail'), message(error), true)
-    } finally {
-      busy = false
-      setButtonBusy(button, false)
-      button.disabled = false
-      await refresh()
-    }
-  }
-
   async function quit() {
-    if (busy) return
-    busy = true
     $('settings-quit').disabled = true
     setStatus($('runtime-detail'), '正在关闭 HarnessDock 及其全部后台进程…')
     try {
@@ -213,23 +65,15 @@
       // Only render an error while the window is still alive.
       setStatus($('runtime-detail'), message(error), true)
       $('settings-quit').disabled = false
-      busy = false
     }
   }
 
-  $('settings-open-harness').addEventListener('click', openHarness)
-  $('settings-refresh-web').addEventListener('click', refreshWeb)
   $('runtime-refresh').addEventListener('click', refresh)
-  $('runtime-restart').addEventListener('click', () => restart(false))
-  $('runtime-clear-restart').addEventListener('click', () => restart(true))
-  $('runtime-stop').addEventListener('click', stop)
-  $('update-check').addEventListener('click', checkUpdate)
-  $('update-install').addEventListener('click', installUpdate)
   $('settings-quit').addEventListener('click', quit)
   $('settings-close').addEventListener('click', async () => {
     try { await call('shell_settings_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
   })
 
   void refresh()
-  window.setInterval(() => { if (!busy) void refresh() }, 4000)
+  window.setInterval(() => { void refresh() }, 4000)
 })()

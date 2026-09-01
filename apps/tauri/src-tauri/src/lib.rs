@@ -13,7 +13,7 @@ mod tray;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
@@ -49,6 +49,14 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
     process::stop_starting_processes(&state.starting_processes);
     gateway_host::stop_managed(&state.gateway);
     runtime::stop_managed(&state.runtime);
+}
+
+#[cfg(not(mobile))]
+pub(crate) fn report_shell_error(app: &tauri::AppHandle, error: &str) {
+    eprintln!("HarnessDock shell action failed: {error}");
+    if let Some(window) = app.get_webview_window("harness") {
+        let _ = window.emit("harnessdock-shell-error", error.to_string());
+    }
 }
 
 pub(crate) fn request_exit(app: &tauri::AppHandle) {
@@ -103,44 +111,46 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         match event.id().0.as_str() {
             "shell-refresh-web" => {
                 let handle = app_handle.clone();
+                let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::harness_reload_web(handle).await {
-                        eprintln!("Web refresh from app menu failed: {error}");
+                        report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "shell-restart-web" => {
                 let handle = app_handle.clone();
+                let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::harness_restart_web(handle).await {
-                        eprintln!("Web restart from app menu failed: {error}");
+                        report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "shell-settings" => {
                 let handle = app_handle.clone();
+                let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::shell_settings_show(handle).await {
-                        eprintln!("Plugin diagnostics from app menu failed: {error}");
+                        report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "shell-clear-quarantine" => {
                 let handle = app_handle.clone();
+                let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::harness_clear_quarantine_restart(handle).await {
-                        eprintln!("Plugin recovery from app menu failed: {error}");
+                        report_shell_error(&report_handle, &error);
                     }
                 });
             }
             "shell-update" => {
                 let handle = app_handle.clone();
+                let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = update::update_install(handle.clone()).await {
-                        eprintln!("Automatic update from app menu failed: {error}");
-                        if let Err(open_error) = harness_window::shell_settings_show(handle).await {
-                            eprintln!("Plugin diagnostics fallback failed: {open_error}");
-                        }
+                        report_shell_error(&report_handle, &error);
                     }
                 });
             }

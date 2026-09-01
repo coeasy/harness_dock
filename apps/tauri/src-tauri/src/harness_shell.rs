@@ -29,7 +29,6 @@ pub(crate) const INIT_SCRIPT: &str = r##"
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 4200);
   };
-
   const setShellAction = (action) => {
     activeAction = true;
     const statusContainer = document.getElementById('harnessdock-shell-status');
@@ -107,6 +106,11 @@ pub(crate) const INIT_SCRIPT: &str = r##"
 
   const install = () => {
     if (!document.documentElement || document.getElementById('harnessdock-shell')) return;
+
+    const listen = window.__TAURI__?.event?.listen;
+    if (typeof listen === 'function') {
+      void listen('harnessdock-shell-error', (event) => notify(event?.payload));
+    }
 
     const style = document.createElement('style');
     style.id = 'harnessdock-shell-style';
@@ -238,9 +242,11 @@ pub(crate) const INIT_SCRIPT: &str = r##"
     menuPanel.id = 'harnessdock-shell-menu-panel';
     menuPanel.className = 'harnessdock-shell-menu-panel';
     menuPanel.setAttribute('role', 'menu');
-    menuPanel.append(refreshButton, restartButton, quarantineRestartButton, updateButton);
+    settingsButton.classList.add('harnessdock-shell-menu-item');
+    bar.querySelector('.harnessdock-shell-separator')?.remove();
+    menuPanel.append(refreshButton, restartButton, quarantineRestartButton, settingsButton, updateButton);
     menu.append(menuToggle, menuPanel);
-    actions?.insertBefore(menu, settingsButton);
+    actions?.prepend(menu);
     ['harnessdock-shell-minimize', 'harnessdock-shell-maximize', 'harnessdock-shell-close'].forEach((id) => {
       document.getElementById(id)?.classList.add('harnessdock-shell-command');
     });

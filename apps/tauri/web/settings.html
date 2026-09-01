@@ -15,8 +15,6 @@
       <h1>插件诊断</h1>
       <p class="muted">仅在需要排查 Runtime、插件隔离或更新状态时打开；正常使用始终停留在 Harness Web。</p>
       <div class="hero-actions">
-        <button id="settings-open-harness" class="primary">打开 Harness Web</button>
-        <button id="settings-refresh-web" class="secondary">刷新 Web</button>
         <button id="settings-close" class="secondary">关闭</button>
         <button id="settings-quit" class="danger">退出 HarnessDock</button>
       </div>
@@ -30,35 +28,27 @@
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>Runtime 与插件恢复</h2><p>第三方插件失败会被隔离；系统 Node 启动异常时自动回退内置 Node。恢复操作不会改写用户的真实 DSH 配置。刷新 Web 不会重启 Runtime；完整重启会先停止 Gateway。</p></div>
+        <div><h2>Runtime 与插件状态</h2><p>第三方插件失败会被隔离；系统 Node 启动异常时自动回退内置 Node。恢复操作不会改写用户的真实 DSH 配置。刷新、重启和隔离恢复统一从主界面的“操作”菜单执行。</p></div>
         <span id="runtime-state" class="badge">checking</span>
       </div>
       <p id="runtime-detail" class="status"></p>
       <div class="actions">
-        <button id="runtime-refresh" class="secondary">刷新状态</button>
-        <button id="runtime-restart" class="primary">重启 Runtime</button>
-        <button id="runtime-clear-restart" class="secondary">清除插件隔离并重启</button>
-        <button id="runtime-stop" class="danger">停止 Runtime</button>
+        <button id="runtime-refresh" class="secondary">刷新诊断数据</button>
       </div>
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>版本更新</h2><p>检查后只安装通过签名校验的桌面更新；安装完成会先完整关闭 Runtime/Gateway，再重启客户端。</p></div>
-        <span id="update-state" class="badge">idle</span>
+        <div><h2>版本更新</h2><p>自动更新从主界面的“操作”菜单执行：先比较 GitHub 最新稳定 Release，再安装通过签名校验的客户端包；安装完成会先完整关闭 Runtime/Gateway，再重启客户端。</p></div>
+        <span class="badge">菜单操作</span>
       </div>
-      <p id="update-detail" class="status">点击“检查更新”后才访问 GitHub，避免启动阶段占用网络或影响 Harness Web 响应。</p>
-      <div class="actions">
-        <button id="update-check" class="secondary">检查更新</button>
-        <button id="update-install" class="primary">自动更新并重启</button>
-        <a id="update-release-link" class="secondary hidden" href="#" target="_blank" rel="noreferrer">打开发布页</a>
-      </div>
+      <p class="status">未配置发布签名时，菜单会提示最新版本和官方发布页，不会安装未经验证的程序包。</p>
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。只有需要查看 Runtime 状态、处理插件隔离或重新打开 Web 时，才使用本窗口。</p></div>
+        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。只有需要查看 Runtime、插件隔离或更新配置状态时，才使用本窗口。</p></div>
         <span class="badge">on demand</span>
       </div>
-      <p class="status">插件诊断关闭后不会停止 Runtime，也不会关闭 Harness Web。停止 Runtime 是显式操作，下一次启动仍会按 Web 优先策略执行。</p>
+      <p class="status">插件诊断关闭后不会停止 Runtime，也不会关闭 Harness Web。所有会影响运行状态的动作都在主界面显示执行中状态，诊断窗口只负责查看状态和退出客户端。</p>
     </section>
     <footer>HarnessDock v0.2.7 · Plugin Diagnostics</footer>
   </main>

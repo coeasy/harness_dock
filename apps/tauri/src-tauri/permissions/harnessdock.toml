@@ -60,8 +60,8 @@ commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_max
 
 [[permission]]
 identifier = "shell-settings"
-description = "Allows only the local Plugin Diagnostics window to inspect, recover, and securely update the owned Runtime."
-commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "update_check", "update_install", "harness_open", "harness_close", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart", "app_quit"]
+description = "Allows only the local Plugin Diagnostics window to inspect the owned Runtime and exit the client."
+commands.allow = ["shell_settings_close", "runtime_status", "app_quit"]
 
 [[permission]]
 identifier = "splash-status"

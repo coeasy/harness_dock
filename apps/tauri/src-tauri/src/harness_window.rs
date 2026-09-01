@@ -206,10 +206,11 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
         let Some(window) = app.get_webview_window("harness") else {
             return harness_open(app.clone(), url.to_string()).await;
         };
-        if let Err(error) = window.hide() {
-            hide_splash(&app);
-            return Err(format!("无法准备刷新 Harness Web 界面: {error}"));
-        }
+        // Keep the current document visible while the next document loads.
+        // Hiding first creates the blank-window failure mode users see when
+        // WebView navigation is slow or a renderer misses its load callback.
+        // The splash/progress surface still communicates that navigation is
+        // in progress, and the page-load hook restores focus after success.
         if let Err(error) = window.navigate(url) {
             hide_splash(&app);
             let _ = window.show();

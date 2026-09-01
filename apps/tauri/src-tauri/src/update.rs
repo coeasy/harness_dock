@@ -5,6 +5,10 @@ use std::time::Duration;
 
 #[cfg(not(mobile))]
 use tauri_plugin_updater::UpdaterExt;
+#[cfg(not(mobile))]
+use std::sync::atomic::Ordering;
+#[cfg(not(mobile))]
+use tauri::Manager;
 
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/coeasy/harness_dock/releases/latest";
 const UPDATER_ENDPOINT: &str =
@@ -38,6 +42,16 @@ pub struct UpdateInfo {
 pub struct UpdateInstallResult {
     pub status: String,
     pub version: Option<String>,
+}
+
+#[cfg(not(mobile))]
+struct UpdateActionGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+#[cfg(not(mobile))]
+impl Drop for UpdateActionGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 fn normalized_version(value: &str) -> String {
@@ -128,24 +142,52 @@ pub async fn update_install(
 
     #[cfg(not(mobile))]
     {
+        let state = app.state::<crate::AppState>();
+        if state.quitting.load(Ordering::Acquire) {
+            return Err("HarnessDock 正在退出，已拒绝自动更新。".into());
+        }
+        if state.web_action.swap(true, Ordering::AcqRel) {
+            return Err("HarnessDock 正在处理另一个操作，请稍候。".into());
+        }
+        let _action = UpdateActionGuard(&state.web_action);
+        crate::harness_window::show_splash(&app, "正在检查 GitHub 最新版本…");
+        let release = update_check().await.map_err(|error| {
+            crate::harness_window::hide_splash(&app);
+            format!("GitHub 最新版本检查失败: {error}")
+        })?;
+        if !release.available {
+            crate::harness_window::hide_splash(&app);
+            return Ok(UpdateInstallResult {
+                status: "latest".into(),
+                version: Some(release.current_version),
+            });
+        }
+
         let Some(public_key) = option_env!("HARNESSDOCK_UPDATER_PUBLIC_KEY")
             .filter(|value| !value.trim().is_empty())
         else {
-            return Err(
-                "自动更新尚未启用：发布签名公钥未配置。请在插件诊断中打开发布页手动更新。"
-                    .into(),
-            );
+            crate::harness_window::hide_splash(&app);
+            return Err(format!(
+                "GitHub 已发布 HarnessDock v{}，但安全自动安装尚未启用：发布签名公钥未配置。请打开发布页手动更新：{}",
+                release.latest_version, release.release_url
+            ));
         };
 
-        crate::harness_window::show_splash(&app, "正在检查安全更新…");
+        crate::harness_window::show_splash(&app, "正在准备签名更新…");
         let endpoint = UPDATER_ENDPOINT
             .parse()
-            .map_err(|error| format!("自动更新地址无效: {error}"))?;
+            .map_err(|error| {
+                crate::harness_window::hide_splash(&app);
+                format!("自动更新地址无效: {error}")
+            })?;
         let updater = app
             .updater_builder()
             .pubkey(public_key)
             .endpoints(vec![endpoint])
-            .map_err(|error| format!("无法配置安全更新服务: {error}"))?
+            .map_err(|error| {
+                crate::harness_window::hide_splash(&app);
+                format!("无法配置安全更新服务: {error}")
+            })?
             .timeout(Duration::from_secs(30))
             .on_before_exit({
                 let shutdown_app = app.clone();
@@ -155,7 +197,10 @@ pub async fn update_install(
             // Windows installer restart would otherwise race Runtime cleanup.
             .restart_after_install(false)
             .build()
-            .map_err(|error| format!("无法初始化安全更新服务: {error}"))?;
+            .map_err(|error| {
+                crate::harness_window::hide_splash(&app);
+                format!("无法初始化安全更新服务: {error}")
+            })?;
 
         let Some(update) = updater
             .check()
@@ -166,13 +211,20 @@ pub async fn update_install(
             })?
         else {
             crate::harness_window::hide_splash(&app);
-            return Ok(UpdateInstallResult {
-                status: "latest".into(),
-                version: None,
-            });
+            return Err(format!(
+                "GitHub 已发现 v{}，但签名更新清单尚未同步，暂不安装未知版本。",
+                release.latest_version
+            ));
         };
 
         let version = update.version.to_string();
+        if normalized_version(&version) != normalized_version(&release.latest_version) {
+            crate::harness_window::hide_splash(&app);
+            return Err(format!(
+                "GitHub 最新版本为 v{}，但签名更新清单为 v{}，版本不一致，暂不安装。",
+                release.latest_version, version
+            ));
+        }
         crate::harness_window::show_splash(&app, "正在下载签名更新…");
         let progress_app = app.clone();
         let mut downloaded = 0_u64;
