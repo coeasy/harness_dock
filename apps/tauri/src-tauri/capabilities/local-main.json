@@ -12,6 +12,8 @@
     "harness-window",
     "runtime-status",
     "runtime-start",
-    "runtime-stop"
+    "runtime-stop",
+    "runtime-maintenance",
+    "harness-shell"
   ]
 }
