@@ -1,4 +1,4 @@
-# HarnessDock Tauri v0.2.4
+# HarnessDock Tauri v0.2.5
 
 `apps/tauri` is the supported application host. Public desktop releases are **Full-only**: Windows, macOS and Linux packages include the pinned local DeepSeek Harness runtime. The legacy Electron Thin implementation remains in the repository for compatibility/testing but is not part of the Tauri candidate or GitHub Release.
 

@@ -12,7 +12,7 @@
 
 ## 当前版本
 
-- **HarnessDock v0.2.4**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
+- **HarnessDock v0.2.5**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
 - Electron Thin/Full 构建逻辑暂时保留在 `apps/desktop` 作为兼容与迁移参考，**不进入正式 candidate / Release**；稳定后可独立删除。
 - 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
 
@@ -27,7 +27,7 @@
 | Android arm64 | Remote-only | release-optimized `.apk` + `.aab` |
 | iOS Simulator arm64 | Remote-only | Simulator `.zip` |
 
-## v0.2.4 安装与升级体验
+## v0.2.5 安装与升级体验
 
 - 统一 1024x1024 HarnessDock 品牌源图，candidate 自动生成桌面、Android、iOS 所需图标。
 - Windows NSIS 安装器和卸载器显式使用 HarnessDock 图标，并使用品牌化 header/sidebar；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
@@ -37,6 +37,7 @@
 - 外壳设置作为独立按需插件窗口，只在 Harness 顶部按钮或应用菜单点击后显示，不抢占 Web 首屏。
 - 桌面端 Harness 使用自定义标题栏：设置、最小化、最大化/还原、隐藏到系统托盘；关闭窗口不会误杀 Runtime，托盘“退出 HarnessDock”才会执行完整退出清理。
 - 启动先显示可操作控制页和启动动画，再异步启动 Runtime；更新检查只在设置页主动点击时执行，失败会留在界面内并给出重试路径。
+- Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
 
 ## 架构
 

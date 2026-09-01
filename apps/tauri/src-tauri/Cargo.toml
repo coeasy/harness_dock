@@ -1,6 +1,6 @@
 [package]
 name = "harnessdock-tauri"
-version = "0.2.4"
+version = "0.2.5"
 description = "HarnessDock Tauri host for desktop, Android and iOS"
 authors = ["HarnessDock contributors"]
 edition = "2021"
