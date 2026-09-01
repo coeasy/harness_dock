@@ -410,7 +410,7 @@ jobs:
           test "$before" != "$after" || { echo 'Android launcher icon still matches Tauri template default' >&2; exit 1; }
       - name: Build Android candidate APK and AAB
         working-directory: apps/tauri
-        run: cargo tauri android build --release --apk --aab --target aarch64 --ci
+        run: cargo tauri android build --apk --aab --target aarch64 --ci
       - name: Validate Android outputs
         shell: bash
         run: |

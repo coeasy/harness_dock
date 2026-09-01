@@ -37,11 +37,11 @@ Mobile projects must be initialized before regenerating icons:
 ```bash
 cargo tauri android init --ci
 cargo tauri icon src-tauri/icons/app-icon.png
-cargo tauri android build --release --apk --aab --target aarch64 --ci
+cargo tauri android build --apk --aab --target aarch64 --ci
 
 cargo tauri ios init --ci
 cargo tauri icon src-tauri/icons/app-icon.png
 cargo tauri ios build --debug --target aarch64-sim --ci
 ```
 
-Public CI artifacts remain unsigned developer builds: Windows has no Authenticode signature, macOS is not notarized, Android is release-optimized but debug-signed, and iOS is Simulator-only. Release assets include SHA256SUMS. Use `--debug` only for local native debugging; it is not publishable because it retains a large unstripped shared library.
+Public CI artifacts remain unsigned developer builds: Windows has no Authenticode signature, macOS is not notarized, Android is release-optimized but debug-signed, and iOS is Simulator-only. Release assets include SHA256SUMS. Tauri CLI defaults `android build` to release mode; use `--debug` only for local native debugging, since it retains a large unstripped shared library.

@@ -93,7 +93,7 @@ jobs:
         run: cargo tauri android init --ci --skip-targets-install
       - name: Build Android smoke APK
         working-directory: apps/tauri
-        run: cargo tauri android build --release --apk --target aarch64 --ci
+        run: cargo tauri android build --apk --target aarch64 --ci
       - name: Check Android smoke package size
         shell: bash
         run: |
