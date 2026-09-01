@@ -900,7 +900,7 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
 pub async fn runtime_restart(app: AppHandle) -> Result<RuntimeStatus, String> {
     {
         let state = app.state::<AppState>();
-        gateway_host::stop_managed(&state.gateway);
+        crate::gateway_host::stop_managed(&state.gateway);
         runtime_stop(state)?;
     }
     let state = app.state::<AppState>();
