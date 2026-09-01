@@ -50,7 +50,7 @@ flowchart TD
 
 `harness` 只允许 loopback Runtime URL，注入脚本也会再次检查 loopback host。远程 Harness/Gateway 页面不会获得本地 Tauri IPC 权限。
 
-- `harness-shell` capability（窗口 `harness`）只允许 `shell_settings_show`；
+- `harness-shell` capability（窗口 `harness`）只允许按需打开设置、窗口控制和 Web 恢复命令；
 - `shell-settings` capability（窗口 `settings`）只允许读取/恢复宿主自有 Runtime；
 - `local-main` capability（窗口 `main`）负责启动控制和 Gateway；
 - 设置插件不能读取插件配置、执行任意命令或把远程页面升级为宿主权限。

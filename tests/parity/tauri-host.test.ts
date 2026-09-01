@@ -105,7 +105,7 @@ describe('Tauri v0.2 host contract', () => {
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
     const android = readJson('apps/tauri/src-tauri/tauri.android.conf.json')
     const ios = readJson('apps/tauri/src-tauri/tauri.ios.conf.json')
-    expect(tauri.app.windows[0].visible).toBe(true)
+    expect(tauri.app.windows[0].visible).toBe(false)
     expect(android.app.windows[0].visible).toBe(true)
     expect(ios.app.windows[0].visible).toBe(true)
 
@@ -145,13 +145,17 @@ describe('Tauri v0.2 host contract', () => {
     const settingsJs = readFileSync(path.join(repoRoot, 'apps/tauri/web/settings.js'), 'utf8')
     expect(capability.windows).toEqual(['harness'])
     expect(capability.local).toBe(false)
+    expect(capability.platforms).toEqual(['linux', 'macOS', 'windows'])
     expect(capability.remote.urls).toEqual([
-      'http://127.0.0.1:*',
-      'http://localhost:*',
-      'https://127.0.0.1:*',
-      'https://localhost:*',
+      'http://127.0.0.1:*/**',
+      'http://localhost:*/**',
+      'http://[::1]:*/**',
+      'https://127.0.0.1:*/**',
+      'https://localhost:*/**',
+      'https://[::1]:*/**',
     ])
     expect(capability.permissions).toContain('harness-shell')
+    expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).not.toContain('harness-shell')
     expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web"]')
     expect(shell).toContain("shell_settings_show")
     expect(shell).toContain("harness_reload_web")
@@ -171,6 +175,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(permission).toContain('identifier = "shell-settings"')
     expect(settingsHtml).toContain('Web 优先启动')
     expect(harnessWindow).toContain('pub async fn shell_settings_show')
+    expect(harnessWindow).toContain('pub fn control_hide')
     expect(harnessWindow).toContain('async fn show_settings_window')
     expect(harnessWindow).toContain('PageLoadEvent::Finished')
     expect(harnessWindow).not.toContain('eval("window.location.reload()")')
@@ -182,6 +187,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(settingsHtml).toContain('版本更新')
     expect(settingsHtml).toContain('id="settings-quit"')
     expect(web).toContain('openHarnessWithRetry')
+    expect(web).toContain("await call('control_hide')")
   })
 
   it('keeps Windows helper processes console-free and has a final Web UI safe profile', () => {

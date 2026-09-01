@@ -13,7 +13,6 @@
     "runtime-status",
     "runtime-start",
     "runtime-stop",
-    "runtime-maintenance",
-    "harness-shell"
+    "runtime-maintenance"
   ]
 }

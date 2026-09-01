@@ -3,12 +3,15 @@
   "identifier": "harness-shell",
   "description": "Minimal capability for the loopback Harness WebView shell. It can open the separate local Shell Settings plugin window and operate only the owning Harness window.",
   "local": false,
+  "platforms": ["linux", "macOS", "windows"],
   "remote": {
     "urls": [
-      "http://127.0.0.1:*",
-      "http://localhost:*",
-      "https://127.0.0.1:*",
-      "https://localhost:*"
+      "http://127.0.0.1:*/**",
+      "http://localhost:*/**",
+      "http://[::1]:*/**",
+      "https://127.0.0.1:*/**",
+      "https://localhost:*/**",
+      "https://[::1]:*/**"
     ]
   },
   "windows": ["harness"],

@@ -324,6 +324,28 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// The bundled control page is a hidden bootstrap/recovery surface on desktop.
+/// Hiding it explicitly at boot also covers upgrades from builds that showed
+/// the page by default, so the first user-visible surface is always Harness Web.
+#[tauri::command]
+pub fn control_hide(app: AppHandle) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        let control = app
+            .get_webview_window("main")
+            .ok_or_else(|| "HarnessDock 启动控制页窗口不存在。".to_string())?;
+        control
+            .hide()
+            .map_err(|error| format!("无法隐藏 HarnessDock 启动控制页: {error}"))
+    }
+}
+
 #[tauri::command]
 pub async fn shell_settings_show(app: AppHandle) -> Result<(), String> {
     #[cfg(mobile)]

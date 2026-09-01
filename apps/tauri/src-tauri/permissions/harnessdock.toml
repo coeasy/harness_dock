@@ -21,7 +21,7 @@ commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_cre
 [[permission]]
 identifier = "harness-window"
 description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
-commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "harness_reload_web", "harness_restart_web"]
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web"]
 
 [[permission]]
 identifier = "runtime-status"
