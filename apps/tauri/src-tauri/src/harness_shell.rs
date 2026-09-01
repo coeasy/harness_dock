@@ -1,8 +1,8 @@
 /// Minimal shell bridge injected into the loopback Harness WebView.
 ///
 /// The official Harness UI stays the primary application surface. This script
-/// adds safe, local-only controls for the separate Shell Settings plugin window and
-/// the Harness window lifecycle; it never starts Runtime, changes DSH configuration,
+/// adds safe, local-only controls for the separate Shell Settings plugin window,
+/// Web refresh/restart and the Harness window lifecycle; it never changes DSH configuration,
 /// or exposes remote host controls. The settings window is prepared hidden during host setup and
 /// shown only after an explicit click.
 pub(crate) const INIT_SCRIPT: &str = r##"
@@ -74,6 +74,7 @@ pub(crate) const INIT_SCRIPT: &str = r##"
       '#harnessdock-shell svg{width:13px;height:13px;flex:0 0 13px}',
       '#harnessdock-shell .harnessdock-shell-separator{width:1px;height:18px;background:rgba(148,178,214,.22);margin:0 3px}',
       '#harnessdock-shell-toast{position:fixed;top:48px;right:12px;max-width:min(360px,calc(100vw - 24px));padding:9px 12px;border:1px solid rgba(248,113,113,.45);border-radius:10px;background:rgba(49,19,28,.96);color:#fecaca;font-size:12px;line-height:1.45;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}',
+      '#harnessdock-shell-toast[data-bad="false"]{border-color:rgba(45,212,191,.42);background:rgba(7,47,38,.96);color:#b8fff2}',
       '#harnessdock-shell-toast.is-visible{opacity:1;transform:translateY(0)}',
       'html body{padding-top:38px!important}'
     ].join('');
@@ -85,6 +86,48 @@ pub(crate) const INIT_SCRIPT: &str = r##"
     bar.setAttribute('aria-label', 'HarnessDock 外壳');
     bar.innerHTML = '<div class="harnessdock-shell-drag"><div class="harnessdock-shell-brand"><span class="harnessdock-shell-mark" aria-hidden="true"></span><span>HarnessDock</span></div></div><div class="harnessdock-shell-actions"><button id="harnessdock-shell-settings-button" class="harnessdock-shell-settings" type="button" title="打开外壳设置" aria-label="打开外壳设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm8.1 3.8c0-.5-.1-1-.2-1.4l-2-1.5 2-3.4-2.3-.9c-.7-.6-1.5-1-2.4-1.3L14.8 3h-4l-.4 2.3c-.9.3-1.7.7-2.4 1.3l-2.3-.9-2 3.4 2 1.5c-.1.5-.2 1-.2 1.4s.1 1 .2 1.4l-2 1.5 2 3.4 2.3-.9c.7.6 1.5 1 2.4 1.3l.4 2.3c.9.3 1.7.7 2.4 1.3l2.3-.9 2 3.4-2 1.5c.1.4.2.9.2 1.4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>设置</span></button><span class="harnessdock-shell-separator" aria-hidden="true"></span><button id="harnessdock-shell-minimize" class="harnessdock-shell-window-control" type="button" title="最小化" aria-label="最小化"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><button id="harnessdock-shell-maximize" class="harnessdock-shell-window-control" type="button" title="最大化" aria-label="最大化"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button><button id="harnessdock-shell-close" class="harnessdock-shell-window-control harnessdock-shell-close" type="button" title="隐藏到托盘" aria-label="隐藏到托盘"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div><div id="harnessdock-shell-toast" role="status" aria-live="polite"></div>';
     document.documentElement.appendChild(bar);
+
+    const actions = bar.querySelector('.harnessdock-shell-actions');
+    const settingsButton = document.getElementById('harnessdock-shell-settings-button');
+    const createWebAction = (id, label, title) => {
+      const button = document.createElement('button');
+      button.id = id;
+      button.className = 'harnessdock-shell-web-action';
+      button.type = 'button';
+      button.title = title;
+      button.setAttribute('aria-label', title);
+      button.textContent = label;
+      return button;
+    };
+    const refreshButton = createWebAction(
+      'harnessdock-shell-refresh-web',
+      '刷新 Web',
+      '刷新 Web（不重启 Runtime）',
+    );
+    const restartButton = createWebAction(
+      'harnessdock-shell-restart-web',
+      '重启 Web',
+      '重启 Runtime 并刷新 Web',
+    );
+    const webSeparator = document.createElement('span');
+    webSeparator.className = 'harnessdock-shell-separator';
+    webSeparator.setAttribute('aria-hidden', 'true');
+    actions?.insertBefore(refreshButton, settingsButton);
+    actions?.insertBefore(restartButton, settingsButton);
+    actions?.insertBefore(webSeparator, settingsButton);
+
+    refreshButton.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const result = await run('harness_reload_web', refreshButton);
+      if (result !== undefined) notify('Harness Web 已刷新。', false);
+    });
+    restartButton.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const result = await run('harness_restart_web', restartButton);
+      if (result?.appUrl) notify('Runtime 已重启，Harness Web 正在重新打开。', false);
+    });
 
     document.getElementById('harnessdock-shell-settings-button')?.addEventListener('click', (event) => {
       event.preventDefault();

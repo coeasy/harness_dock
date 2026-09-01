@@ -15,6 +15,8 @@ fn main() {
         "harness_toggle_maximize",
         "harness_window_state",
         "control_show",
+        "harness_reload_web",
+        "harness_restart_web",
         "shell_settings_show",
         "shell_settings_close",
         "runtime_status",

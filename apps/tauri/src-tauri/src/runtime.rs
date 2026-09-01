@@ -112,6 +112,14 @@ impl Drop for RuntimeStartGuard<'_> {
     }
 }
 
+struct RuntimeRestartGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for RuntimeRestartGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 impl Drop for RuntimeProcess {
     fn drop(&mut self) {
         self.stop();
@@ -874,6 +882,13 @@ pub fn runtime_status(state: State<'_, AppState>) -> RuntimeStatus {
 
 #[tauri::command]
 pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
+    if state.runtime_restarting.load(Ordering::Acquire) {
+        return Err("Runtime 正在重启，请稍候再试。".into());
+    }
+    runtime_start_impl(app, state).await
+}
+
+async fn runtime_start_impl(app: AppHandle, state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
     if cfg!(mobile) {
         return Err("Android/iOS 使用 Remote Gateway，不允许在移动设备内启动桌面 dsh Runtime。".into());
     }
@@ -922,15 +937,26 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     Ok(status)
 }
 
-#[tauri::command]
-pub async fn runtime_restart(app: AppHandle) -> Result<RuntimeStatus, String> {
+pub(crate) async fn restart_managed(app: AppHandle) -> Result<RuntimeStatus, String> {
+    let state = app.state::<AppState>();
+    if state.quitting.load(Ordering::Acquire) {
+        return Err("HarnessDock 正在退出，已拒绝 Runtime 重启。".into());
+    }
+    if state.runtime_restarting.swap(true, Ordering::AcqRel) {
+        return Err("Runtime 正在重启，请稍候再试。".into());
+    }
+    let _restarting = RuntimeRestartGuard(&state.runtime_restarting);
     {
-        let state = app.state::<AppState>();
         crate::gateway_host::stop_managed(&state.gateway);
-        runtime_stop(state)?;
+        runtime_stop(app.state::<AppState>())?;
     }
     let state = app.state::<AppState>();
-    runtime_start(app.clone(), state).await
+    runtime_start_impl(app.clone(), state).await
+}
+
+#[tauri::command]
+pub async fn runtime_restart(app: AppHandle) -> Result<RuntimeStatus, String> {
+    restart_managed(app).await
 }
 
 #[tauri::command]

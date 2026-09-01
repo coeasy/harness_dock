@@ -17,6 +17,8 @@ use tauri::Manager;
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
     pub(crate) runtime_starting: AtomicBool,
+    pub(crate) runtime_restarting: AtomicBool,
+    pub(crate) web_restarting: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: AtomicBool,
@@ -27,6 +29,8 @@ impl Default for AppState {
         Self {
             runtime: Mutex::new(None),
             runtime_starting: AtomicBool::new(false),
+            runtime_restarting: AtomicBool::new(false),
+            web_restarting: AtomicBool::new(false),
             gateway: Mutex::new(None),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: AtomicBool::new(false),
@@ -50,6 +54,8 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
     let shell = SubmenuBuilder::new(app, "HarnessDock")
+        .text("shell-refresh-web", "刷新 Harness Web")
+        .text("shell-restart-web", "重启并刷新 Harness Web")
         .text("shell-settings", "外壳设置")
         .build()
         .map_err(|error| format!("无法创建 HarnessDock 菜单项: {error}"))?;
@@ -59,8 +65,22 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         .map_err(|error| format!("无法创建 HarnessDock 菜单: {error}"))?;
     app.set_menu(menu).map_err(|error| format!("无法安装 HarnessDock 菜单: {error}"))?;
     app.on_menu_event(|app_handle: &tauri::AppHandle, event| {
-        if event.id().0.as_str() == "shell-settings" {
-            let _ = harness_window::shell_settings_show(app_handle.clone());
+        match event.id().0.as_str() {
+            "shell-refresh-web" => {
+                let _ = harness_window::harness_reload_web(app_handle.clone());
+            }
+            "shell-restart-web" => {
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::harness_restart_web(handle).await {
+                        eprintln!("Web restart from app menu failed: {error}");
+                    }
+                });
+            }
+            "shell-settings" => {
+                let _ = harness_window::shell_settings_show(app_handle.clone());
+            }
+            _ => {}
         }
     });
     Ok(())
@@ -96,6 +116,8 @@ pub fn run() {
             harness_window::harness_toggle_maximize,
             harness_window::harness_window_state,
             harness_window::control_show,
+            harness_window::harness_reload_web,
+            harness_window::harness_restart_web,
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,
             harness_window::app_quit,

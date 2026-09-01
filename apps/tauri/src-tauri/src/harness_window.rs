@@ -21,6 +21,14 @@ fn validated_runtime_url(value: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+struct WebRestartGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for WebRestartGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[cfg(not(mobile))]
 fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
@@ -124,6 +132,79 @@ pub async fn harness_close(app: AppHandle) -> Result<(), String> {
             window.hide().map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
         }
         Ok(())
+    }
+}
+
+/// Reload only the Harness WebView document. This keeps the Runtime, Gateway,
+/// session and plugin state alive, so it is the safe first-line recovery action
+/// for a renderer that is stale or visually stuck.
+#[tauri::command]
+pub fn harness_reload_web(app: AppHandle) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("移动端不提供桌面 Harness WebView 刷新命令。".into());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        let window = harness_window(&app)?;
+        window
+            .eval("window.location.reload()")
+            .map_err(|error| format!("无法刷新 Harness Web 界面: {error}"))
+    }
+}
+
+/// Replace the local Runtime/Gateway and reopen the Harness WebView at the new
+/// loopback URL. A failed restart returns the user to the control page instead
+/// of leaving an apparently ready but disconnected WebView on screen.
+#[tauri::command]
+pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("Android/iOS 使用 Remote Gateway，不支持重启桌面 Runtime。".into());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        if app
+            .state::<crate::AppState>()
+            .quitting
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("HarnessDock 正在退出，已拒绝 Web 重启。".into());
+        }
+        let state = app.state::<crate::AppState>();
+        if state.web_restarting.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return Err("Harness Web 正在重启，请稍候再试。".into());
+        }
+        let _restarting = WebRestartGuard(&state.web_restarting);
+
+        // Hide the stale WebView while its loopback Runtime is being replaced.
+        // If startup fails, surface the control page from the recovery path.
+        if let Some(window) = app.get_webview_window("harness") {
+            window
+                .hide()
+                .map_err(|error| format!("无法暂时隐藏 Harness Web 界面: {error}"))?;
+        }
+
+        let status = match crate::runtime::restart_managed(app.clone()).await {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = control_show(app.clone());
+                return Err(error);
+            }
+        };
+        let Some(url) = status.app_url.clone() else {
+            let _ = control_show(app.clone());
+            return Err("Runtime 重启成功，但没有返回 Harness Web 地址。".into());
+        };
+        if let Err(error) = harness_open(app.clone(), url).await {
+            let _ = control_show(app.clone());
+            return Err(error);
+        }
+        Ok(status)
     }
 }
 
