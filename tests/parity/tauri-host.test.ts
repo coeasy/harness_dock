@@ -118,7 +118,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(capability.permissions).toContain('harness-shell')
     expect(permission).toContain('commands.allow = ["shell_settings_show"]')
     expect(shell).toContain("shell_settings_show")
-    expect(web).toContain("await call('harness_open', { url: currentRuntime.appUrl })")
+    expect(web).toContain("await openHarnessWithRetry(currentRuntime.appUrl)")
     expect(web).not.toContain('autoOpenHarness')
     expect(web).not.toContain('auto-open-harness')
     expect(index).toContain('外壳设置插件')
