@@ -5,14 +5,30 @@ mod harness_window;
 mod platform;
 mod plugin_quarantine;
 mod runtime;
+mod update;
+#[cfg(not(mobile))]
+mod tray;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use tauri::Manager;
 
-#[derive(Default)]
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
+    pub(crate) runtime_starting: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
+    pub(crate) quitting: AtomicBool,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            runtime: Mutex::new(None),
+            runtime_starting: AtomicBool::new(false),
+            gateway: Mutex::new(None),
+            quitting: AtomicBool::new(false),
+        }
+    }
 }
 
 #[cfg(not(mobile))]
@@ -40,6 +56,16 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
 pub fn run() {
     let mut app = tauri::Builder::default()
         .manage(AppState::default())
+        .setup(|app| {
+            #[cfg(not(mobile))]
+            {
+                // Create both entry points before Runtime boot. A Runtime or
+                // plugin failure must never remove the user's exit path.
+                tray::create_tray(&app.handle())?;
+                let _ = harness_window::prewarm_settings_window(&app.handle());
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             platform::platform_info,
             gateway::gateway_health,
@@ -52,13 +78,18 @@ pub fn run() {
             gateway_host::gateway_host_stop,
             harness_window::harness_open,
             harness_window::harness_close,
+            harness_window::harness_minimize,
+            harness_window::harness_toggle_maximize,
+            harness_window::harness_window_state,
             harness_window::control_show,
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,
             runtime::runtime_status,
             runtime::runtime_start,
+            runtime::runtime_restart,
             runtime::runtime_stop,
             runtime::runtime_clear_plugin_quarantine,
+            update::update_check,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build HarnessDock Tauri application");
@@ -67,10 +98,30 @@ pub fn run() {
     install_shell_menu(&mut app).expect("failed to install HarnessDock shell settings menu");
 
     app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
-            let state = app_handle.state::<AppState>();
-            gateway_host::stop_managed(&state.gateway);
-            runtime::stop_managed(&state.runtime);
+        match event {
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } if !app_handle
+                .state::<AppState>()
+                .quitting
+                .load(std::sync::atomic::Ordering::SeqCst)
+                && (label == "main" || label == "harness") =>
+            {
+                // Closing a window means "hide to tray". Only the explicit
+                // tray/menu Exit action terminates the application.
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window(&label) {
+                    let _ = window.hide();
+                }
+            }
+            tauri::RunEvent::Exit => {
+                let state = app_handle.state::<AppState>();
+                gateway_host::stop_managed(&state.gateway);
+                runtime::stop_managed(&state.runtime);
+            }
+            _ => {}
         }
     });
 }

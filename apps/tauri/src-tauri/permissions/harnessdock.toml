@@ -21,7 +21,7 @@ commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_cre
 [[permission]]
 identifier = "harness-window"
 description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
-commands.allow = ["harness_open", "harness_close", "control_show"]
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show"]
 
 [[permission]]
 identifier = "runtime-status"
@@ -44,11 +44,16 @@ description = "Allows the local HarnessDock control surfaces to clear a persiste
 commands.allow = ["runtime_clear_plugin_quarantine"]
 
 [[permission]]
+identifier = "update-check"
+description = "Allows the local Shell Settings plugin to check the official project release feed for a newer version."
+commands.allow = ["update_check"]
+
+[[permission]]
 identifier = "harness-shell"
-description = "Allows the loopback Harness WebView to open the separate on-demand Shell Settings plugin; it cannot manage Runtime or Gateway."
-commands.allow = ["shell_settings_show"]
+description = "Allows the loopback Harness WebView to open the separate on-demand Shell Settings plugin and control only its own window."
+commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close"]
 
 [[permission]]
 identifier = "shell-settings"
 description = "Allows only the local Shell Settings plugin window to inspect and recover the owned Runtime."
-commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "harness_open", "harness_close"]
+commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "update_check", "harness_open", "harness_close"]

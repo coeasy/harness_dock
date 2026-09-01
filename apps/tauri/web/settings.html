@@ -41,12 +41,23 @@
     </section>
     <section class="card">
       <div class="card-heading">
+        <div><h2>版本更新</h2><p>只在你主动点击时检查 GitHub 稳定发布版本，不下载、不替换正在运行的程序。</p></div>
+        <span id="update-state" class="badge">idle</span>
+      </div>
+      <p id="update-detail" class="status">点击“检查更新”后才访问 GitHub，避免启动阶段占用网络或影响 Harness Web 响应。</p>
+      <div class="actions">
+        <button id="update-check" class="secondary">检查更新</button>
+        <a id="update-release-link" class="secondary hidden" href="#" target="_blank" rel="noreferrer">打开发布页</a>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-heading">
         <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。只有需要查看 Runtime 状态、处理插件隔离或重新打开 Web 时，才使用本窗口。</p></div>
         <span class="badge">on demand</span>
       </div>
       <p class="status">设置插件关闭后不会停止 Runtime，也不会关闭 Harness Web。停止 Runtime 是显式操作，下一次启动仍会按 Web 优先策略执行。</p>
     </section>
-    <footer>HarnessDock v0.2.4 · Shell Settings Plugin</footer>
+    <footer>HarnessDock v0.2.5 · Shell Settings Plugin</footer>
   </main>
   <script src="./settings.js" defer></script>
 </body>

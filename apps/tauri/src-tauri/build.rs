@@ -11,10 +11,17 @@ fn main() {
         "gateway_host_stop",
         "harness_open",
         "harness_close",
+        "harness_minimize",
+        "harness_toggle_maximize",
+        "harness_window_state",
         "control_show",
+        "shell_settings_show",
+        "shell_settings_close",
         "runtime_status",
         "runtime_start",
+        "runtime_restart",
         "runtime_stop",
+        "update_check",
     ];
 
     tauri_build::try_build(

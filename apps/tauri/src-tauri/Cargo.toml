@@ -1,6 +1,6 @@
 [package]
 name = "harnessdock-tauri"
-version = "0.2.4"
+version = "0.2.5"
 description = "HarnessDock Tauri host for desktop, Android and iOS"
 authors = ["HarnessDock contributors"]
 edition = "2021"
@@ -14,8 +14,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
-tauri = { version = "=2.11.5", features = [] }
+tauri = { version = "=2.11.5", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 url = "2.5"
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

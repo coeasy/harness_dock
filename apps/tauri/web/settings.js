@@ -109,11 +109,40 @@
     }
   }
 
+  async function checkUpdate() {
+    const button = $('update-check')
+    const link = $('update-release-link')
+    button.disabled = true
+    $('update-state').textContent = 'checking'
+    setStatus($('update-detail'), '正在检查稳定版本…')
+    link.classList.add('hidden')
+    try {
+      const update = await call('update_check')
+      $('update-state').textContent = update.available ? 'available' : 'latest'
+      setStatus(
+        $('update-detail'),
+        update.available
+          ? `发现 HarnessDock v${update.latestVersion}（当前 v${update.currentVersion}）。请打开发布页手动下载安装包；当前运行不会被打断。`
+          : `当前已是最新稳定版本 v${update.currentVersion}。`,
+      )
+      if (update.available && update.releaseUrl) {
+        link.href = update.releaseUrl
+        link.classList.remove('hidden')
+      }
+    } catch (error) {
+      $('update-state').textContent = 'error'
+      setStatus($('update-detail'), message(error), true)
+    } finally {
+      button.disabled = false
+    }
+  }
+
   $('settings-open-harness').addEventListener('click', openHarness)
   $('runtime-refresh').addEventListener('click', refresh)
   $('runtime-restart').addEventListener('click', () => restart(false))
   $('runtime-clear-restart').addEventListener('click', () => restart(true))
   $('runtime-stop').addEventListener('click', stop)
+  $('update-check').addEventListener('click', checkUpdate)
   $('settings-close').addEventListener('click', async () => {
     try { await call('shell_settings_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
   })

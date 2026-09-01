@@ -3,7 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{atomic::Ordering, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -91,10 +91,25 @@ impl RuntimeProcess {
         (self.node.clone(), self.ready.url.clone())
     }
 
+    fn is_alive(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(_)) => false,
+            Ok(None) | Err(_) => true,
+        }
+    }
+
     fn stop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = fs::remove_dir_all(&self.work_dir);
+    }
+}
+
+struct RuntimeStartGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for RuntimeStartGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
@@ -841,7 +856,11 @@ fn start_blocking(
 
 #[tauri::command]
 pub fn runtime_status(state: State<'_, AppState>) -> RuntimeStatus {
-    state.runtime.lock().ok().and_then(|guard| guard.as_ref().map(RuntimeProcess::status)).unwrap_or_else(stopped)
+    let Ok(mut guard) = state.runtime.lock() else { return stopped() };
+    if guard.as_mut().is_some_and(|process| !process.is_alive()) {
+        guard.take();
+    }
+    guard.as_ref().map(RuntimeProcess::status).unwrap_or_else(stopped)
 }
 
 #[tauri::command]
@@ -849,9 +868,19 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     if cfg!(mobile) {
         return Err("Android/iOS 使用 Remote Gateway，不允许在移动设备内启动桌面 dsh Runtime。".into());
     }
-    if let Some(current) = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?.as_ref() {
-        return Ok(current.status());
+    {
+        let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
+        if let Some(current) = guard.as_mut() {
+            if current.is_alive() {
+                return Ok(current.status());
+            }
+            guard.take();
+        }
     }
+    if state.runtime_starting.swap(true, Ordering::Acquire) {
+        return Err("Runtime 正在启动，请稍候再试。".into());
+    }
+    let _starting = RuntimeStartGuard(&state.runtime_starting);
     let runtime_root = resource_path(&app, "dsh-runtime")?;
     let plugin_path = resource_path(&app, "plugin-embedded-client/index.js")?;
     let compatibility_path = resource_path(&app, "dsh-client-runtime-compat/index.js")?;
@@ -865,6 +894,17 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     let status = process.status();
     *state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())? = Some(process);
     Ok(status)
+}
+
+#[tauri::command]
+pub async fn runtime_restart(app: AppHandle) -> Result<RuntimeStatus, String> {
+    {
+        let state = app.state::<AppState>();
+        crate::gateway_host::stop_managed(&state.gateway);
+        runtime_stop(state)?;
+    }
+    let state = app.state::<AppState>();
+    runtime_start(app.clone(), state).await
 }
 
 #[tauri::command]
