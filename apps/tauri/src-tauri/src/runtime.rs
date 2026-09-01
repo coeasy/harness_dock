@@ -10,7 +10,7 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 use url::Url;
 
-use crate::{platform, plugin_quarantine, AppState};
+use crate::{platform, plugin_quarantine, process as process_control, AppState};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,8 +99,7 @@ impl RuntimeProcess {
     }
 
     fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        process_control::stop_child_tree(&mut self.child);
         let _ = fs::remove_dir_all(&self.work_dir);
     }
 }
@@ -343,7 +342,8 @@ fn spawn_runtime(
     version: &str,
     dir: &Path,
     attempt: &str,
-) -> Result<(Child, PathBuf, PathBuf), String> {
+    starting_processes: &process_control::StartingProcessRegistry,
+) -> Result<(Child, PathBuf, PathBuf, process_control::StartingProcessGuard), String> {
     let stdout_path = dir.join(format!("{attempt}.stdout.log"));
     let stderr_path = dir.join(format!("{attempt}.stderr.log"));
     let stdout = fs::File::create(&stdout_path).map_err(|error| format!("无法创建 Runtime stdout 日志: {error}"))?;
@@ -368,7 +368,8 @@ fn spawn_runtime(
     let child = command
         .spawn()
         .map_err(|error| format!("无法启动本地 dsh Runtime: {error}"))?;
-    Ok((child, stdout_path, stderr_path))
+    let registration = process_control::register_starting_process(starting_processes, child.id());
+    Ok((child, stdout_path, stderr_path, registration))
 }
 
 fn wait_for_ready(
@@ -408,8 +409,7 @@ fn wait_for_ready(
                     }
                 }
                 Err(error) if deadline <= Instant::now() => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    process_control::stop_child_tree(child);
                     let diagnostic = read_attempt_logs(stdout_path, stderr_path);
                     return Err(AttemptFailure { message: error, diagnostic });
                 }
@@ -417,8 +417,7 @@ fn wait_for_ready(
             }
         }
         if deadline <= Instant::now() {
-            let _ = child.kill();
-            let _ = child.wait();
+            process_control::stop_child_tree(child);
             let diagnostic = read_attempt_logs(stdout_path, stderr_path);
             return Err(AttemptFailure { message: "等待 dsh Runtime ready 超时。".into(), diagnostic });
         }
@@ -439,11 +438,12 @@ fn start_safe_profile(
     origin: &OriginInfo,
     dir: &Path,
     failure_context: &str,
+    starting_processes: &process_control::StartingProcessRegistry,
 ) -> Result<RuntimeProcess, String> {
     let safe_home = dir.join("safe-dsh-home");
     fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建 Runtime 安全配置目录: {error}"))?;
     let _ = fs::remove_file(ready_file);
-    let (mut child, stdout_path, stderr_path) = spawn_runtime(
+    let (mut child, stdout_path, stderr_path, _registration) = spawn_runtime(
         node,
         dsh,
         &[patch_file],
@@ -452,6 +452,7 @@ fn start_safe_profile(
         &origin.dsh_version,
         dir,
         "safe",
+        starting_processes,
     )?;
     match wait_for_ready(
         &mut child,
@@ -473,8 +474,7 @@ fn start_safe_profile(
             safe_mode: true,
         }),
         Err(safe_failure) => {
-            let _ = child.kill();
-            let _ = child.wait();
+            process_control::stop_child_tree(&mut child);
             let summary = public_diagnostic(&safe_failure.diagnostic);
             let _ = fs::remove_dir_all(dir);
             Err(format!(
@@ -582,6 +582,7 @@ fn start_with_node_fallback(
     compatibility_path: PathBuf,
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
+    starting_processes: process_control::StartingProcessRegistry,
 ) -> Result<RuntimeProcess, String> {
     let normalized_root = platform::node_cli_path(&runtime_root);
     let bundled_node = node_path(&normalized_root);
@@ -595,6 +596,7 @@ fn start_with_node_fallback(
             origin_path,
             quarantine_state_path,
             Some((preferred_node, preferred_source)),
+            starting_processes,
         );
     }
 
@@ -605,6 +607,7 @@ fn start_with_node_fallback(
         origin_path.clone(),
         quarantine_state_path.clone(),
         Some((preferred_node, "system")),
+        starting_processes.clone(),
     ) {
         Ok(process) => return Ok(process),
         Err(error) => error,
@@ -617,6 +620,7 @@ fn start_with_node_fallback(
         origin_path,
         quarantine_state_path,
         Some((bundled_node, "bundled")),
+        starting_processes,
     ) {
         Ok(process) => Ok(process),
         Err(bundled_error) => Err(format!(
@@ -632,6 +636,7 @@ fn start_blocking(
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
     forced_node: Option<(PathBuf, &'static str)>,
+    starting_processes: process_control::StartingProcessRegistry,
 ) -> Result<RuntimeProcess, String> {
     // Tauri can return verbatim Windows paths (\\?\\C:\\...). Node's
     // entry-point resolver on affected releases cannot execute those paths.
@@ -664,7 +669,7 @@ fn start_blocking(
             fs::write(&quarantine_file, recovery_patch_ids(&quarantine.isolated_plugins)?)
                 .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
-            let (mut quarantine_child, quarantine_stdout, quarantine_stderr) = spawn_runtime(
+            let (mut quarantine_child, quarantine_stdout, quarantine_stderr, _registration) = spawn_runtime(
                 &node,
                 &dsh,
                 &[patch_file.as_path(), quarantine_file.as_path()],
@@ -673,6 +678,7 @@ fn start_blocking(
                 &origin.dsh_version,
                 &dir,
                 "quarantine",
+                &starting_processes,
             )?;
             match wait_for_ready(
                 &mut quarantine_child,
@@ -696,8 +702,7 @@ fn start_blocking(
                     });
                 }
                 Err(_) => {
-                    let _ = quarantine_child.kill();
-                    let _ = quarantine_child.wait();
+                    process_control::stop_child_tree(&mut quarantine_child);
                     let _ = plugin_quarantine::clear(&quarantine_state_path);
                     let _ = fs::remove_file(&ready_file);
                 }
@@ -705,7 +710,7 @@ fn start_blocking(
         }
     }
 
-    let (mut child, stdout_path, stderr_path) = spawn_runtime(
+    let (mut child, stdout_path, stderr_path, _registration) = spawn_runtime(
         &node,
         &dsh,
         &[patch_file.as_path()],
@@ -714,6 +719,7 @@ fn start_blocking(
         &origin.dsh_version,
         &dir,
         "normal",
+        &starting_processes,
     )?;
     match wait_for_ready(&mut child, &ready_file, &origin.dsh_version, &stdout_path, &stderr_path) {
         Ok(ready) => {
@@ -731,8 +737,7 @@ fn start_blocking(
             });
         }
         Err(first_failure) => {
-            let _ = child.kill();
-            let _ = child.wait();
+            process_control::stop_child_tree(&mut child);
             if !recovery_enabled {
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 let _ = fs::remove_dir_all(&dir);
@@ -752,6 +757,7 @@ fn start_blocking(
                         &origin,
                         &dir,
                         &format!("{}\n{}\n插件兼容恢复未运行: {error}", first_failure.message, summary),
+                        &starting_processes,
                     );
                 }
             };
@@ -768,6 +774,7 @@ fn start_blocking(
                     &origin,
                     &dir,
                     &format!("{}\n{}\n未找到可隔离的第三方插件", first_failure.message, summary),
+                    &starting_processes,
                 );
             }
 
@@ -775,7 +782,7 @@ fn start_blocking(
             fs::write(&recovery_file, recovery_patch(&selected)?).map_err(|error| format!("无法写入插件兼容恢复 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
             let isolated_plugins: Vec<String> = selected.iter().map(|row| row.id.clone()).collect();
-            let (mut recovery_child, recovery_stdout, recovery_stderr) = match spawn_runtime(
+            let (mut recovery_child, recovery_stdout, recovery_stderr, _registration) = match spawn_runtime(
                 &node,
                 &dsh,
                 &[patch_file.as_path(), recovery_file.as_path()],
@@ -784,6 +791,7 @@ fn start_blocking(
                 &origin.dsh_version,
                 &dir,
                 "recovery",
+                &starting_processes,
             ) {
                 Ok(value) => value,
                 Err(error) => {
@@ -796,6 +804,7 @@ fn start_blocking(
                         &origin,
                         &dir,
                         &format!("插件兼容恢复进程无法启动: {error}"),
+                        &starting_processes,
                     );
                 }
             };
@@ -828,8 +837,7 @@ fn start_blocking(
                     })
                 }
                 Err(recovery_failure) => {
-                    let _ = recovery_child.kill();
-                    let _ = recovery_child.wait();
+                    process_control::stop_child_tree(&mut recovery_child);
                     let first_summary = public_diagnostic(&first_failure.diagnostic);
                     let recovery_summary = public_diagnostic(&recovery_failure.diagnostic);
                     start_safe_profile(
@@ -847,6 +855,7 @@ fn start_blocking(
                             recovery_failure.message,
                             recovery_summary,
                         ),
+                        &starting_processes,
                     )
                 }
             }
@@ -868,6 +877,9 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     if cfg!(mobile) {
         return Err("Android/iOS 使用 Remote Gateway，不允许在移动设备内启动桌面 dsh Runtime。".into());
     }
+    if state.quitting.load(Ordering::Acquire) {
+        return Err("HarnessDock 正在退出，已拒绝新的 Runtime 启动。".into());
+    }
     {
         let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
         if let Some(current) = guard.as_mut() {
@@ -886,13 +898,27 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     let compatibility_path = resource_path(&app, "dsh-client-runtime-compat/index.js")?;
     let origin_path = resource_path(&app, "origin.json")?;
     let quarantine_state_path = quarantine_path(&app)?;
+    let starting_processes = std::sync::Arc::clone(&state.starting_processes);
     let process = tauri::async_runtime::spawn_blocking(move || {
-        start_with_node_fallback(runtime_root, plugin_path, compatibility_path, origin_path, quarantine_state_path)
+        start_with_node_fallback(
+            runtime_root,
+            plugin_path,
+            compatibility_path,
+            origin_path,
+            quarantine_state_path,
+            starting_processes,
+        )
     })
         .await
         .map_err(|error| format!("Runtime 启动任务失败: {error}"))??;
     let status = process.status();
-    *state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())? = Some(process);
+    let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
+    if state.quitting.load(Ordering::Acquire) {
+        let mut process = process;
+        process.stop();
+        return Err("HarnessDock 已进入退出流程，Runtime 未继续运行。".into());
+    }
+    *guard = Some(process);
     Ok(status)
 }
 

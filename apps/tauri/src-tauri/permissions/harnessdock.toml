@@ -56,4 +56,4 @@ commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_max
 [[permission]]
 identifier = "shell-settings"
 description = "Allows only the local Shell Settings plugin window to inspect and recover the owned Runtime."
-commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "update_check", "harness_open", "harness_close"]
+commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "update_check", "harness_open", "harness_close", "app_quit"]
