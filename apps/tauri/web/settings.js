@@ -21,7 +21,7 @@
   }
 
   function runtimeDescription(runtime) {
-    if (!runtime?.appUrl) return 'Runtime 尚未就绪。请关闭诊断窗口后从主界面的“操作”菜单执行重启。'
+    if (!runtime?.appUrl) return 'Runtime 尚未就绪。请关闭诊断窗口后从主界面的“菜单”执行重启。'
     const lines = [
       '状态：' + (runtime.recoveryMode ? '兼容模式（Web 可用）' : runtime.state),
       'Node：' + (runtime.nodeSource || 'unknown'),
@@ -31,7 +31,7 @@
     if (runtime.safeMode) lines.push('安全配置：已启用临时干净配置，未修改用户配置。')
     if (runtime.isolatedPlugins?.length) lines.push('已隔离插件：' + runtime.isolatedPlugins.join(', '))
     if (runtime.suspectedPlugins?.length) lines.push('疑似故障插件：' + runtime.suspectedPlugins.join(', '))
-    return lines.join('\\n')
+    return lines.join('\n')
   }
 
   function render(runtime) {
@@ -42,8 +42,8 @@
     setStatus(
       $('web-detail'),
       runtime?.appUrl
-        ? 'Harness Web 正在使用本地 Runtime；刷新、重启和插件恢复请从主界面的“操作”菜单执行。'
-        : 'Runtime 尚未提供 Web 地址；请关闭诊断窗口后从主界面的“操作”菜单重试。',
+        ? 'Harness Web 正在使用本地 Runtime；刷新、重启和插件恢复请从主界面的“菜单”执行。'
+        : 'Runtime 尚未提供 Web 地址；请关闭诊断窗口后从主界面的“菜单”重试。',
     )
   }
 

@@ -234,14 +234,20 @@ pub(crate) const INIT_SCRIPT: &str = r##"
     menuToggle.id = 'harnessdock-shell-menu-toggle';
     menuToggle.className = 'harnessdock-shell-menu-toggle';
     menuToggle.type = 'button';
-    menuToggle.title = '打开 Harness 操作菜单';
-    menuToggle.setAttribute('aria-label', '打开 Harness 操作菜单');
+    menuToggle.title = '打开 Harness 菜单';
+    menuToggle.setAttribute('aria-label', '打开 Harness 菜单');
+    menuToggle.setAttribute('aria-haspopup', 'menu');
+    menuToggle.setAttribute('aria-controls', 'harnessdock-shell-menu-panel');
     menuToggle.setAttribute('aria-expanded', 'false');
-    menuToggle.innerHTML = '操作<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    menuToggle.innerHTML = '菜单<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const menuPanel = document.createElement('div');
     menuPanel.id = 'harnessdock-shell-menu-panel';
     menuPanel.className = 'harnessdock-shell-menu-panel';
     menuPanel.setAttribute('role', 'menu');
+    menuPanel.setAttribute('aria-label', 'Harness 菜单');
+    [refreshButton, restartButton, quarantineRestartButton, settingsButton, updateButton].forEach((button) => {
+      button.setAttribute('role', 'menuitem');
+    });
     settingsButton.classList.add('harnessdock-shell-menu-item');
     bar.querySelector('.harnessdock-shell-separator')?.remove();
     menuPanel.append(refreshButton, restartButton, quarantineRestartButton, settingsButton, updateButton);

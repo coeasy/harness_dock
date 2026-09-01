@@ -28,7 +28,7 @@
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>Runtime 与插件状态</h2><p>第三方插件失败会被隔离；系统 Node 启动异常时自动回退内置 Node。恢复操作不会改写用户的真实 DSH 配置。刷新、重启和隔离恢复统一从主界面的“操作”菜单执行。</p></div>
+        <div><h2>Runtime 与插件状态</h2><p>第三方插件失败会被隔离；系统 Node 启动异常时自动回退内置 Node。恢复操作不会改写用户的真实 DSH 配置。刷新、重启和隔离恢复统一从主界面的“菜单”执行。</p></div>
         <span id="runtime-state" class="badge">checking</span>
       </div>
       <p id="runtime-detail" class="status"></p>
@@ -38,14 +38,14 @@
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>版本更新</h2><p>自动更新从主界面的“操作”菜单执行：先比较 GitHub 最新稳定 Release，再安装通过签名校验的客户端包；安装完成会先完整关闭 Runtime/Gateway，再重启客户端。</p></div>
-        <span class="badge">菜单操作</span>
+        <div><h2>版本更新</h2><p>自动更新从主界面的“菜单”执行：先比较 GitHub 最新稳定 Release，再安装通过签名校验的客户端包；安装完成会先完整关闭 Runtime/Gateway，再重启客户端。</p></div>
+        <span class="badge">主菜单</span>
       </div>
       <p class="status">未配置发布签名时，菜单会提示最新版本和官方发布页，不会安装未经验证的程序包。</p>
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。只有需要查看 Runtime、插件隔离或更新配置状态时，才使用本窗口。</p></div>
+        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。只有需要查看 Runtime、插件隔离、更新配置状态或退出客户端时，才使用本窗口。</p></div>
         <span class="badge">on demand</span>
       </div>
       <p class="status">插件诊断关闭后不会停止 Runtime，也不会关闭 Harness Web。所有会影响运行状态的动作都在主界面显示执行中状态，诊断窗口只负责查看状态和退出客户端。</p>
