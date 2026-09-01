@@ -285,16 +285,18 @@ pub async fn gateway_host_start(
     .await
     .map_err(|error| format!("Gateway 启动任务失败: {error}"))??;
     let ready = process.ready.clone();
-    let mut guard = state
-        .gateway
-        .lock()
-        .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
-    if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
-        let mut process = process;
-        process.stop();
-        return Err("HarnessDock 已进入退出流程，Gateway 未继续运行。".into());
+    {
+        let mut guard = state
+            .gateway
+            .lock()
+            .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
+        if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
+            let mut process = process;
+            process.stop();
+            return Err("HarnessDock 已进入退出流程，Gateway 未继续运行。".into());
+        }
+        *guard = Some(process);
     }
-    *guard = Some(process);
     admin_json(&ready, "status", None).await
 }
 

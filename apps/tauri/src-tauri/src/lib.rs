@@ -45,12 +45,6 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
     app.exit(0);
 }
 
-#[tauri::command]
-pub fn app_quit(app: tauri::AppHandle) -> Result<(), String> {
-    request_exit(&app);
-    Ok(())
-}
-
 #[cfg(not(mobile))]
 fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
@@ -104,7 +98,7 @@ pub fn run() {
             harness_window::control_show,
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,
-            app_quit,
+            harness_window::app_quit,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_restart,
