@@ -1,3 +1,4 @@
+#[cfg(not(mobile))]
 use crate::harness_shell::INIT_SCRIPT;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -132,6 +133,7 @@ pub struct HarnessWindowState {
     pub maximized: bool,
 }
 
+#[cfg(not(mobile))]
 fn harness_window(app: &AppHandle) -> Result<tauri::WebviewWindow<tauri::Wry>, String> {
     app.get_webview_window("harness")
         .ok_or_else(|| "Harness Web 窗口尚未创建。".to_string())
@@ -139,28 +141,55 @@ fn harness_window(app: &AppHandle) -> Result<tauri::WebviewWindow<tauri::Wry>, S
 
 #[tauri::command]
 pub fn harness_minimize(app: AppHandle) -> Result<(), String> {
-    harness_window(&app)?.minimize().map_err(|error| format!("无法最小化 Harness 窗口: {error}"))
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        harness_window(&app)?.minimize().map_err(|error| format!("无法最小化 Harness 窗口: {error}"))
+    }
 }
 
 #[tauri::command]
 pub fn harness_toggle_maximize(app: AppHandle) -> Result<HarnessWindowState, String> {
-    let window = harness_window(&app)?;
-    if window.is_maximized().map_err(|error| format!("无法读取 Harness 窗口状态: {error}"))? {
-        window.unmaximize().map_err(|error| format!("无法还原 Harness 窗口: {error}"))?;
-    } else {
-        window.maximize().map_err(|error| format!("无法最大化 Harness 窗口: {error}"))?;
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(HarnessWindowState { maximized: false });
     }
-    Ok(HarnessWindowState {
-        maximized: window.is_maximized().unwrap_or(false),
-    })
+
+    #[cfg(not(mobile))]
+    {
+        let window = harness_window(&app)?;
+        if window.is_maximized().map_err(|error| format!("无法读取 Harness 窗口状态: {error}"))? {
+            window.unmaximize().map_err(|error| format!("无法还原 Harness 窗口: {error}"))?;
+        } else {
+            window.maximize().map_err(|error| format!("无法最大化 Harness 窗口: {error}"))?;
+        }
+        Ok(HarnessWindowState {
+            maximized: window.is_maximized().unwrap_or(false),
+        })
+    }
 }
 
 #[tauri::command]
 pub fn harness_window_state(app: AppHandle) -> Result<HarnessWindowState, String> {
-    let window = harness_window(&app)?;
-    Ok(HarnessWindowState {
-        maximized: window.is_maximized().unwrap_or(false),
-    })
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(HarnessWindowState { maximized: false });
+    }
+
+    #[cfg(not(mobile))]
+    {
+        let window = harness_window(&app)?;
+        Ok(HarnessWindowState {
+            maximized: window.is_maximized().unwrap_or(false),
+        })
+    }
 }
 
 #[tauri::command]
