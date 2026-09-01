@@ -5,10 +5,10 @@
   "local": false,
   "remote": {
     "urls": [
-      "http://127.0.0.1:*/*",
-      "http://localhost:*/*",
-      "https://127.0.0.1:*/*",
-      "https://localhost:*/*"
+      "http://127.0.0.1:*",
+      "http://localhost:*",
+      "https://127.0.0.1:*",
+      "https://localhost:*"
     ]
   },
   "windows": ["harness"],

@@ -3,8 +3,8 @@
 /// The official Harness UI stays the primary application surface. This script
 /// adds safe, local-only controls for the separate Shell Settings plugin window,
 /// Web refresh/restart and the Harness window lifecycle; it never changes DSH configuration,
-/// or exposes remote host controls. The settings window is prepared hidden during host setup and
-/// shown only after an explicit click.
+/// or exposes remote host controls. The settings window is created only after
+/// an explicit click and is never part of startup.
 pub(crate) const INIT_SCRIPT: &str = r##"
 (() => {
   'use strict';

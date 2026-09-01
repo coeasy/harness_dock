@@ -1,6 +1,5 @@
 (() => {
   'use strict'
-  const invoke = window.__TAURI__?.core?.invoke
   const $ = (id) => document.getElementById(id)
   const runtimeState = $('runtime-state')
   const runtimeDetail = $('runtime-detail')
@@ -13,6 +12,11 @@
   const deviceName = $('device-name')
   let currentRuntime
   let desktopStartup
+
+  function showRecoveryCards() {
+    $('desktop-card')?.classList.remove('hidden')
+    $('gateway-host-card')?.classList.remove('hidden')
+  }
 
   function status(element, value, bad = false) {
     if (!element) return
@@ -28,6 +32,7 @@
   }
 
   async function call(command, args) {
+    const invoke = window.__TAURI__?.core?.invoke
     if (!invoke) throw new Error('Tauri IPC is unavailable. This page must run inside HarnessDock.')
     return invoke(command, args)
   }
@@ -152,6 +157,7 @@
         desktopStartup = undefined
         runtimeState.textContent = 'error'
         status(runtimeDetail, `Harness Web Runtime 启动失败，但控制页仍可用。\n${String(error)}`, true)
+        showRecoveryCards()
         bootStatus('启动失败，当前控制页仍可重试', 'error')
         await showControl()
       } finally {
@@ -167,10 +173,7 @@
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
       if (platform.runtimeMode === 'local') {
         bootStatus('正在准备本地 Runtime，控制页已就绪…')
-        $('desktop-card').classList.remove('hidden')
-        $('gateway-host-card').classList.remove('hidden')
         await autoStartDesktopRuntime()
-        await refreshGatewayHost().catch((error) => status(hostDetail, String(error), true))
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')
         $('mobile-remote-card').classList.remove('hidden')
@@ -178,6 +181,7 @@
       }
     } catch (error) {
       bootStatus('运行环境检测失败，当前页面仍可操作', 'error')
+      showRecoveryCards()
       status(runtimeDetail || gatewayDetail, String(error), true)
       await showControl()
     }

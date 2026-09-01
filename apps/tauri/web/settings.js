@@ -1,13 +1,13 @@
 (() => {
   'use strict'
 
-  const invoke = window.__TAURI__?.core?.invoke
   const $ = (id) => document.getElementById(id)
   let currentRuntime
   let busy = false
 
   function call(command, args) {
-    if (!invoke) return Promise.reject(new Error('Tauri IPC is unavailable.'))
+    const invoke = window.__TAURI__?.core?.invoke
+    if (typeof invoke !== 'function') return Promise.reject(new Error('Tauri IPC is unavailable.'))
     return invoke(command, args)
   }
 
