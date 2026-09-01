@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(mobile))]
+use std::time::Duration;
+
+#[cfg(not(mobile))]
+use tauri_plugin_updater::UpdaterExt;
+
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/coeasy/harness_dock/releases/latest";
+const UPDATER_ENDPOINT: &str =
+    "https://github.com/coeasy/harness_dock/releases/latest/download/latest.json";
 
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
@@ -23,6 +31,13 @@ pub struct UpdateInfo {
     pub title: String,
     pub notes: String,
     pub published_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInstallResult {
+    pub status: String,
+    pub version: Option<String>,
 }
 
 fn normalized_version(value: &str) -> String {
@@ -93,4 +108,98 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         notes: release.body.unwrap_or_default(),
         published_at: release.published_at,
     })
+}
+
+/// Check and install a signed Tauri update, then restart the client.
+///
+/// The public key is intentionally supplied at build time. Until the release
+/// pipeline publishes `latest.json` and a matching signature, this command
+/// returns an explicit, actionable error instead of downloading an unsigned
+/// installer or pretending that a manual release page is an automatic update.
+#[tauri::command]
+pub async fn update_install(
+    app: tauri::AppHandle,
+) -> Result<UpdateInstallResult, String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("Android/iOS 暂不支持桌面客户端自动更新，请使用应用商店更新。".into());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        let Some(public_key) = option_env!("HARNESSDOCK_UPDATER_PUBLIC_KEY")
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Err(
+                "自动更新尚未启用：发布签名公钥未配置。请在插件诊断中打开发布页手动更新。"
+                    .into(),
+            );
+        };
+
+        crate::harness_window::show_splash(&app, "正在检查安全更新…");
+        let endpoint = UPDATER_ENDPOINT
+            .parse()
+            .map_err(|error| format!("自动更新地址无效: {error}"))?;
+        let updater = app
+            .updater_builder()
+            .pubkey(public_key)
+            .endpoints(vec![endpoint])
+            .map_err(|error| format!("无法配置安全更新服务: {error}"))?
+            .timeout(Duration::from_secs(30))
+            .on_before_exit({
+                let shutdown_app = app.clone();
+                move || crate::stop_managed_processes(&shutdown_app)
+            })
+            // Keep shutdown under LifecycleCoordinator. The updater's default
+            // Windows installer restart would otherwise race Runtime cleanup.
+            .restart_after_install(false)
+            .build()
+            .map_err(|error| format!("无法初始化安全更新服务: {error}"))?;
+
+        let Some(update) = updater
+            .check()
+            .await
+            .map_err(|error| {
+                crate::harness_window::hide_splash(&app);
+                format!("安全更新检查失败: {error}")
+            })?
+        else {
+            crate::harness_window::hide_splash(&app);
+            return Ok(UpdateInstallResult {
+                status: "latest".into(),
+                version: None,
+            });
+        };
+
+        let version = update.version.to_string();
+        crate::harness_window::show_splash(&app, "正在下载签名更新…");
+        let progress_app = app.clone();
+        let mut downloaded = 0_u64;
+        update
+            .download_and_install(
+                move |chunk_length, content_length| {
+                    downloaded = downloaded.saturating_add(chunk_length as u64);
+                    let status = content_length
+                        .filter(|length| *length > 0)
+                        .map(|length| {
+                            format!(
+                                "正在下载签名更新… {}%",
+                                downloaded.saturating_mul(100) / length
+                            )
+                        })
+                        .unwrap_or_else(|| "正在下载签名更新…".into());
+                    crate::harness_window::show_splash(&progress_app, &status);
+                },
+                || {},
+            )
+            .await
+            .map_err(|error| {
+                crate::harness_window::hide_splash(&app);
+                format!("安全更新下载或安装失败: {error}")
+            })?;
+
+        crate::harness_window::show_splash(&app, "更新已安装，正在重启 HarnessDock…");
+        app.restart();
+    }
 }

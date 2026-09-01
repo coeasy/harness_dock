@@ -10,6 +10,7 @@
     "gateway-pair",
     "gateway-host",
     "harness-window",
+    "splash-status",
     "runtime-status",
     "runtime-start",
     "runtime-stop",

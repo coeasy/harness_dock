@@ -41,6 +41,16 @@ impl Default for AppState {
     }
 }
 
+/// Synchronous, idempotent child cleanup used by both normal shutdown and the
+/// updater's Windows pre-exit hook. The updater may terminate the host as part
+/// of installer handoff, so it cannot rely on an async shutdown task alone.
+pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    process::stop_starting_processes(&state.starting_processes);
+    gateway_host::stop_managed(&state.gateway);
+    runtime::stop_managed(&state.runtime);
+}
+
 pub(crate) fn request_exit(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     if state.quitting.swap(true, Ordering::SeqCst) {
@@ -57,9 +67,7 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
         let _ = tauri::async_runtime::spawn_blocking(move || {
             let state = cleanup_handle.state::<AppState>();
             for _ in 0..50 {
-                process::stop_starting_processes(&state.starting_processes);
-                gateway_host::stop_managed(&state.gateway);
-                runtime::stop_managed(&state.runtime);
+                stop_managed_processes(&cleanup_handle);
                 if process::starting_processes_empty(&state.starting_processes) {
                     break;
                 }
@@ -67,9 +75,7 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
             }
             // One final idempotent pass covers a startup task that published
             // its Child just as the last registry check completed.
-            process::stop_starting_processes(&state.starting_processes);
-            gateway_host::stop_managed(&state.gateway);
-            runtime::stop_managed(&state.runtime);
+            stop_managed_processes(&cleanup_handle);
         })
         .await;
         handle.exit(0);
@@ -83,7 +89,9 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     let shell = SubmenuBuilder::new(app, "HarnessDock")
         .text("shell-refresh-web", "刷新 Harness Web")
         .text("shell-restart-web", "重启并刷新 Harness Web")
-        .text("shell-settings", "外壳设置")
+        .text("shell-clear-quarantine", "清除插件隔离并重启")
+        .text("shell-update", "自动更新")
+        .text("shell-settings", "插件诊断")
         .build()
         .map_err(|error| format!("无法创建 HarnessDock 菜单项: {error}"))?;
     let menu = MenuBuilder::new(app)
@@ -113,7 +121,26 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
                 let handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::shell_settings_show(handle).await {
-                        eprintln!("Shell settings from app menu failed: {error}");
+                        eprintln!("Plugin diagnostics from app menu failed: {error}");
+                    }
+                });
+            }
+            "shell-clear-quarantine" => {
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::harness_clear_quarantine_restart(handle).await {
+                        eprintln!("Plugin recovery from app menu failed: {error}");
+                    }
+                });
+            }
+            "shell-update" => {
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = update::update_install(handle.clone()).await {
+                        eprintln!("Automatic update from app menu failed: {error}");
+                        if let Err(open_error) = harness_window::shell_settings_show(handle).await {
+                            eprintln!("Plugin diagnostics fallback failed: {open_error}");
+                        }
                     }
                 });
             }
@@ -133,6 +160,8 @@ pub fn run() {
                 // Create both entry points before Runtime boot. A Runtime or
                 // plugin failure must never remove the user's exit path.
                 tray::create_tray(&app.handle())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
             Ok(())
         })
@@ -155,8 +184,10 @@ pub fn run() {
             harness_window::control_hide,
             harness_window::harness_reload_web,
             harness_window::harness_restart_web,
+            harness_window::harness_clear_quarantine_restart,
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,
+            harness_window::splash_status,
             harness_window::app_quit,
             runtime::runtime_status,
             runtime::runtime_start,
@@ -164,6 +195,7 @@ pub fn run() {
             runtime::runtime_stop,
             runtime::runtime_clear_plugin_quarantine,
             update::update_check,
+            update::update_install,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build HarnessDock Tauri application");
@@ -191,10 +223,7 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Exit => {
-                let state = app_handle.state::<AppState>();
-                process::stop_starting_processes(&state.starting_processes);
-                gateway_host::stop_managed(&state.gateway);
-                runtime::stop_managed(&state.runtime);
+                stop_managed_processes(app_handle);
             }
             _ => {}
         }

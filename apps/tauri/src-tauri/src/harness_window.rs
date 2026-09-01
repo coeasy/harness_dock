@@ -7,6 +7,32 @@ use url::Url;
 #[cfg(not(mobile))]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(not(mobile))]
+pub(crate) fn hide_splash(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("splash") {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(not(mobile))]
+fn set_splash_status(app: &AppHandle, status: &str) {
+    let Some(window) = app.get_webview_window("splash") else {
+        return;
+    };
+    let Ok(value) = serde_json::to_string(status) else {
+        return;
+    };
+    let _ = window.eval(format!("window.__harnessDockSetStatus({value})"));
+}
+
+#[cfg(not(mobile))]
+pub(crate) fn show_splash(app: &AppHandle, status: &str) {
+    set_splash_status(app, status);
+    if let Some(window) = app.get_webview_window("splash") {
+        let _ = window.show();
+    }
+}
+
 fn validated_runtime_url(value: &str) -> Result<Url, String> {
     let url = Url::parse(value).map_err(|_| "Runtime URL 无效。".to_string())?;
     if url.scheme() != "http" && url.scheme() != "https" {
@@ -40,8 +66,8 @@ impl Drop for SettingsOpenGuard<'_> {
 #[cfg(not(mobile))]
 async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
-        window.show().map_err(|error| format!("无法显示外壳设置插件: {error}"))?;
-        window.set_focus().map_err(|error| format!("无法聚焦外壳设置插件: {error}"))?;
+        window.show().map_err(|error| format!("无法显示插件诊断窗口: {error}"))?;
+        window.set_focus().map_err(|error| format!("无法聚焦插件诊断窗口: {error}"))?;
         return Ok(());
     }
 
@@ -50,10 +76,11 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
         "settings",
         WebviewUrl::App("settings.html".into()),
     )
-    .title("HarnessDock · 外壳设置")
-    .inner_size(760.0, 650.0)
-    .min_inner_size(560.0, 480.0)
+    .title("HarnessDock · 插件诊断")
+    .inner_size(560.0, 520.0)
+    .min_inner_size(480.0, 420.0)
     .resizable(true)
+    .center()
     // Window creation must stay inside an async command on Windows. Keeping
     // the page hidden until the native window exists also prevents a half-built
     // settings surface from flashing during startup.
@@ -67,7 +94,7 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
         }
     })
     .build()
-    .map_err(|error| format!("无法创建外壳设置插件窗口: {error}"))?;
+    .map_err(|error| format!("无法创建插件诊断窗口: {error}"))?;
     Ok(())
 }
 
@@ -82,9 +109,14 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         let runtime_url = validated_runtime_url(&url)?;
+        show_splash(&app, "正在打开 Harness Web…");
         if let Some(window) = app.get_webview_window("harness") {
-            window.hide().map_err(|error| format!("无法准备 Harness Web 界面: {error}"))?;
+            if let Err(error) = window.hide() {
+                hide_splash(&app);
+                return Err(format!("无法准备 Harness Web 界面: {error}"));
+            }
             if let Err(error) = window.navigate(runtime_url) {
+                hide_splash(&app);
                 let _ = window.show();
                 let _ = window.set_focus();
                 return Err(format!("无法导航 Harness 窗口: {error}"));
@@ -107,6 +139,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
                     let _ = window.eval(INIT_SCRIPT);
                     let _ = window.show();
                     let _ = window.set_focus();
+                    hide_splash(&window.app_handle());
                 }
             })
             .inner_size(1180.0, 780.0)
@@ -115,7 +148,10 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
             .decorations(false)
             .visible(false)
             .build()
-            .map_err(|error| format!("无法创建 Harness WebView: {error}"))?;
+            .map_err(|error| {
+                hide_splash(&app);
+                format!("无法创建 Harness WebView: {error}")
+            })?;
         if let Some(control) = app.get_webview_window("main") {
             let _ = control.hide();
         }
@@ -166,11 +202,16 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
             .app_url
             .ok_or_else(|| "Runtime 尚未启动，暂时无法刷新 Harness Web。".to_string())?;
         let url = validated_runtime_url(&url)?;
+        show_splash(&app, "正在刷新 Harness Web…");
         let Some(window) = app.get_webview_window("harness") else {
             return harness_open(app.clone(), url.to_string()).await;
         };
-        window.hide().map_err(|error| format!("无法准备刷新 Harness Web 界面: {error}"))?;
+        if let Err(error) = window.hide() {
+            hide_splash(&app);
+            return Err(format!("无法准备刷新 Harness Web 界面: {error}"));
+        }
         if let Err(error) = window.navigate(url) {
+            hide_splash(&app);
             let _ = window.show();
             let _ = window.set_focus();
             return Err(format!("无法导航刷新 Harness Web 界面: {error}"));
@@ -204,13 +245,15 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }
         let _restarting = WebActionGuard(&state.web_action);
+        show_splash(&app, "正在重启 Runtime…");
 
         // Hide the stale WebView while its loopback Runtime is being replaced.
         // If startup fails, surface the control page from the recovery path.
         if let Some(window) = app.get_webview_window("harness") {
-            window
-                .hide()
-                .map_err(|error| format!("无法暂时隐藏 Harness Web 界面: {error}"))?;
+            if let Err(error) = window.hide() {
+                hide_splash(&app);
+                return Err(format!("无法暂时隐藏 Harness Web 界面: {error}"));
+            }
         }
 
         let status = match crate::runtime::restart_managed(app.clone()).await {
@@ -229,6 +272,27 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
             return Err(error);
         }
         Ok(status)
+    }
+}
+
+/// Clear the persisted plugin quarantine and perform the same guarded Runtime
+/// restart as the normal Web action. Keeping this as one native command makes
+/// the primary Web shell able to offer an explicit recovery action without
+/// granting it the lower-level quarantine storage permission.
+#[tauri::command]
+pub async fn harness_clear_quarantine_restart(
+    app: AppHandle,
+) -> Result<crate::runtime::RuntimeStatus, String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("Android/iOS 使用 Remote Gateway，不支持桌面插件隔离恢复。".into());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        crate::runtime::runtime_clear_plugin_quarantine(app.clone())?;
+        harness_restart_web(app).await
     }
 }
 
@@ -313,6 +377,7 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
 
     #[cfg(not(mobile))]
     {
+        hide_splash(&app);
         let control = app
             .get_webview_window("main")
             .ok_or_else(|| "HarnessDock 控制页窗口不存在。".to_string())?;
@@ -322,6 +387,24 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
         control
             .set_focus()
             .map_err(|error| format!("无法聚焦 HarnessDock 控制页: {error}"))?;
+        Ok(())
+    }
+}
+
+/// Update the desktop-only startup splash without making splash failures block
+/// Runtime startup. The splash has no remote permissions and this command is
+/// available only to the hidden local bootstrap window.
+#[tauri::command]
+pub fn splash_status(app: AppHandle, status: String) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = (app, status);
+        return Ok(());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        set_splash_status(&app, &status);
         Ok(())
     }
 }
@@ -353,7 +436,7 @@ pub async fn shell_settings_show(app: AppHandle) -> Result<(), String> {
     #[cfg(mobile)]
     {
         let _ = app;
-        return Err("移动端不提供桌面外壳设置插件。".into());
+        return Err("移动端不提供桌面插件诊断窗口。".into());
     }
 
     #[cfg(not(mobile))]
@@ -363,7 +446,7 @@ pub async fn shell_settings_show(app: AppHandle) -> Result<(), String> {
             .settings_opening
             .swap(true, std::sync::atomic::Ordering::AcqRel)
         {
-            return Err("外壳设置正在打开，请稍候。".into());
+            return Err("插件诊断窗口正在打开，请稍候。".into());
         }
         let _opening = SettingsOpenGuard(&state.settings_opening);
         show_settings_window(&app).await
@@ -381,7 +464,7 @@ pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         if let Some(window) = app.get_webview_window("settings") {
-            window.hide().map_err(|error| format!("无法隐藏外壳设置插件: {error}"))?;
+            window.hide().map_err(|error| format!("无法隐藏插件诊断窗口: {error}"))?;
         }
         Ok(())
     }

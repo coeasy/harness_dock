@@ -18,13 +18,16 @@ fn main() {
         "control_hide",
         "harness_reload_web",
         "harness_restart_web",
+        "harness_clear_quarantine_restart",
         "shell_settings_show",
         "shell_settings_close",
+        "splash_status",
         "runtime_status",
         "runtime_start",
         "runtime_restart",
         "runtime_stop",
         "update_check",
+        "update_install",
     ];
 
     tauri_build::try_build(

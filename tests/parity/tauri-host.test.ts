@@ -138,29 +138,44 @@ describe('Tauri v0.2 host contract', () => {
     const permission = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/permissions/harnessdock.toml'), 'utf8')
     const shell = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/harness_shell.rs'), 'utf8')
     const harnessWindow = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/harness_window.rs'), 'utf8')
+    const host = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/lib.rs'), 'utf8')
     const web = readFileSync(path.join(repoRoot, 'apps/tauri/web/app.js'), 'utf8')
     const index = readFileSync(path.join(repoRoot, 'apps/tauri/web/index.html'), 'utf8')
     const settingsCapability = readJson('apps/tauri/src-tauri/capabilities/shell-settings.json')
     const settingsHtml = readFileSync(path.join(repoRoot, 'apps/tauri/web/settings.html'), 'utf8')
     const settingsJs = readFileSync(path.join(repoRoot, 'apps/tauri/web/settings.js'), 'utf8')
+    const update = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/update.rs'), 'utf8')
+    const cargo = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/Cargo.toml'), 'utf8')
+    const tray = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/tray.rs'), 'utf8')
     expect(capability.windows).toEqual(['harness'])
     expect(capability.local).toBe(false)
     expect(capability.platforms).toEqual(['linux', 'macOS', 'windows'])
     expect(capability.remote.urls).toEqual([
-      'http://127.0.0.1:*/**',
-      'http://localhost:*/**',
-      'https://127.0.0.1:*/**',
-      'https://localhost:*/**',
+      'http://127.0.0.1:*/*',
+      'http://localhost:*/*',
+      'https://127.0.0.1:*/*',
+      'https://localhost:*/*',
     ])
     expect(capability.permissions).toContain('harness-shell')
     expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).not.toContain('harness-shell')
-    expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web"]')
+    expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart", "update_install"]')
     expect(shell).toContain("shell_settings_show")
     expect(shell).toContain("harness_reload_web")
     expect(shell).toContain("harness_restart_web")
+    expect(shell).toContain("harness_clear_quarantine_restart")
+    expect(shell).toContain('harnessdock-shell-menu-panel')
+    expect(shell).toContain('harnessdock-shell-progress')
+    expect(shell).toContain('harnessdock-shell-status')
+    expect(shell).toContain('activeAction')
     expect(shell).toContain('harnessdock-shell-mounted')
     expect(shell).toContain('padding-bottom:var(--harnessdock-shell-bottom-inset)!important')
-    expect(shell).toContain('overflow-x:auto')
+    expect(shell).toContain('overflow:visible')
+    expect(shell).toContain('harnessdock-shell-update')
+    expect(shell).toContain("run('update_install'")
+    expect(shell).toContain('自动更新')
+    expect(host).toContain('"shell-update", "自动更新"')
+    expect(tray).toContain('"tray-update", "自动更新"')
+    expect(tray).toContain('crate::update::update_install')
     expect(web).toContain("await openHarnessWithRetry(currentRuntime.appUrl)")
     expect(web).not.toContain('autoOpenHarness')
     expect(web).not.toContain('auto-open-harness')
@@ -171,23 +186,60 @@ describe('Tauri v0.2 host contract', () => {
     expect(settingsCapability.permissions).toContain('shell-settings')
     expect(permission).toContain('identifier = "runtime-maintenance"')
     expect(permission).toContain('identifier = "shell-settings"')
-    expect(settingsHtml).toContain('Web 优先启动')
+    expect(settingsHtml).toContain('插件诊断')
+    expect(settingsHtml).toContain('清除插件隔离并重启')
+    expect(settingsHtml).toContain('class="settings-page"')
     expect(harnessWindow).toContain('pub async fn shell_settings_show')
     expect(harnessWindow).toContain('pub fn control_hide')
     expect(readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/build.rs'), 'utf8')).toContain('"control_hide"')
     expect(harnessWindow).toContain('async fn show_settings_window')
     expect(harnessWindow).toContain('.visible(false)')
+    expect(harnessWindow).toContain('.center()')
     expect(harnessWindow).toContain('PageLoadEvent::Finished')
+    expect(harnessWindow).toContain('show_splash')
     expect(harnessWindow).not.toContain('eval("window.location.reload()")')
     expect(settingsJs).toContain('const invoke = window.__TAURI__?.core?.invoke')
-    expect(settingsJs).toContain("call('harness_restart_web')")
+    expect(settingsJs).toContain("'harness_clear_quarantine_restart' : 'harness_restart_web'")
+    expect(settingsJs).toContain('setButtonBusy')
     expect(settingsJs).toContain("call('harness_reload_web')")
     expect(settingsJs).toContain("call('shell_settings_close')")
     expect(settingsJs).toContain("call('update_check')")
+    expect(settingsJs).toContain("call('update_install')")
     expect(settingsHtml).toContain('版本更新')
+    expect(settingsHtml).toContain('自动更新并重启')
     expect(settingsHtml).toContain('id="settings-quit"')
     expect(web).toContain('openHarnessWithRetry')
     expect(web).toContain("await call('control_hide')")
+    expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).toContain('splash-status')
+    expect(readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/build.rs'), 'utf8')).toContain('"splash_status"')
+    expect(readFileSync(path.join(repoRoot, 'apps/tauri/web/splash.html'), 'utf8')).toContain('__harnessDockSetStatus')
+    expect(permission).toContain('identifier = "update-install"')
+    expect(cargo).toContain('tauri-plugin-updater')
+    expect(readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/lib.rs'), 'utf8')).toContain('tauri_plugin_updater::Builder')
+    expect(update).toContain('HARNESSDOCK_UPDATER_PUBLIC_KEY')
+    expect(update).toContain('latest/download/latest.json')
+    expect(update).toContain('download_and_install')
+    expect(update).toContain('restart_after_install(false)')
+    expect(update).toContain('app.restart()')
+  })
+
+  it('uses a transient startup surface for visible progress without exposing diagnostics at boot', () => {
+    const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
+    const splash = tauri.app.windows.find((window: Record<string, any>) => window.label === 'splash')
+    expect(splash).toMatchObject({
+      url: 'splash.html',
+      visible: true,
+      center: true,
+      decorations: false,
+      closable: false,
+      skipTaskbar: true,
+    })
+    expect(tauri.app.windows.find((window: Record<string, any>) => window.label === 'settings')).toBeUndefined()
+    const settingsWindow = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/harness_window.rs'), 'utf8')
+    expect(settingsWindow).toContain('"settings"')
+    expect(settingsWindow).toContain('WebviewUrl::App("settings.html".into())')
+    expect(settingsWindow).toContain('.on_page_load(|window, payload|')
+    expect(settingsWindow).toContain('let _ = window.show()')
   })
 
   it('keeps Windows helper processes console-free and has a final Web UI safe profile', () => {

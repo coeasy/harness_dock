@@ -37,6 +37,12 @@
     return invoke(command, args)
   }
 
+  function splashStatus(value) {
+    // The desktop splash is deliberately best-effort: a status paint failure
+    // must never turn a healthy Runtime startup into recovery mode.
+    return call('splash_status', { status: value }).catch(() => undefined)
+  }
+
   function defaultDeviceName(platform) {
     const label = platform?.os || 'device'
     return `HarnessDock ${label}`
@@ -147,14 +153,17 @@
       runtimeState.textContent = 'starting'
       bootStatus('正在启动本地 Runtime，界面保持可操作…')
       status(runtimeDetail, '正在启动 Harness Web Runtime…')
+      void splashStatus('正在启动 Harness Runtime…')
       try {
         currentRuntime = await call('runtime_start')
         if (!currentRuntime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
         status(runtimeDetail, runtimeDetailText(currentRuntime))
+        void splashStatus('正在打开 Harness Web…')
         await openHarnessWithRetry(currentRuntime.appUrl)
         bootStatus('Harness Web 已就绪', 'ready')
       } catch (error) {
         desktopStartup = undefined
+        void splashStatus('启动失败，正在打开插件诊断…')
         runtimeState.textContent = 'error'
         status(runtimeDetail, `Harness Web Runtime 启动失败，但控制页仍可用。\n${String(error)}`, true)
         showRecoveryCards()
@@ -169,6 +178,7 @@
 
   async function boot() {
     try {
+      void splashStatus('正在初始化客户端…')
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
       if (platform.runtimeMode === 'local') {
@@ -176,6 +186,7 @@
         // hide it before starting Runtime so upgrades from older builds cannot
         // flash the virtual settings page before Harness Web is ready.
         await call('control_hide')
+        void splashStatus('正在准备本地 Runtime…')
         bootStatus('正在准备本地 Runtime，稍后直接打开 Harness Web…')
         await autoStartDesktopRuntime()
       } else {
