@@ -95,7 +95,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
             return Ok(());
         }
 
-        let window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
+        let _window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
             .title("HarnessDock · DeepSeek Harness")
             .initialization_script(INIT_SCRIPT)
             // Navigation replaces the document and therefore does not rerun

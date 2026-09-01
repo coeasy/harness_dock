@@ -149,10 +149,8 @@ describe('Tauri v0.2 host contract', () => {
     expect(capability.remote.urls).toEqual([
       'http://127.0.0.1:*/**',
       'http://localhost:*/**',
-      'http://[::1]:*/**',
       'https://127.0.0.1:*/**',
       'https://localhost:*/**',
-      'https://[::1]:*/**',
     ])
     expect(capability.permissions).toContain('harness-shell')
     expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).not.toContain('harness-shell')
