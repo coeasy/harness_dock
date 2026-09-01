@@ -178,6 +178,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(harnessWindow).toContain('pub fn control_hide')
     expect(readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/build.rs'), 'utf8')).toContain('"control_hide"')
     expect(harnessWindow).toContain('async fn show_settings_window')
+    expect(harnessWindow).toContain('.visible(false)')
     expect(harnessWindow).toContain('PageLoadEvent::Finished')
     expect(harnessWindow).not.toContain('eval("window.location.reload()")')
     expect(settingsJs).toContain('const invoke = window.__TAURI__?.core?.invoke')

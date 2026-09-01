@@ -45,7 +45,7 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let _window = WebviewWindowBuilder::new(
         app,
         "settings",
         WebviewUrl::App("settings.html".into()),
@@ -58,14 +58,16 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     // the page hidden until the native window exists also prevents a half-built
     // settings surface from flashing during startup.
     .visible(false)
+    .on_page_load(|window, payload| {
+        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+            // Do not expose an unpainted WebView. The settings plugin becomes
+            // visible only after its HTML/CSS/JS document has finished loading.
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    })
     .build()
     .map_err(|error| format!("无法创建外壳设置插件窗口: {error}"))?;
-    window
-        .show()
-        .map_err(|error| format!("无法显示外壳设置插件: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("无法聚焦外壳设置插件: {error}"))?;
     Ok(())
 }
 
