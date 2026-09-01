@@ -15,6 +15,7 @@ use tauri::Manager;
 
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
+    pub(crate) runtime_starting: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
     pub(crate) quitting: AtomicBool,
 }
@@ -23,6 +24,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             runtime: Mutex::new(None),
+            runtime_starting: AtomicBool::new(false),
             gateway: Mutex::new(None),
             quitting: AtomicBool::new(false),
         }
