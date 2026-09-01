@@ -20,7 +20,7 @@ fn show_primary(app: &AppHandle) {
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "tray-open", "打开 Harness", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "tray-settings", "外壳设置", true, None::<&str>)?;
-    let restart = MenuItem::with_id(app, "tray-restart", "重启 Runtime", true, None::<&str>)?;
+    let restart = MenuItem::with_id(app, "tray-restart", "重启并刷新 Web", true, None::<&str>)?;
     let check_update = MenuItem::with_id(app, "tray-update", "检查更新", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "tray-quit", "退出 HarnessDock", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &settings, &restart, &check_update, &quit])?;
@@ -38,12 +38,8 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             "tray-restart" => {
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    match crate::runtime::runtime_restart(handle.clone()).await {
-                        Ok(status) => {
-                            if let Some(url) = status.app_url {
-                                let _ = harness_window::harness_open(handle.clone(), url).await;
-                            }
-                        }
+                    match harness_window::harness_restart_web(handle).await {
+                        Ok(_) => {}
                         Err(error) => eprintln!("runtime restart from tray failed: {error}"),
                     }
                 });

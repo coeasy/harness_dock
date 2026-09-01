@@ -40,6 +40,7 @@
     const label = runtime?.recoveryMode ? 'degraded' : (runtime?.state || 'stopped')
     $('runtime-state').textContent = label
     $('settings-open-harness').disabled = !runtime?.appUrl || busy
+    $('settings-refresh-web').disabled = !runtime?.appUrl || busy
     $('runtime-restart').disabled = busy
     $('runtime-clear-restart').disabled = busy
     $('runtime-stop').disabled = busy || !runtime?.appUrl
@@ -71,20 +72,32 @@
     }
   }
 
+  async function refreshWeb() {
+    if (busy) return
+    const button = $('settings-refresh-web')
+    button.disabled = true
+    setStatus($('web-detail'), '正在刷新 Harness Web（Runtime 保持运行）…')
+    try {
+      await call('harness_reload_web')
+      setStatus($('web-detail'), 'Harness Web 已刷新，Runtime 和当前会话保持不变。')
+    } catch (error) {
+      setStatus($('web-detail'), message(error), true)
+    } finally {
+      button.disabled = busy || !currentRuntime?.appUrl
+    }
+  }
+
   async function restart(clearQuarantine = false) {
     if (busy) return
     busy = true
     render(currentRuntime || { state: 'starting' })
-    setStatus($('runtime-detail'), clearQuarantine ? '正在清除隔离并重启 Runtime…' : '正在重启 Runtime 并打开 Harness Web…')
+    setStatus($('runtime-detail'), clearQuarantine ? '正在清除隔离并重启 Runtime…' : '正在重启 Runtime 并刷新 Harness Web…')
     try {
       if (clearQuarantine) await call('runtime_clear_plugin_quarantine')
-      await call('harness_close').catch(() => undefined)
-      await call('runtime_stop').catch(() => undefined)
-      const runtime = await call('runtime_start')
+      const runtime = await call('harness_restart_web')
       if (!runtime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
-      await call('harness_open', { url: runtime.appUrl })
       render(runtime)
-      setStatus($('web-detail'), 'Harness Web 已打开，外壳设置保持按需关闭。')
+      setStatus($('web-detail'), 'Runtime 已重启，Harness Web 已重新打开；外壳设置保持按需关闭。')
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
     } finally {
@@ -154,6 +167,7 @@
   }
 
   $('settings-open-harness').addEventListener('click', openHarness)
+  $('settings-refresh-web').addEventListener('click', refreshWeb)
   $('runtime-refresh').addEventListener('click', refresh)
   $('runtime-restart').addEventListener('click', () => restart(false))
   $('runtime-clear-restart').addEventListener('click', () => restart(true))
