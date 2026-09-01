@@ -1,4 +1,5 @@
 use crate::harness_shell::INIT_SCRIPT;
+use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use url::Url;
 
@@ -47,6 +48,22 @@ fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(mobile))]
+pub fn prewarm_settings_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window("settings").is_some() {
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+        .title("HarnessDock · 外壳设置")
+        .inner_size(760.0, 650.0)
+        .min_inner_size(560.0, 480.0)
+        .resizable(true)
+        .visible(false)
+        .build()
+        .map(|_| ())
+        .map_err(|error| format!("无法预热外壳设置插件窗口: {error}"))
+}
+
 #[tauri::command]
 pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(mobile)]
@@ -76,6 +93,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
             .inner_size(1180.0, 780.0)
             .min_inner_size(720.0, 560.0)
             .resizable(true)
+            .decorations(false)
             .build()
             .map_err(|error| format!("无法创建 Harness WebView: {error}"))?;
         window
@@ -102,14 +120,47 @@ pub async fn harness_close(app: AppHandle) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         if let Some(window) = app.get_webview_window("harness") {
-            window.close().map_err(|error| format!("无法关闭 Harness 窗口: {error}"))?;
-        }
-        if let Some(control) = app.get_webview_window("main") {
-            control.show().map_err(|error| format!("无法显示 HarnessDock 控制页: {error}"))?;
-            control.set_focus().map_err(|error| format!("无法聚焦 HarnessDock 控制页: {error}"))?;
+            window.hide().map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessWindowState {
+    pub maximized: bool,
+}
+
+fn harness_window(app: &AppHandle) -> Result<tauri::WebviewWindow<tauri::Wry>, String> {
+    app.get_webview_window("harness")
+        .ok_or_else(|| "Harness Web 窗口尚未创建。".to_string())
+}
+
+#[tauri::command]
+pub fn harness_minimize(app: AppHandle) -> Result<(), String> {
+    harness_window(&app)?.minimize().map_err(|error| format!("无法最小化 Harness 窗口: {error}"))
+}
+
+#[tauri::command]
+pub fn harness_toggle_maximize(app: AppHandle) -> Result<HarnessWindowState, String> {
+    let window = harness_window(&app)?;
+    if window.is_maximized().map_err(|error| format!("无法读取 Harness 窗口状态: {error}"))? {
+        window.unmaximize().map_err(|error| format!("无法还原 Harness 窗口: {error}"))?;
+    } else {
+        window.maximize().map_err(|error| format!("无法最大化 Harness 窗口: {error}"))?;
+    }
+    Ok(HarnessWindowState {
+        maximized: window.is_maximized().unwrap_or(false),
+    })
+}
+
+#[tauri::command]
+pub fn harness_window_state(app: AppHandle) -> Result<HarnessWindowState, String> {
+    let window = harness_window(&app)?;
+    Ok(HarnessWindowState {
+        maximized: window.is_maximized().unwrap_or(false),
+    })
 }
 
 #[tauri::command]
@@ -160,7 +211,7 @@ pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         if let Some(window) = app.get_webview_window("settings") {
-            window.close().map_err(|error| format!("无法关闭外壳设置插件: {error}"))?;
+            window.hide().map_err(|error| format!("无法隐藏外壳设置插件: {error}"))?;
         }
         Ok(())
     }

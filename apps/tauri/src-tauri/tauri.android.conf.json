@@ -9,8 +9,7 @@
     ]
   },
   "bundle": {
-    "android": {
-      "minSdkVersion": 24
-    }
+    "android": { "minSdkVersion": 24 },
+    "resources": {}
   }
 }

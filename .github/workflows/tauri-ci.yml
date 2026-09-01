@@ -91,9 +91,16 @@ jobs:
       - name: Initialize Android project
         working-directory: apps/tauri
         run: cargo tauri android init --ci --skip-targets-install
-      - name: Build Android debug APK
+      - name: Build Android smoke APK
         working-directory: apps/tauri
-        run: cargo tauri android build --debug --apk --target aarch64 --ci
+        run: cargo tauri android build --release --apk --target aarch64 --ci
+      - name: Check Android smoke package size
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.apk' -print | sort | head -1)"
+          test -n "$apk"
+          node scripts/check-android-package.mjs "$apk"
 
   ios-smoke:
     runs-on: macos-latest

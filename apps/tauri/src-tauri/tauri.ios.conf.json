@@ -9,8 +9,7 @@
     ]
   },
   "bundle": {
-    "iOS": {
-      "minimumSystemVersion": "14.0"
-    }
+    "iOS": { "minimumSystemVersion": "14.0" },
+    "resources": {}
   }
 }

@@ -146,8 +146,8 @@ jobs:
           copy_one release-input/tauri-desktop-linux-x64 '*.AppImage' "release-assets/HarnessDock-${version}-linux-x64.AppImage"
           copy_one release-input/tauri-desktop-mac-x64 '*.dmg' "release-assets/HarnessDock-${version}-macos-x64.dmg"
           copy_one release-input/tauri-desktop-mac-arm64 '*.dmg' "release-assets/HarnessDock-${version}-macos-arm64.dmg"
-          copy_one release-input/tauri-android-arm64-candidate '*.apk' "release-assets/HarnessDock-${version}-android-arm64-debug.apk"
-          copy_one release-input/tauri-android-arm64-candidate '*.aab' "release-assets/HarnessDock-${version}-android-arm64-debug.aab"
+          copy_one release-input/tauri-android-arm64-candidate '*.apk' "release-assets/HarnessDock-${version}-android-arm64-release.apk"
+          copy_one release-input/tauri-android-arm64-candidate '*.aab' "release-assets/HarnessDock-${version}-android-arm64-release.aab"
           copy_one release-input/tauri-ios-simulator-candidate '*.zip' "release-assets/HarnessDock-${version}-ios-arm64-simulator.zip"
 
           pack_runtime() {

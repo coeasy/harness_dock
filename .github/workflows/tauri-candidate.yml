@@ -16,6 +16,7 @@ on:
       - 'scripts/build-macos-dmg.sh'
       - 'scripts/generate-nsis-branding.ps1'
       - 'scripts/verify-windows-installer-icon.mjs'
+      - 'scripts/check-android-package.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/release-notes/**'
@@ -409,17 +410,22 @@ jobs:
           test "$before" != "$after" || { echo 'Android launcher icon still matches Tauri template default' >&2; exit 1; }
       - name: Build Android candidate APK and AAB
         working-directory: apps/tauri
-        run: cargo tauri android build --debug --apk --aab --target aarch64 --ci
+        run: cargo tauri android build --release --apk --aab --target aarch64 --ci
       - name: Validate Android outputs
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.apk' -print -quit)"
-          test -n "$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.aab' -print -quit)"
+          apk="$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.apk' -print | sort | head -1)"
+          aab="$(find apps/tauri/src-tauri/gen/android/app/build/outputs -type f -name '*.aab' -print | sort | head -1)"
+          test -n "$apk"
+          test -n "$aab"
+          node scripts/check-android-package.mjs "$apk" "$aab"
       - uses: actions/upload-artifact@v7
         with:
           name: tauri-android-arm64-candidate
-          path: apps/tauri/src-tauri/gen/android/app/build/outputs/**
+          path: |
+            apps/tauri/src-tauri/gen/android/app/build/outputs/**/*.apk
+            apps/tauri/src-tauri/gen/android/app/build/outputs/**/*.aab
           retention-days: 7
           if-no-files-found: error
           compression-level: 0

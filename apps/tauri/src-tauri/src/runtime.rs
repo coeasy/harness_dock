@@ -868,6 +868,16 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
+pub async fn runtime_restart(app: AppHandle) -> Result<RuntimeStatus, String> {
+    {
+        let state = app.state::<AppState>();
+        runtime_stop(state)?;
+    }
+    let state = app.state::<AppState>();
+    runtime_start(app.clone(), state).await
+}
+
+#[tauri::command]
 pub fn runtime_stop(state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
     let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
     if let Some(mut process) = guard.take() {

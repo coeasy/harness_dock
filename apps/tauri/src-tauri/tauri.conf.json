@@ -9,7 +9,7 @@
     "windows": [{
       "label": "main",
       "title": "HarnessDock",
-      "visible": false,
+      "visible": true,
       "width": 1180,
       "height": 780,
       "minWidth": 720,

@@ -20,6 +20,13 @@
     element.classList.toggle('error', bad)
   }
 
+  function bootStatus(value, state = 'loading') {
+    const element = $('boot-status')
+    if (!element) return
+    element.className = `boot-status ${state}`
+    element.querySelector('span:last-child').textContent = value
+  }
+
   async function call(command, args) {
     if (!invoke) throw new Error('Tauri IPC is unavailable. This page must run inside HarnessDock.')
     return invoke(command, args)
@@ -133,16 +140,19 @@
     desktopStartup = (async () => {
       $('runtime-start').disabled = true
       runtimeState.textContent = 'starting'
+      bootStatus('正在启动本地 Runtime，界面保持可操作…')
       status(runtimeDetail, '正在启动 Harness Web Runtime…')
       try {
         currentRuntime = await call('runtime_start')
         if (!currentRuntime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
         status(runtimeDetail, runtimeDetailText(currentRuntime))
         await openHarnessWithRetry(currentRuntime.appUrl)
+        bootStatus('Harness Web 已就绪', 'ready')
       } catch (error) {
         desktopStartup = undefined
         runtimeState.textContent = 'error'
         status(runtimeDetail, `Harness Web Runtime 启动失败，但控制页仍可用。\n${String(error)}`, true)
+        bootStatus('启动失败，当前控制页仍可重试', 'error')
         await showControl()
       } finally {
         $('runtime-start').disabled = false
@@ -156,15 +166,18 @@
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
       if (platform.runtimeMode === 'local') {
+        bootStatus('正在准备本地 Runtime，控制页已就绪…')
         $('desktop-card').classList.remove('hidden')
         $('gateway-host-card').classList.remove('hidden')
         await autoStartDesktopRuntime()
         await refreshGatewayHost().catch((error) => status(hostDetail, String(error), true))
       } else {
+        bootStatus('Remote Gateway 模式已就绪', 'ready')
         $('mobile-remote-card').classList.remove('hidden')
         deviceName.value = defaultDeviceName(platform)
       }
     } catch (error) {
+      bootStatus('运行环境检测失败，当前页面仍可操作', 'error')
       status(runtimeDetail || gatewayDetail, String(error), true)
       await showControl()
     }

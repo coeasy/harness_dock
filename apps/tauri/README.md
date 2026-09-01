@@ -12,7 +12,9 @@
 - Desktop startup always opens the isolated official Harness Web UI as the primary surface; the local control page stays hidden in the background and is only shown for startup recovery or explicit settings access.
 - If normal plugin recovery cannot complete, a temporary clean DSH profile is used so the Web UI can still open without changing the user's real configuration.
 
-The Harness WebView receives a minimal injected shell toolbar with one `外壳设置` button. Clicking it creates or focuses a separate local Shell Settings plugin window; the native `HarnessDock → 外壳设置` menu remains available as a fallback. The settings plugin is never opened during a successful startup, and the Web UI auto-open behavior is mandatory rather than a user toggle.
+The Harness WebView receives a minimal injected shell toolbar with `设置`, `最小化`, `最大化/还原`, and `隐藏到托盘` controls. Clicking `设置` focuses the prewarmed local Shell Settings plugin; the native `HarnessDock → 外壳设置` menu and system tray remain available as fallbacks. Closing the Harness window hides it to the tray, while the explicit tray `退出 HarnessDock` action performs full child-process cleanup. The settings plugin is never opened during a successful startup, and the Web UI auto-open behavior is mandatory rather than a user toggle.
+
+The control page is visible immediately on desktop launch and starts the local Runtime asynchronously. A Runtime failure leaves the control page available for recovery instead of making the application look frozen. Update checking is available from Shell Settings and opens the matching GitHub release page; signed in-place installation is intentionally not enabled until updater signing keys and platform-specific release metadata are configured.
 
 ## Brand and installation contract
 
@@ -35,11 +37,11 @@ Mobile projects must be initialized before regenerating icons:
 ```bash
 cargo tauri android init --ci
 cargo tauri icon src-tauri/icons/app-icon.png
-cargo tauri android build --debug --apk --aab --target aarch64 --ci
+cargo tauri android build --release --apk --aab --target aarch64 --ci
 
 cargo tauri ios init --ci
 cargo tauri icon src-tauri/icons/app-icon.png
 cargo tauri ios build --debug --target aarch64-sim --ci
 ```
 
-Public CI artifacts remain unsigned developer builds: Windows has no Authenticode signature, macOS is not notarized, Android is debug-signed, and iOS is Simulator-only. Release assets include SHA256SUMS.
+Public CI artifacts remain unsigned developer builds: Windows has no Authenticode signature, macOS is not notarized, Android is release-optimized but debug-signed, and iOS is Simulator-only. Release assets include SHA256SUMS. Use `--debug` only for local native debugging; it is not publishable because it retains a large unstripped shared library.
