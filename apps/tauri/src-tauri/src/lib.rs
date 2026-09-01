@@ -96,7 +96,6 @@ pub fn run() {
                 // Create both entry points before Runtime boot. A Runtime or
                 // plugin failure must never remove the user's exit path.
                 tray::create_tray(&app.handle())?;
-                let _ = harness_window::prewarm_settings_window(&app.handle());
             }
             Ok(())
         })

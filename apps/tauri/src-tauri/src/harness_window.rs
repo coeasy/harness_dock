@@ -57,22 +57,6 @@ fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(mobile))]
-pub fn prewarm_settings_window(app: &AppHandle) -> Result<(), String> {
-    if app.get_webview_window("settings").is_some() {
-        return Ok(());
-    }
-    WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-        .title("HarnessDock · 外壳设置")
-        .inner_size(760.0, 650.0)
-        .min_inner_size(560.0, 480.0)
-        .resizable(true)
-        .visible(false)
-        .build()
-        .map(|_| ())
-        .map_err(|error| format!("无法预热外壳设置插件窗口: {error}"))
-}
-
 #[tauri::command]
 pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(mobile)]
