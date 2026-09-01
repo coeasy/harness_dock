@@ -193,9 +193,6 @@ pub async fn update_install(
                 let shutdown_app = app.clone();
                 move || crate::stop_managed_processes(&shutdown_app)
             })
-            // Keep shutdown under LifecycleCoordinator. The updater's default
-            // Windows installer restart would otherwise race Runtime cleanup.
-            .restart_after_install(false)
             .build()
             .map_err(|error| {
                 crate::harness_window::hide_splash(&app);

@@ -231,7 +231,6 @@ describe('Tauri v0.2 host contract', () => {
     expect(update).toContain('GitHub 已发布 HarnessDock')
     expect(update).toContain('latest/download/latest.json')
     expect(update).toContain('download_and_install')
-    expect(update).toContain('restart_after_install(false)')
     expect(update).toContain('state.web_action.swap')
     expect(update).toContain('签名更新清单为 v')
     expect(update).toContain('on_before_exit')
