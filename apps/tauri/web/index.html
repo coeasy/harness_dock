@@ -12,13 +12,13 @@
   <main class="shell">
     <section class="hero">
       <div class="brand">HarnessDock</div>
-      <h1>Tauri v0.2.3</h1>
+      <h1>Tauri v0.2.4</h1>
       <p id="platform-summary" class="muted">正在检测运行环境…</p>
       <div class="hero-actions"><button id="shell-settings-entry" class="secondary">⚙ 外壳设置</button><button id="shell-open-harness" class="primary">打开 Harness</button></div>
     </section>
     <section id="shell-settings" class="card">
-      <div class="card-heading"><div><h2>外壳设置插件</h2><p>本窗口只在用户点击 Harness 顶部的“外壳设置”按钮或应用菜单后打开；不会在正常启动时抢占 Harness Web 界面。</p></div><span class="badge">on demand</span></div>
-      <p id="shell-detail" class="status">Harness Web 窗口默认随 Runtime 就绪后自动打开，确保启动后可以直接使用；插件异常只触发降级，不会关闭外壳。</p>
+      <div class="card-heading"><div><h2>外壳设置插件</h2><p>这是按需加载的独立外壳设置插件窗口，只在用户点击 Harness 顶部按钮或应用菜单后打开；正常启动始终优先进入 Harness Web。</p></div><span class="badge">on demand</span></div>
+      <p id="shell-detail" class="status">Harness Web 是必开的主工作窗口；插件异常只进入兼容/安全模式，不会阻止 Web 使用。外壳设置本身不会参与启动。</p>
     </section>
     <section id="desktop-card" class="card hidden">
       <div class="card-heading"><div><h2>本地 Runtime</h2><p>桌面端托管完整 DeepSeek Harness Runtime；第三方插件异常只会触发 Runtime 降级，不会关闭 HarnessDock。</p></div><span id="runtime-state" class="badge">stopped</span></div>
@@ -42,7 +42,7 @@
       <div class="actions"><button id="gateway-check" class="secondary">检查 Gateway</button><button id="gateway-pair" class="primary">配对并连接</button></div>
       <p id="gateway-detail" class="status"></p>
     </section>
-    <footer>HarnessDock v0.2.3 · Full-only Tauri Desktop · Remote Mobile</footer>
+    <footer>HarnessDock v0.2.4 · Full-only Tauri Desktop · Remote Mobile</footer>
   </main>
   <script src="./app.js" defer></script>
 </body>

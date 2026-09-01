@@ -19,6 +19,34 @@ fn validated_runtime_url(value: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+#[cfg(not(mobile))]
+fn show_settings_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        window.show().map_err(|error| format!("无法显示外壳设置插件: {error}"))?;
+        window.set_focus().map_err(|error| format!("无法聚焦外壳设置插件: {error}"))?;
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        "settings",
+        WebviewUrl::App("settings.html".into()),
+    )
+    .title("HarnessDock · 外壳设置")
+    .inner_size(760.0, 650.0)
+    .min_inner_size(560.0, 480.0)
+    .resizable(true)
+    .build()
+    .map_err(|error| format!("无法创建外壳设置插件窗口: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("无法显示外壳设置插件: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("无法聚焦外壳设置插件: {error}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(mobile)]
@@ -109,6 +137,31 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn shell_settings_show(app: AppHandle) -> Result<(), String> {
-    // This is the only command exposed to the Harness WebView shell plugin.
-    control_show(app)
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("移动端不提供桌面外壳设置插件。".into());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        show_settings_window(&app)
+    }
+}
+
+#[tauri::command]
+pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        if let Some(window) = app.get_webview_window("settings") {
+            window.close().map_err(|error| format!("无法关闭外壳设置插件: {error}"))?;
+        }
+        Ok(())
+    }
 }

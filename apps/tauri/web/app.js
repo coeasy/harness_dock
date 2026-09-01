@@ -112,6 +112,21 @@
   async function showControl() {
     try { await call('control_show') } catch { /* the window may already be visible */ }
   }
+  async function openHarnessWithRetry(url, attempts = 3) {
+    let lastError
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        await call('harness_open', { url })
+        return
+      } catch (error) {
+        lastError = error
+        if (attempt + 1 < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+        }
+      }
+    }
+    throw lastError || new Error('无法打开 Harness Web 窗口。')
+  }
 
   function autoStartDesktopRuntime() {
     if (desktopStartup) return desktopStartup
@@ -123,7 +138,7 @@
         currentRuntime = await call('runtime_start')
         if (!currentRuntime?.appUrl) throw new Error('Runtime 已返回，但没有可打开的 Web 地址。')
         status(runtimeDetail, runtimeDetailText(currentRuntime))
-        await call('harness_open', { url: currentRuntime.appUrl })
+        await openHarnessWithRetry(currentRuntime.appUrl)
       } catch (error) {
         desktopStartup = undefined
         runtimeState.textContent = 'error'
@@ -159,15 +174,19 @@
     await autoStartDesktopRuntime()
   })
 
-  $('shell-settings-entry').addEventListener('click', () => {
-    $('shell-settings').scrollIntoView({ behavior: 'smooth', block: 'start' })
+  $('shell-settings-entry').addEventListener('click', async () => {
+    try {
+      await call('shell_settings_show')
+    } catch (error) {
+      status($('shell-detail'), String(error), true)
+    }
   })
 
   $('shell-open-harness').addEventListener('click', async () => {
     try {
       const current = await refreshRuntime()
       if (!current.appUrl) throw new Error('Runtime 尚未启动。')
-      await call('harness_open', { url: current.appUrl })
+      await openHarnessWithRetry(current.appUrl)
     } catch (error) {
       status($('shell-detail'), String(error), true)
     }
@@ -177,7 +196,7 @@
     try {
       const current = await refreshRuntime()
       if (!current.appUrl) throw new Error('Runtime 尚未启动。')
-      await call('harness_open', { url: current.appUrl })
+      await openHarnessWithRetry(current.appUrl)
     } catch (error) {
       status(runtimeDetail, String(error), true)
     }

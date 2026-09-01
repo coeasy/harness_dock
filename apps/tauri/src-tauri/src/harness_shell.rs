@@ -1,8 +1,8 @@
 /// Minimal shell bridge injected into the loopback Harness WebView.
 ///
 /// The official Harness UI stays the primary application surface. This script
-/// adds one safe, on-demand entry point for the local Shell Settings plugin;
-/// it never starts Runtime, changes DSH configuration, or exposes host controls.
+/// adds one safe, on-demand entry point for the separate local Shell Settings plugin window;
+/// it never starts Runtime, changes DSH configuration, or exposes host controls. The settings window is created only after an explicit click.
 pub(crate) const INIT_SCRIPT: &str = r##"
 (() => {
   'use strict';

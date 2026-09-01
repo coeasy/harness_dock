@@ -30,7 +30,7 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     app.set_menu(menu).map_err(|error| format!("无法安装 HarnessDock 菜单: {error}"))?;
     app.on_menu_event(|app_handle: &tauri::AppHandle, event| {
         if event.id().0.as_str() == "shell-settings" {
-            let _ = harness_window::control_show(app_handle.clone());
+            let _ = harness_window::shell_settings_show(app_handle.clone());
         }
     });
     Ok(())
@@ -54,6 +54,7 @@ pub fn run() {
             harness_window::harness_close,
             harness_window::control_show,
             harness_window::shell_settings_show,
+            harness_window::shell_settings_close,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,

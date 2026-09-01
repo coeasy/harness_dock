@@ -39,6 +39,16 @@ description = "Allows the bundled desktop launcher to stop its owned DeepSeek Ha
 commands.allow = ["runtime_stop"]
 
 [[permission]]
+identifier = "runtime-maintenance"
+description = "Allows the local HarnessDock control surfaces to clear a persisted plugin quarantine record."
+commands.allow = ["runtime_clear_plugin_quarantine"]
+
+[[permission]]
 identifier = "harness-shell"
-description = "Allows the loopback Harness WebView to open the on-demand Shell Settings plugin; it cannot manage Runtime or Gateway."
+description = "Allows the loopback Harness WebView to open the separate on-demand Shell Settings plugin; it cannot manage Runtime or Gateway."
 commands.allow = ["shell_settings_show"]
+
+[[permission]]
+identifier = "shell-settings"
+description = "Allows only the local Shell Settings plugin window to inspect and recover the owned Runtime."
+commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "harness_open", "harness_close"]

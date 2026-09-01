@@ -1,4 +1,4 @@
-# HarnessDock Tauri v0.2.3
+# HarnessDock Tauri v0.2.4
 
 `apps/tauri` is the supported application host. Public desktop releases are **Full-only**: Windows, macOS and Linux packages include the pinned local DeepSeek Harness runtime. The legacy Electron Thin implementation remains in the repository for compatibility/testing but is not part of the Tauri candidate or GitHub Release.
 
@@ -7,12 +7,12 @@
 - Windows / macOS / Linux: packaged local runtime + Remote Gateway.
 - Android / iOS: Remote Gateway only; Node/dsh is never started on-device.
 - Third-party plugin failures are isolated by bounded recovery/quarantine and do not terminate the HarnessDock host.
-- The packaged launcher reuses a compatible Node already on PATH; the bundled portable Node is only the offline fallback and is never installed system-wide.
+- The packaged launcher reuses a compatible Node already on PATH; if that executable fails to boot the pinned Runtime, the launcher retries with the bundled portable Node. The bundled Node is never installed system-wide.
 - A built-in `@deepseek-ai/dsh-client-runtime/client` compatibility layer keeps older plugins such as `dsh-at-file` from failing when the official package is now `dsh-client-modules`.
 - Desktop startup always opens the isolated official Harness Web UI as the primary surface; the local control page stays hidden in the background and is only shown for startup recovery or explicit settings access.
 - If normal plugin recovery cannot complete, a temporary clean DSH profile is used so the Web UI can still open without changing the user's real configuration.
 
-The Harness WebView receives a minimal injected shell toolbar with one `外壳设置` button. Clicking it shows the on-demand Shell Settings plugin window; the native `HarnessDock → 外壳设置` menu remains available as a fallback. The settings plugin is never opened during a successful startup, and the Web UI auto-open behavior is mandatory rather than a user toggle.
+The Harness WebView receives a minimal injected shell toolbar with one `外壳设置` button. Clicking it creates or focuses a separate local Shell Settings plugin window; the native `HarnessDock → 外壳设置` menu remains available as a fallback. The settings plugin is never opened during a successful startup, and the Web UI auto-open behavior is mandatory rather than a user toggle.
 
 ## Brand and installation contract
 

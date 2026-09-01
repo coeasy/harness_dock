@@ -561,12 +561,62 @@ fn recovery_rows(node: &Path, dsh: &Path, embedded_patch_file: &Path) -> Result<
     }
 }
 
+fn start_with_node_fallback(
+    runtime_root: PathBuf,
+    plugin_path: PathBuf,
+    compatibility_path: PathBuf,
+    origin_path: PathBuf,
+    quarantine_state_path: PathBuf,
+) -> Result<RuntimeProcess, String> {
+    let normalized_root = platform::node_cli_path(&runtime_root);
+    let bundled_node = node_path(&normalized_root);
+    let (preferred_node, preferred_source) = platform::resolve_node(&bundled_node);
+
+    if preferred_source != "system" {
+        return start_blocking(
+            runtime_root,
+            plugin_path,
+            compatibility_path,
+            origin_path,
+            quarantine_state_path,
+            Some((preferred_node, preferred_source)),
+        );
+    }
+
+    let system_error = match start_blocking(
+        runtime_root.clone(),
+        plugin_path.clone(),
+        compatibility_path.clone(),
+        origin_path.clone(),
+        quarantine_state_path.clone(),
+        Some((preferred_node, "system")),
+    ) {
+        Ok(process) => return Ok(process),
+        Err(error) => error,
+    };
+
+    match start_blocking(
+        runtime_root,
+        plugin_path,
+        compatibility_path,
+        origin_path,
+        quarantine_state_path,
+        Some((bundled_node, "bundled")),
+    ) {
+        Ok(process) => Ok(process),
+        Err(bundled_error) => Err(format!(
+            "系统 Node 启动失败，已自动回退内置 Node，但仍未能打开 Harness Web。\\n系统 Node: {system_error}\\n内置 Node: {bundled_error}"
+        )),
+    }
+}
+
 fn start_blocking(
     runtime_root: PathBuf,
     plugin_path: PathBuf,
     compatibility_path: PathBuf,
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
+    forced_node: Option<(PathBuf, &'static str)>,
 ) -> Result<RuntimeProcess, String> {
     // Tauri can return verbatim Windows paths (\\?\\C:\\...). Node's
     // entry-point resolver on affected releases cannot execute those paths.
@@ -576,7 +626,7 @@ fn start_blocking(
     let origin_path = platform::node_cli_path(&origin_path);
     let quarantine_state_path = platform::node_cli_path(&quarantine_state_path);
     let bundled_node = node_path(&runtime_root);
-    let (node, node_source) = platform::resolve_node(&bundled_node);
+    let (node, node_source) = forced_node.unwrap_or_else(|| platform::resolve_node(&bundled_node));
     let dsh = dsh_path(&runtime_root);
     if !dsh.is_file() || (node_source == "bundled" && !bundled_node.is_file()) {
         return Err(format!("Tauri Full Runtime 不完整: node={} dsh={}", bundled_node.display(), dsh.display()));
@@ -808,7 +858,7 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     let origin_path = resource_path(&app, "origin.json")?;
     let quarantine_state_path = quarantine_path(&app)?;
     let process = tauri::async_runtime::spawn_blocking(move || {
-        start_blocking(runtime_root, plugin_path, compatibility_path, origin_path, quarantine_state_path)
+        start_with_node_fallback(runtime_root, plugin_path, compatibility_path, origin_path, quarantine_state_path)
     })
         .await
         .map_err(|error| format!("Runtime 启动任务失败: {error}"))??;

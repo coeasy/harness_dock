@@ -12,7 +12,7 @@
 
 ## 当前版本
 
-- **HarnessDock v0.2.2**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
+- **HarnessDock v0.2.4**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
 - Electron Thin/Full 构建逻辑暂时保留在 `apps/desktop` 作为兼容与迁移参考，**不进入正式 candidate / Release**；稳定后可独立删除。
 - 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
 
@@ -27,13 +27,14 @@
 | Android arm64 | Remote-only | debug `.apk` + `.aab` |
 | iOS Simulator arm64 | Remote-only | Simulator `.zip` |
 
-## v0.2.2 安装与升级体验
+## v0.2.4 安装与升级体验
 
 - 统一 1024x1024 HarnessDock 品牌源图，candidate 自动生成桌面、Android、iOS 所需图标。
 - Windows NSIS 安装器和卸载器显式使用 HarnessDock 图标，并使用品牌化 header/sidebar；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
 - Windows 保持 `com.harnessdock.client` 应用标识与 current-user 安装模式，可直接覆盖升级现有 v0.2.x；禁止意外降级安装。
 - WebView2 bootstrapper 随 Windows 安装器嵌入，缺少 WebView2 时无需再先下载 bootstrapper 本体。
-- Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine，用户仍可访问诊断、清除隔离和重试入口。
+- Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine 或临时安全配置，Web 仍默认打开；系统 Node 启动异常会自动回退随包 Node。
+- 外壳设置作为独立按需插件窗口，只在 Harness 顶部按钮或应用菜单点击后显示，不抢占 Web 首屏。
 
 ## 架构
 

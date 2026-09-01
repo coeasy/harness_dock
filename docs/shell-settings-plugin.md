@@ -2,64 +2,65 @@
 
 ## 目标
 
-Harness Web 是桌面端唯一的主工作界面。启动成功后必须直接显示 Harness Web，外壳设置不参与启动竞争，也不因为启动成功而自动弹出。
+Harness Web 是桌面端唯一的主工作界面，启动成功后必须直接打开，用户不需要先看到任何配置页。外壳设置是宿主级按需插件，只在用户主动点击入口时出现。
 
-外壳设置作为一个宿主级插件存在：
+完整策略是：
 
-- Harness Web 顶部提供唯一的“外壳设置”入口；
-- 点击入口后显示已加载的本地外壳设置窗口；
-- 应用菜单保留“HarnessDock → 外壳设置”作为备用入口；
-- Runtime、插件兼容恢复和 Node 选择仍由隐藏的启动控制页负责；
-- 设置插件只获得显示设置窗口的最小 IPC 权限。
+- `main` 仅作为隐藏启动控制面，负责 Runtime 启动、恢复与状态；
+- `harness` 是用户实际使用的官方 Harness Web 主窗口；
+- `settings` 是独立的本地外壳设置插件窗口，首次点击时创建，之后复用；
+- 插件错误只能触发隔离/兼容/安全配置，不能阻止已有 Web 地址交给主窗口；
+- 系统 Node 不能启动时自动回退到随包 Node，不安装系统环境、不修改用户 PATH。
 
 ## 窗口职责
 
 | 窗口 | 默认状态 | 职责 |
 | --- | --- | --- |
-| `main` | 隐藏 | 启动 Runtime、处理恢复失败、承载 Shell Settings Plugin |
-| `harness` | Runtime ready 后显示 | 用户实际使用的官方 Harness Web |
-| `settings` | 不单独创建 | 复用 `main` 的控制页，以弹出窗口形式按需显示 |
+| `main` | 隐藏 | 启动 Runtime、执行恢复、承载异常诊断 |
+| `harness` | Runtime ready 后显示 | 官方 Harness Web 主工作界面 |
+| `settings` | 不创建 | 顶部按钮或应用菜单点击后才创建/显示独立设置插件 |
 
-复用隐藏控制页可以避免重复启动 Runtime、重复创建 WebView 数据目录和重复加载插件配置。设置插件打开时只改变 `main` 的可见性与焦点，不改变 Harness Web 的生命周期。
-
-## 启动与交互生命周期
+## 启动契约
 
 ```mermaid
-sequenceDiagram
-    participant App as HarnessDock
-    participant Boot as 隐藏启动控制页
-    participant Runtime as dsh Runtime
-    participant Web as Harness Web
-    participant Settings as 外壳设置插件
-
-    App->>Boot: 创建隐藏 main
-    Boot->>Runtime: runtime_start
-    Runtime-->>Boot: ready + loopback URL
-    Boot->>Web: harness_open（强制）
-    Web-->>App: 显示主工作界面
-    Web->>Settings: 顶部按钮 shell_settings_show
-    Settings-->>App: 显示并聚焦设置页
+flowchart TD
+    A["启动 HarnessDock"] --> B["隐藏 main 启动 Runtime"]
+    B --> C{"插件/Node 是否异常"}
+    C -->|"否"| D["打开 Harness Web"]
+    C -->|"是"| E["隔离或安全配置"]
+    E --> F["仍取得 loopback Web 地址"]
+    F --> D
+    D --> G["用户按需打开 settings 插件"]
 ```
+
+正常路径和降级路径最终都以 `harness_open` 为出口；只有 Runtime 本身无法提供 loopback Web 地址时才显示诊断控制面。
+
+## 设置插件功能
+
+设置插件提供四类操作：
+
+- 查看 Runtime 状态、版本、Node 来源、兼容模式和隔离插件；
+- 一键重新打开 Harness Web；
+- 重启 Runtime 并打开 Web；
+- 清除持久化插件隔离后重启，或显式停止 Runtime。
+
+设置插件关闭后不会停止 Runtime，也不会关闭 Harness Web。它不承载正常工作流，用户可以始终停留在 Harness Web。
 
 ## 安全边界
 
-`harness` 窗口只允许 loopback Runtime URL。注入脚本再次检查 `localhost/127.0.0.1/::1`，非 loopback 页面不会安装按钮。
+`harness` 只允许 loopback Runtime URL，注入脚本也会再次检查 loopback host。远程 Harness/Gateway 页面不会获得本地 Tauri IPC 权限。
 
-`harness-shell` capability 只允许 `shell_settings_show`。它不能启动/停止 Runtime、管理 Gateway、读取插件配置或写入 DSH 配置。所有高权限操作仍留在 `local-main` capability。
-
-## 失败与恢复
-
-- 正常启动：Runtime ready 后打开 Harness Web，设置窗口保持关闭。
-- Runtime/插件启动失败：显示原有控制页，提供恢复和重试能力。
-- 用户打开设置：显示控制页，Harness Web 不被关闭。
-- 用户关闭设置：仅隐藏控制页，Harness Web 仍保持可用。
-- 用户停止 Runtime：沿用现有显式停止流程，关闭 Harness Web 并显示控制页。
+- `harness-shell` capability（窗口 `harness`）只允许 `shell_settings_show`；
+- `shell-settings` capability（窗口 `settings`）只允许读取/恢复宿主自有 Runtime；
+- `local-main` capability（窗口 `main`）负责启动控制和 Gateway；
+- 设置插件不能读取插件配置、执行任意命令或把远程页面升级为宿主权限。
 
 ## 验收标准
 
-1. 首次启动不会显示外壳设置页，直接进入 Harness Web。
-2. 已保存的旧 `autoOpenHarness=false` 不再阻断 Web 启动；启动行为始终为自动打开。
-3. Harness Web 顶部存在“外壳设置”按钮，点击一次显示设置页，再次点击只复用同一窗口。
-4. 应用菜单入口与顶部入口行为一致。
-5. 插件报错不会阻断 Harness Web；启动失败时控制页仍可用。
-6. Windows/macOS/Linux 的 Tauri 构建、Rust 检查和现有 Runtime smoke 全部通过。
+1. 桌面正常启动默认直接进入 Harness Web，配置窗口不抢占首屏。
+2. 旧配置中的自动打开开关不再影响启动；启动契约固定为 Web 优先。
+3. 第三方插件异常时，仍优先尝试隔离恢复，再使用临时干净配置，最终仍打开 Web。
+4. 系统 Node 启动失败时，自动尝试随包 Node。
+5. Harness 顶部按钮与应用菜单均打开同一个独立 settings 插件窗口。
+6. 设置插件可查看状态、重新打开、重启 Runtime、清除隔离并停止 Runtime。
+7. 所有高权限命令按窗口 capability 隔离，Windows 子进程不显示控制台窗口。
