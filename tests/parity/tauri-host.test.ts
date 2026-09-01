@@ -176,6 +176,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(settingsHtml).toContain('Web 优先启动')
     expect(harnessWindow).toContain('pub async fn shell_settings_show')
     expect(harnessWindow).toContain('pub fn control_hide')
+    expect(readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/build.rs'), 'utf8')).toContain('"control_hide"')
     expect(harnessWindow).toContain('async fn show_settings_window')
     expect(harnessWindow).toContain('PageLoadEvent::Finished')
     expect(harnessWindow).not.toContain('eval("window.location.reload()")')
