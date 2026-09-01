@@ -123,6 +123,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(host).toContain('quitting')
     expect(host).toContain('runtime_starting')
     expect(host).toContain('web_restarting')
+    expect(host).not.toContain('prewarm_settings_window')
     expect(runtime).toContain('gateway_host::stop_managed(&state.gateway)')
     expect(runtime).toContain('runtime_restarting')
     expect(web).toContain('autoStartDesktopRuntime')
@@ -140,11 +141,21 @@ describe('Tauri v0.2 host contract', () => {
     const settingsHtml = readFileSync(path.join(repoRoot, 'apps/tauri/web/settings.html'), 'utf8')
     const settingsJs = readFileSync(path.join(repoRoot, 'apps/tauri/web/settings.js'), 'utf8')
     expect(capability.windows).toEqual(['harness'])
+    expect(capability.local).toBe(false)
+    expect(capability.remote.urls).toEqual([
+      'http://127.0.0.1:*/*',
+      'http://localhost:*/*',
+      'https://127.0.0.1:*/*',
+      'https://localhost:*/*',
+    ])
     expect(capability.permissions).toContain('harness-shell')
     expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web"]')
     expect(shell).toContain("shell_settings_show")
     expect(shell).toContain("harness_reload_web")
     expect(shell).toContain("harness_restart_web")
+    expect(shell).toContain('harnessdock-shell-mounted')
+    expect(shell).toContain('padding-bottom:var(--harnessdock-shell-bottom-inset)!important')
+    expect(shell).toContain('overflow-x:auto')
     expect(web).toContain("await openHarnessWithRetry(currentRuntime.appUrl)")
     expect(web).not.toContain('autoOpenHarness')
     expect(web).not.toContain('auto-open-harness')

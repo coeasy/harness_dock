@@ -57,12 +57,14 @@ pub(crate) const INIT_SCRIPT: &str = r##"
     const style = document.createElement('style');
     style.id = 'harnessdock-shell-style';
     style.textContent = [
-      '#harnessdock-shell{position:fixed;top:0;left:0;right:0;height:38px;z-index:2147483647;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 16px;background:linear-gradient(180deg,rgba(18,31,51,.98),rgba(9,18,32,.98));border-bottom:1px solid rgba(148,178,214,.18);box-shadow:0 1px 0 rgba(0,0,0,.28);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;user-select:none;-webkit-user-select:none}',
+      ':root{--harnessdock-shell-top-inset:42px;--harnessdock-shell-bottom-inset:12px}',
+      '#harnessdock-shell{position:fixed;top:0;left:0;right:0;height:42px;z-index:2147483647;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 16px;background:linear-gradient(180deg,rgba(18,31,51,.98),rgba(9,18,32,.98));border-bottom:1px solid rgba(148,178,214,.18);box-shadow:0 1px 0 rgba(0,0,0,.28);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;user-select:none;-webkit-user-select:none}',
       '#harnessdock-shell .harnessdock-shell-drag{display:flex;align-items:center;min-width:0;flex:1;height:100%;-webkit-app-region:drag}',
       '#harnessdock-shell .harnessdock-shell-brand{display:flex;align-items:center;gap:8px;color:#e9eef7;font-size:12px;font-weight:700;letter-spacing:.03em}',
       '#harnessdock-shell .harnessdock-shell-mark{width:16px;height:16px;border-radius:5px;background:radial-gradient(circle at 35% 30%,#6ee7d8 0%,#14b8a6 58%,#0d9488 100%);box-shadow:0 0 8px rgba(20,184,166,.42),inset 0 0 0 1px rgba(255,255,255,.18)}',
       '#harnessdock-shell .harnessdock-shell-mark:after{content:"";display:block;width:7px;height:7px;margin:4.5px;border-radius:50%;background:#d9fff6;box-shadow:0 0 5px rgba(126,231,214,.6)}',
-      '#harnessdock-shell .harnessdock-shell-actions{display:flex;align-items:center;gap:4px;height:100%;-webkit-app-region:no-drag}',
+      '#harnessdock-shell .harnessdock-shell-actions{display:flex;align-items:center;gap:4px;height:100%;max-width:calc(100vw - 72px);overflow-x:auto;scrollbar-width:none;-webkit-app-region:no-drag}',
+      '#harnessdock-shell .harnessdock-shell-actions::-webkit-scrollbar{display:none}',
       '#harnessdock-shell button{all:unset;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;min-width:30px;padding:0 9px;border-radius:8px;color:#c7d5e8;font-size:12px;font-weight:650;cursor:pointer;background:rgba(148,178,214,.1);border:1px solid rgba(148,178,214,.18);box-sizing:border-box;-webkit-app-region:no-drag}',
       '#harnessdock-shell .harnessdock-shell-settings{min-width:0}',
       '#harnessdock-shell .harnessdock-shell-window-control{padding:0;background:transparent;border-color:transparent}',
@@ -73,10 +75,13 @@ pub(crate) const INIT_SCRIPT: &str = r##"
       '#harnessdock-shell button:focus-visible{outline:2px solid #5eead4;outline-offset:1px}',
       '#harnessdock-shell svg{width:13px;height:13px;flex:0 0 13px}',
       '#harnessdock-shell .harnessdock-shell-separator{width:1px;height:18px;background:rgba(148,178,214,.22);margin:0 3px}',
-      '#harnessdock-shell-toast{position:fixed;top:48px;right:12px;max-width:min(360px,calc(100vw - 24px));padding:9px 12px;border:1px solid rgba(248,113,113,.45);border-radius:10px;background:rgba(49,19,28,.96);color:#fecaca;font-size:12px;line-height:1.45;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}',
+      '#harnessdock-shell-toast{position:fixed;top:52px;right:12px;max-width:min(360px,calc(100vw - 24px));padding:9px 12px;border:1px solid rgba(248,113,113,.45);border-radius:10px;background:rgba(49,19,28,.96);color:#fecaca;font-size:12px;line-height:1.45;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}',
       '#harnessdock-shell-toast[data-bad="false"]{border-color:rgba(45,212,191,.42);background:rgba(7,47,38,.96);color:#b8fff2}',
       '#harnessdock-shell-toast.is-visible{opacity:1;transform:translateY(0)}',
-      'html body{padding-top:38px!important}'
+      'html.harnessdock-shell-mounted{scroll-padding-top:var(--harnessdock-shell-top-inset);scroll-padding-bottom:var(--harnessdock-shell-bottom-inset)}',
+      'html.harnessdock-shell-mounted body{box-sizing:border-box!important;min-height:100vh!important;padding-top:var(--harnessdock-shell-top-inset)!important;padding-bottom:var(--harnessdock-shell-bottom-inset)!important;overflow-x:hidden!important}',
+      'html.harnessdock-shell-mounted body #root,html.harnessdock-shell-mounted body #app,html.harnessdock-shell-mounted body [data-reactroot]{box-sizing:border-box!important;min-height:calc(100vh - var(--harnessdock-shell-top-inset) - var(--harnessdock-shell-bottom-inset))!important}',
+      '@media (max-width:720px){#harnessdock-shell{padding-left:10px;padding-right:7px}#harnessdock-shell .harnessdock-shell-brand span:last-child{display:none}#harnessdock-shell .harnessdock-shell-actions{max-width:calc(100vw - 34px);gap:3px}#harnessdock-shell button{padding-left:7px;padding-right:7px;font-size:11px}}'
     ].join('');
     document.documentElement.appendChild(style);
 
@@ -86,6 +91,14 @@ pub(crate) const INIT_SCRIPT: &str = r##"
     bar.setAttribute('aria-label', 'HarnessDock 外壳');
     bar.innerHTML = '<div class="harnessdock-shell-drag"><div class="harnessdock-shell-brand"><span class="harnessdock-shell-mark" aria-hidden="true"></span><span>HarnessDock</span></div></div><div class="harnessdock-shell-actions"><button id="harnessdock-shell-settings-button" class="harnessdock-shell-settings" type="button" title="打开外壳设置" aria-label="打开外壳设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm8.1 3.8c0-.5-.1-1-.2-1.4l-2-1.5 2-3.4-2.3-.9c-.7-.6-1.5-1-2.4-1.3L14.8 3h-4l-.4 2.3c-.9.3-1.7.7-2.4 1.3l-2.3-.9-2 3.4 2 1.5c-.1.5-.2 1-.2 1.4s.1 1 .2 1.4l-2 1.5 2 3.4 2.3-.9c.7.6 1.5 1 2.4 1.3l.4 2.3c.9.3 1.7.7 2.4 1.3l2.3-.9 2 3.4-2 1.5c.1.4.2.9.2 1.4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>设置</span></button><span class="harnessdock-shell-separator" aria-hidden="true"></span><button id="harnessdock-shell-minimize" class="harnessdock-shell-window-control" type="button" title="最小化" aria-label="最小化"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><button id="harnessdock-shell-maximize" class="harnessdock-shell-window-control" type="button" title="最大化" aria-label="最大化"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button><button id="harnessdock-shell-close" class="harnessdock-shell-window-control harnessdock-shell-close" type="button" title="隐藏到托盘" aria-label="隐藏到托盘"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div><div id="harnessdock-shell-toast" role="status" aria-live="polite"></div>';
     document.documentElement.appendChild(bar);
+    const syncLayoutInsets = () => {
+      const height = Math.ceil(bar.getBoundingClientRect().height || 42);
+      document.documentElement.style.setProperty('--harnessdock-shell-top-inset', `${height}px`);
+      document.documentElement.style.setProperty('--harnessdock-shell-bottom-inset', '12px');
+      document.documentElement.classList.add('harnessdock-shell-mounted');
+    };
+    syncLayoutInsets();
+    window.addEventListener('resize', syncLayoutInsets, { passive: true });
 
     const actions = bar.querySelector('.harnessdock-shell-actions');
     const settingsButton = document.getElementById('harnessdock-shell-settings-button');
