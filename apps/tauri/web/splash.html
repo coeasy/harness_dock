@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" />
+  <title>HarnessDock</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: #0b1120; color: #eef2fa; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: radial-gradient(120% 100% at 50% 0%, #172943 0%, #0b1120 60%, #080d18 100%); }
+    body { user-select: none; -webkit-user-select: none; }
+    .splash { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; animation: appear .28s ease-out; }
+    .mark { width: 58px; height: 58px; border-radius: 17px; background: radial-gradient(circle at 35% 28%, #6ee7d8 0%, #14b8a6 58%, #0d9488 100%); box-shadow: 0 12px 28px rgba(0,0,0,.4), 0 0 36px rgba(20,184,166,.25), inset 0 0 0 1px rgba(255,255,255,.2); position: relative; }
+    .mark::after { content: ""; position: absolute; inset: 16px; border-radius: 50%; background: #d9fff6; box-shadow: 0 0 13px rgba(126,231,214,.75); }
+    h1 { margin: 0; font-size: 18px; letter-spacing: .06em; }
+    .sub { color: #8b9bb8; font-size: 11px; letter-spacing: .05em; }
+    .status { min-height: 18px; color: #c7d5e8; font-size: 12px; text-align: center; }
+    .progress { width: 220px; height: 5px; overflow: hidden; border-radius: 99px; background: rgba(148,178,214,.15); }
+    .progress::before { content: ""; display: block; width: 28%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0d9488, #2dd4bf, #6ee7d8); animation: progress 1.25s ease-in-out infinite; }
+    .spinner { width: 18px; height: 18px; border: 2px solid rgba(110,231,216,.18); border-top-color: #2dd4bf; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes progress { 0% { transform: translateX(-140%); } 100% { transform: translateX(430%); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+  </style>
+</head>
+<body>
+  <main class="splash" aria-live="polite">
+    <div class="mark" aria-hidden="true"></div>
+    <h1>HarnessDock</h1>
+    <div class="sub">DeepSeek Harness · CLIENT</div>
+    <div class="spinner" aria-hidden="true"></div>
+    <div id="splash-status" class="status">正在初始化客户端…</div>
+    <div class="progress" aria-hidden="true"></div>
+  </main>
+  <script>
+    window.__harnessDockSetStatus = (value) => {
+      const element = document.getElementById('splash-status')
+      if (element) element.textContent = String(value || '正在执行…')
+    }
+  </script>
+</body>
+</html>

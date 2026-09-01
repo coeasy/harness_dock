@@ -34,11 +34,13 @@
 - Windows 保持 `com.harnessdock.client` 应用标识与 current-user 安装模式，可直接覆盖升级现有 v0.2.x；禁止意外降级安装。
 - WebView2 bootstrapper 随 Windows 安装器嵌入，缺少 WebView2 时无需再先下载 bootstrapper 本体。
 - Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine 或临时安全配置，Web 仍默认打开；系统 Node 启动异常会自动回退随包 Node。
-- 外壳设置作为独立按需插件窗口，只在 Harness 顶部按钮或应用菜单点击后显示，不抢占 Web 首屏。
-- 桌面端 Harness 使用自定义标题栏：设置、最小化、最大化/还原、隐藏到系统托盘；关闭窗口不会误杀 Runtime，托盘“退出 HarnessDock”才会执行完整退出清理。
-- 外壳顶部、外壳设置、托盘和应用菜单均提供两级 Web 恢复：`刷新 Web` 只重载 WebView；`重启 Web` 会先停止 Gateway、重启 Runtime，再用新的 loopback 地址重新打开 Harness Web。
-- 启动先显示可操作控制页和启动动画，再异步启动 Runtime；更新检查只在设置页主动点击时执行，失败会留在界面内并给出重试路径。
+- 插件诊断作为独立按需窗口，只在 Harness `菜单`、托盘或应用菜单中明确点击后显示，不抢占 Web 首屏；窗口居中、紧凑并在页面加载完成后显示。
+- 桌面端 Harness 使用自定义标题栏：`菜单`、最小化、最大化/还原、隐藏到系统托盘；刷新、Runtime 重启、清除插件隔离并重启、插件诊断和自动更新统一收敛到菜单。
+- 启动、刷新和重启都使用可见执行态；导航期间由本地 splash 显示动画和状态，页面加载成功后自动回到 Harness Web，失败则回到恢复入口而不是白屏。
+- 启动只显示本地 splash，后台控制页和插件诊断均不抢占首屏；自动更新统一从主界面菜单、托盘或应用菜单进入，失败会留在界面内并给出明确降级路径。
 - Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
+
+完整的 v0.2.8 外壳交互和发布前验收方案见 [`docs/plan/v0.2.8-shell-interaction-and-progress.md`](docs/plan/v0.2.8-shell-interaction-and-progress.md)。
 
 ## 架构
 

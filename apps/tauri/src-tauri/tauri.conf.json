@@ -6,18 +6,36 @@
   "build": { "frontendDist": "../web" },
   "app": {
     "withGlobalTauri": true,
-    "windows": [{
-      "label": "main",
-      "title": "HarnessDock",
-      "visible": false,
-      "width": 1180,
-      "height": 780,
-      "minWidth": 720,
-      "minHeight": 560,
-      "resizable": true,
-      "fullscreen": false,
-      "useHttpsScheme": true
-    }],
+    "windows": [
+      {
+        "label": "main",
+        "title": "HarnessDock",
+        "visible": false,
+        "width": 1180,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false,
+        "useHttpsScheme": true
+      },
+      {
+        "label": "splash",
+        "title": "HarnessDock",
+        "url": "splash.html",
+        "visible": true,
+        "center": true,
+        "width": 420,
+        "height": 300,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
+      }
+    ],
     "security": {
       "capabilities": ["local-main", "harness-shell", "shell-settings"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"

@@ -21,7 +21,7 @@ commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_cre
 [[permission]]
 identifier = "harness-window"
 description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
-commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web"]
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart"]
 
 [[permission]]
 identifier = "runtime-status"
@@ -45,15 +45,25 @@ commands.allow = ["runtime_clear_plugin_quarantine"]
 
 [[permission]]
 identifier = "update-check"
-description = "Allows the local Shell Settings plugin to check the official project release feed for a newer version."
+description = "Allows the local Plugin Diagnostics window to check the official project release feed for a newer version."
 commands.allow = ["update_check"]
 
 [[permission]]
+identifier = "update-install"
+description = "Allows a local desktop surface to install only a signed HarnessDock update and restart the client."
+commands.allow = ["update_install"]
+
+[[permission]]
 identifier = "harness-shell"
-description = "Allows the loopback Harness WebView to open the separate on-demand Shell Settings plugin and control only its own window."
-commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web"]
+description = "Allows the loopback Harness WebView to open the separate on-demand Plugin Diagnostics window, run signed updates, and control only its own window."
+commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart", "update_install"]
 
 [[permission]]
 identifier = "shell-settings"
-description = "Allows only the local Shell Settings plugin window to inspect and recover the owned Runtime."
-commands.allow = ["shell_settings_close", "runtime_status", "runtime_start", "runtime_stop", "runtime_clear_plugin_quarantine", "update_check", "harness_open", "harness_close", "harness_reload_web", "harness_restart_web", "app_quit"]
+description = "Allows only the local Plugin Diagnostics window to inspect the owned Runtime and exit the client."
+commands.allow = ["shell_settings_close", "runtime_status", "app_quit"]
+
+[[permission]]
+identifier = "splash-status"
+description = "Allows the bundled launcher to update its desktop startup animation."
+commands.allow = ["splash_status"]
