@@ -44,9 +44,8 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "tray-quit", "退出 HarnessDock", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &settings, &refresh, &restart, &safe_mode, &clear_quarantine, &update, &quit])?;
 
-    let _tray = TrayIconBuilder::with_id("harnessdock-tray")
+    let mut builder = TrayIconBuilder::with_id("harnessdock-tray")
         .tooltip("HarnessDock")
-        .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -120,8 +119,16 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             {
                 show_primary(&tray.app_handle());
             }
-        })
-        .build(app)?;
+        });
 
+    // A missing default icon is an optional shell degradation, not a reason to
+    // panic before Harness Web starts. Tauri may still build the tray on
+    // platforms that provide a system default; otherwise build() returns a
+    // normal error that the caller handles fail-open.
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    let _tray = builder.build(app)?;
     Ok(())
 }
