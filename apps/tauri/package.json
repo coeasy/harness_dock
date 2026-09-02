@@ -6,7 +6,7 @@
   "description": "Tauri-only HarnessDock host tooling",
   "scripts": {
     "prepare:plugins": "pnpm --filter @dsh/plugin-embedded-client build && pnpm --filter @dsh/plugin-harness-shell build",
-    "prepare:icons": "cargo tauri icon src-tauri/icons/app-icon.png",
+    "prepare:icons": "node scripts/normalize-icon.mjs src-tauri/icons/app-icon.png src-tauri/icons/.app-icon-normalized.png && cargo tauri icon src-tauri/icons/.app-icon-normalized.png",
     "build": "pnpm prepare:plugins && pnpm bundle:sidecar",
     "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
     "tauri:dev": "pnpm prepare:plugins && pnpm bundle:sidecar && pnpm prepare:icons && cargo tauri dev",
