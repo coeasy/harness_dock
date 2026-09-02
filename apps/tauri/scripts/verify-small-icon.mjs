@@ -117,14 +117,16 @@ const pixels = unfilter(decoded)
 const bounds = findArtworkBounds(pixels, decoded.width, decoded.height)
 const artworkWidth = bounds.maxX - bounds.minX + 1
 const artworkHeight = bounds.maxY - bounds.minY + 1
-const dominantOccupancy = Math.max(artworkWidth / decoded.width, artworkHeight / decoded.height)
+const horizontalOccupancy = artworkWidth / decoded.width
+const verticalOccupancy = artworkHeight / decoded.height
+const minimumOccupancy = Math.min(horizontalOccupancy, verticalOccupancy)
 const maxEdgeGap = Math.max(bounds.minX, bounds.minY, decoded.width - 1 - bounds.maxX, decoded.height - 1 - bounds.maxY)
 
-if (dominantOccupancy < minimum) {
-  throw new Error(`small icon artwork only fills ${(dominantOccupancy * 100).toFixed(1)}% of the canvas; required ${(minimum * 100).toFixed(1)}%`)
+if (minimumOccupancy < minimum) {
+  throw new Error(`small icon artwork fills ${(horizontalOccupancy * 100).toFixed(1)}% x ${(verticalOccupancy * 100).toFixed(1)}% of the canvas; both axes require ${(minimum * 100).toFixed(1)}%`)
 }
 if (maxEdgeGap > 2) {
   throw new Error(`small icon still has a ${maxEdgeGap}px outer gap; expected no more than 2px`)
 }
 
-console.log(`small icon fill OK: ${decoded.width}x${decoded.height}, occupancy ${(dominantOccupancy * 100).toFixed(1)}%, max edge gap ${maxEdgeGap}px`)
+console.log(`small icon fill OK: ${decoded.width}x${decoded.height}, occupancy ${(horizontalOccupancy * 100).toFixed(1)}% x ${(verticalOccupancy * 100).toFixed(1)}%, max edge gap ${maxEdgeGap}px`)
