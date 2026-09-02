@@ -112,7 +112,9 @@ const minimum = Number(minimumRaw)
 if (!Number.isFinite(minimum) || minimum <= 0 || minimum > 1) throw new Error(`invalid minimum occupancy: ${minimumRaw}`)
 
 const decoded = parsePng(readFileSync(iconPath))
-if (decoded.width > 64 || decoded.height > 64) throw new Error(`expected a small icon, got ${decoded.width}x${decoded.height}`)
+if (decoded.width !== 32 || decoded.height !== 32) {
+  throw new Error(`expected the generated 32x32 icon exactly, got ${decoded.width}x${decoded.height}`)
+}
 const pixels = unfilter(decoded)
 const bounds = findArtworkBounds(pixels, decoded.width, decoded.height)
 const artworkWidth = bounds.maxX - bounds.minX + 1
