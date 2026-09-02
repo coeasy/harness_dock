@@ -56,7 +56,7 @@ commands.allow = ["update_install"]
 [[permission]]
 identifier = "harness-shell"
 description = "Allows the independent v0.2.0 Harness Shell plugin to open on-demand diagnostics, run signed updates, and control only its own window."
-commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "update_check", "update_install", "app_quit"]
+commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_shell_close", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "update_check", "update_install", "app_quit"]
 
 [[permission]]
 identifier = "shell-settings"
