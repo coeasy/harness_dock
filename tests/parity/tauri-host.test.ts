@@ -123,6 +123,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(host).toContain('quitting')
     expect(host).toContain('runtime_starting')
     expect(host).toContain('web_action')
+    expect(host).toContain('harness_loading')
     expect(host).toContain('spawn_blocking')
     expect(host).toContain('starting_processes_empty')
     expect(host).not.toContain('prewarm_settings_window')
@@ -152,9 +153,13 @@ describe('Tauri v0.2 host contract', () => {
     expect(capability.platforms).toEqual(['linux', 'macOS', 'windows'])
     expect(capability.remote.urls).toEqual([
       'http://127.0.0.1:*/*',
+      'http://127.0.0.1:*',
       'http://localhost:*/*',
+      'http://localhost:*',
       'https://127.0.0.1:*/*',
+      'https://127.0.0.1:*',
       'https://localhost:*/*',
+      'https://localhost:*',
     ])
     expect(capability.permissions).toContain('harness-shell')
     expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).not.toContain('harness-shell')
@@ -226,7 +231,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(settingsHtml).toContain('版本更新')
     expect(settingsHtml).toContain('id="settings-quit"')
     expect(web).toContain('openHarnessWithRetry')
-    expect(web).toContain("await call('control_hide')")
+    expect(web).toContain('Native startup owns the normal desktop path')
     expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).toContain('splash-status')
     expect(readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/build.rs'), 'utf8')).toContain('"splash_status"')
     expect(readFileSync(path.join(repoRoot, 'apps/tauri/web/splash.html'), 'utf8')).toContain('__harnessDockSetStatus')
@@ -261,6 +266,29 @@ describe('Tauri v0.2 host contract', () => {
     expect(settingsWindow).toContain('WebviewUrl::App("settings.html".into())')
     expect(settingsWindow).toContain('.on_page_load(|window, payload|')
     expect(settingsWindow).toContain('let _ = window.show()')
+  })
+
+  it('starts desktop Runtime natively and keeps a failed WebView recoverable', () => {
+    const startup = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/startup.rs'), 'utf8')
+    const host = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/lib.rs'), 'utf8')
+    const harnessWindow = readFileSync(path.join(repoRoot, 'apps/tauri/src-tauri/src/harness_window.rs'), 'utf8')
+    const web = readFileSync(path.join(repoRoot, 'apps/tauri/web/app.js'), 'utf8')
+
+    expect(host).toContain('mod startup')
+    expect(host).toContain('startup::spawn(app.handle().clone())')
+    expect(host).toContain('RunEvent::ExitRequested')
+    expect(host).toContain('api.prevent_exit()')
+    expect(startup).toContain('runtime::start_for_boot')
+    expect(startup).toContain('open_for_startup')
+    expect(startup).toContain('show_startup_recovery')
+    expect(startup).not.toContain('app.exit')
+    expect(harnessWindow).toContain('schedule_harness_watchdog')
+    expect(harnessWindow).toContain('finish_harness_load')
+    expect(harnessWindow).toContain('show_startup_recovery')
+    expect(harnessWindow).toContain('20 秒内没有完成加载')
+    expect(web).toContain('Native startup owns the normal desktop path')
+    expect(web).toContain('__harnessDockShowRecovery')
+    expect(web).not.toContain('await call(\'control_hide\')')
   })
 
   it('keeps Windows helper processes console-free and has a final Web UI safe profile', () => {
