@@ -3,7 +3,11 @@
   "productName": "HarnessDock",
   "version": "0.2.0",
   "identifier": "com.harnessdock.client",
-  "build": { "frontendDist": "../web" },
+  "build": {
+    "frontendDist": "../web",
+    "beforeDevCommand": "pnpm prepare:icons",
+    "beforeBuildCommand": "pnpm prepare:icons"
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
