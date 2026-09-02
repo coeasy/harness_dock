@@ -1,0 +1,54 @@
+name: v020-core-hardening-apply-v3
+
+on:
+  push:
+    branches:
+      - refactor/v0.2.0-shell-first
+    paths:
+      - '.github/workflows/v020-core-hardening-apply-v3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply guarded core migration
+        run: node scripts/_apply-v020-core-hardening.mjs
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Rebuild independent Harness Shell package
+        run: pnpm --filter @dsh/plugin-harness-shell build
+      - name: Format Rust
+        run: cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Validate v0.2.0 contracts
+        run: |
+          pnpm check:versions
+          pnpm check:release
+          pnpm test
+          cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml -- --check
+          cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Commit validated hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'coeasy'
+          git config user.email 'mdonetwo@yeah.net'
+          git add README.md docs/plan/v0.2.0-shell-first-implementation.md apps/tauri/src-tauri/src/runtime.rs apps/tauri/src-tauri/src/harness_window.rs apps/tauri/web/app.js packages/plugin-harness-shell/src/index.ts packages/plugin-harness-shell/lib/index.js packages/plugin-harness-shell/web/shell.js tests/parity/tauri-host.test.ts tests/parity/tauri-shell-fail-open.test.ts tests/parity/v020-core-contract.test.ts
+          git diff --cached --quiet && { echo 'No validated business changes to commit.'; exit 1; }
+          git commit -m 'refactor: harden v0.2.0 managed host contract'
+          git push origin HEAD:refactor/v0.2.0-shell-first
