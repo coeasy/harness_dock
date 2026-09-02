@@ -23,6 +23,7 @@ const BRIDGE_SCRIPT: &str = r#"
     'web.restart': 'harness_restart_web',
     'runtime.safe-mode': 'harness_safe_mode_restart',
     'runtime.clear-quarantine': 'harness_clear_quarantine_restart',
+    'gateway.manage': 'control_show',
     'diagnostics.open': 'shell_settings_show',
     'app.update.check': 'update_check',
     'app.update.install': 'update_install',
