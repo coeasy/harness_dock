@@ -17,13 +17,13 @@ describe('independent Harness Shell dsh plugin', () => {
     expect(packageJson.files).toEqual(expect.arrayContaining(['lib', 'manifest.json', 'web']))
     expect(manifest).toMatchObject({
       id: 'harness-shell',
-      version: '0.2.0',
+      version: packageJson.version,
       kind: 'shell',
       apiVersion: 1,
       safeMode: true,
     })
     expect(entry).toContain("export const name = 'harness-shell'")
-    expect(entry).toContain("export const version = '0.2.0'")
+    expect(entry).toContain(`export const version = '${packageJson.version}'`)
     expect(web).toContain('window.__DSH_SHELL_BRIDGE__')
     expect(web).toContain('runtime.safe-mode')
     expect(web).toContain('app.update.install')
