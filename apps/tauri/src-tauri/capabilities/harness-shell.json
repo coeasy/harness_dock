@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "harness-shell",
-  "description": "v0.2.0 Harness Shell plugin capability for the loopback Harness WebView. It can operate only the owning Harness window and its host-managed Runtime/update actions.",
+  "description": "v0.2.0 Harness Shell plugin capability for the managed loopback Harness WebView. It receives only the event/drag core primitives required by the injected shell plus the explicit HarnessDock host bridge commands.",
   "local": false,
   "platforms": ["linux", "macOS", "windows"],
   "remote": {
@@ -17,5 +17,10 @@
     ]
   },
   "windows": ["harness"],
-  "permissions": ["core:default", "harness-shell"]
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "harness-shell"
+  ]
 }
