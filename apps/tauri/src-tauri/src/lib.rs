@@ -243,6 +243,7 @@ pub fn run() {
             harness_window::harness_minimize,
             harness_window::harness_toggle_maximize,
             harness_window::harness_window_state,
+            harness_shell::harness_shell_close,
             harness_window::control_show,
             harness_window::harness_reload_web,
             harness_window::harness_restart_web,
