@@ -56,7 +56,12 @@ impl Drop for UpdateActionGuard<'_> {
 }
 
 fn normalized_version(value: &str) -> String {
-    value.trim().trim_start_matches('v').to_ascii_lowercase()
+    let value = value.trim();
+    value
+        .strip_prefix('v')
+        .or_else(|| value.strip_prefix('V'))
+        .unwrap_or(value)
+        .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,12 +86,33 @@ fn parse_numeric_identifier(value: &str) -> Option<u64> {
     value.parse().ok()
 }
 
+fn valid_semver_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn validate_build_metadata(value: &str) -> bool {
+    !value.is_empty() && value.split('.').all(valid_semver_identifier)
+}
+
 fn semantic_version(value: &str) -> Option<SemanticVersion> {
     let normalized = normalized_version(value);
     if normalized.is_empty() {
         return None;
     }
-    let without_build = normalized.split_once('+').map(|(version, _)| version).unwrap_or(&normalized);
+    if normalized.matches('+').count() > 1 {
+        return None;
+    }
+    let (without_build, build) = normalized
+        .split_once('+')
+        .map(|(version, build)| (version, Some(build)))
+        .unwrap_or((&normalized, None));
+    if build.is_some_and(|value| !validate_build_metadata(value)) {
+        return None;
+    }
+
     let (core, prerelease_raw) = without_build
         .split_once('-')
         .map(|(core, prerelease)| (core, Some(prerelease)))
@@ -107,16 +133,15 @@ fn semantic_version(value: &str) -> Option<SemanticVersion> {
             }
             let mut identifiers = Vec::new();
             for value in raw.split('.') {
-                if value.is_empty()
-                    || !value
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                {
+                if !valid_semver_identifier(value) {
                     return None;
                 }
                 if value.bytes().all(|byte| byte.is_ascii_digit()) {
                     identifiers.push(PrereleaseIdentifier::Numeric(parse_numeric_identifier(value)?));
                 } else {
+                    // SemVer prerelease identifiers are compared using ASCII
+                    // lexical order and are case-sensitive. Do not normalize
+                    // the case or Beta/RC ordering becomes incorrect.
                     identifiers.push(PrereleaseIdentifier::Text(value.to_string()));
                 }
             }
@@ -207,7 +232,7 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         });
     }
 
-    let latest_version = release.tag_name.trim_start_matches('v').trim().to_string();
+    let latest_version = release.tag_name.trim_start_matches(['v', 'V']).trim().to_string();
     let parsed_latest = semantic_version(&latest_version)
         .ok_or_else(|| "更新服务返回了无效的 HarnessDock 版本号，已拒绝。".to_string())?;
     if !parsed_latest.prerelease.is_empty() {
@@ -375,6 +400,7 @@ mod tests {
         assert!(is_newer("0.2.0-beta.11", "0.2.0-beta.2").unwrap());
         assert!(is_newer("0.2.0-beta", "0.2.0-2").unwrap());
         assert!(is_newer("0.2.0-beta.2", "0.2.0-beta").unwrap());
+        assert!(is_newer("0.2.0-beta", "0.2.0-Beta").unwrap());
     }
 
     #[test]
@@ -388,6 +414,9 @@ mod tests {
         assert!(semantic_version("0.2").is_none());
         assert!(semantic_version("0.2.00").is_none());
         assert!(semantic_version("0.2.0-beta.01").is_none());
+        assert!(semantic_version("0.2.0+").is_none());
+        assert!(semantic_version("0.2.0+build..1").is_none());
+        assert!(semantic_version("0.2.0+build+extra").is_none());
         assert!(semantic_version("release-0.2.0").is_none());
     }
 }
