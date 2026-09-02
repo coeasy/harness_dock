@@ -1,6 +1,6 @@
 {
   "name": "@dsh/plugin-embedded-client",
-  "version": "0.2.0",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
