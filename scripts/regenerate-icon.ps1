@@ -1,6 +1,7 @@
 # Regenerates the HarnessDock app icons from the brand source: brightens and
-# cyan-izes the existing logo (white/dark -> teal gradient), then rebuilds the
-# multi-size .ico. Run from the repo root:
+# cyan-izes the existing logo (white/dark -> teal gradient), tight-fills the
+# artwork for small system icons, then rebuilds the multi-size .ico. Run from
+# the repo root:
 #   powershell -ExecutionPolicy Bypass -File scripts/regenerate-icon.ps1
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -70,8 +71,19 @@ foreach ($src in $sources) {
   Write-Host "processed: $src"
 }
 
-# ---- rebuild a multi-size .ico from the processed 256px source ----
+# Keep manual regeneration identical to the normal Tauri build path. The
+# normalizer tight-crops source whitespace and applies a tiny visual bleed so
+# 16/24/32px taskbar/tray icons do not look undersized inside their canvas.
 $src256 = Join-Path $build 'app-icon.png'
+$normalizer = Join-Path $root 'apps\tauri\scripts\normalize-icon.mjs'
+$normalizedTmp = Join-Path $build '.app-icon-regenerated-tightfill.png'
+if (-not (Test-Path $normalizer)) { throw "missing icon normalizer: $normalizer" }
+& node $normalizer $src256 $normalizedTmp
+if ($LASTEXITCODE -ne 0) { throw "icon normalizer failed with exit code $LASTEXITCODE" }
+Move-Item -Force $normalizedTmp $src256
+Write-Host "tight-filled: $src256"
+
+# ---- rebuild a multi-size .ico from the processed tight-fill source ----
 $icoPath = Join-Path $build 'icon.ico'
 $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $pngData = @{}
@@ -81,6 +93,7 @@ foreach ($size in $sizes) {
   $g = [System.Drawing.Graphics]::FromImage($dst)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
   $g.DrawImage($src, 0, 0, $size, $size)
   $ms = New-Object System.IO.MemoryStream
   $dst.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
