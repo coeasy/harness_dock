@@ -158,9 +158,12 @@
         updateMaximizeIcon()
       }).catch(() => {})
     }
-    if (compatibleBridge && bridge.subscribe) bridge.subscribe((event) => {
-      if (event?.state === 'error') showToast(event.message || '外壳状态异常')
-    })
+    if (compatibleBridge && bridge.subscribe) {
+      const unsubscribe = bridge.subscribe((event) => {
+        if (event?.state === 'error') showToast(event.message || '外壳状态异常')
+      })
+      window.addEventListener('pagehide', () => unsubscribe?.(), { once: true })
+    }
   }
 
   window.__DSH_SHELL_REBUILD__ = mount
