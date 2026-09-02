@@ -9,8 +9,8 @@
     "prepare:icons": "node scripts/normalize-icon.mjs src-tauri/icons/app-icon.png src-tauri/icons/.app-icon-normalized.png && cargo tauri icon src-tauri/icons/.app-icon-normalized.png",
     "build": "pnpm prepare:plugins && pnpm bundle:sidecar",
     "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
-    "tauri:dev": "pnpm prepare:plugins && pnpm bundle:sidecar && pnpm prepare:icons && cargo tauri dev",
-    "tauri:build": "pnpm prepare:plugins && pnpm bundle:sidecar && pnpm prepare:icons && cargo tauri build",
+    "tauri:dev": "pnpm prepare:plugins && pnpm bundle:sidecar && cargo tauri dev",
+    "tauri:build": "pnpm prepare:plugins && pnpm bundle:sidecar && cargo tauri build",
     "tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
