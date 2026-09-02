@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Check that every version-bearing product artifact matches the repo root
- * package.json version (single source of truth for the v0.2.0 release train).
+ * package.json version (single source of truth for the current release train).
  * Exit 0 and print "all versions match: <version>" on success, exit 1 and
  * print each mismatch otherwise.
  */
