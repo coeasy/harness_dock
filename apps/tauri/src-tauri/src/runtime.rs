@@ -937,6 +937,14 @@ async fn runtime_start_impl(app: AppHandle, state: State<'_, AppState>) -> Resul
     Ok(status)
 }
 
+/// Start the packaged Runtime from the native startup coordinator. The public
+/// command remains available to the recovery page, but normal desktop boot no
+/// longer depends on that hidden renderer running JavaScript first.
+pub(crate) async fn start_for_boot(app: AppHandle) -> Result<RuntimeStatus, String> {
+    let state = app.state::<AppState>();
+    runtime_start_impl(app.clone(), state).await
+}
+
 pub(crate) async fn restart_managed(app: AppHandle) -> Result<RuntimeStatus, String> {
     let state = app.state::<AppState>();
     if state.quitting.load(Ordering::Acquire) {

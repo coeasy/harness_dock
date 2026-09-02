@@ -12,8 +12,8 @@
 
 ## 当前版本
 
-- **HarnessDock v0.2.8**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
-- Electron Thin/Full 构建逻辑暂时保留在 `apps/desktop` 作为兼容与迁移参考，**不进入正式 candidate / Release**；稳定后可独立删除。
+- **HarnessDock v0.2.9**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
+- Electron Thin/Full 构建逻辑仅保留在 `apps/desktop` 作为兼容与迁移参考，**不进入正式 candidate / Release，也不再作为主验证路径**；正式客户端、启动、退出和发布门禁统一以 Tauri 为准。
 - 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
 
 ## 平台矩阵
@@ -27,7 +27,7 @@
 | Android arm64 | Remote-only | release-optimized `.apk` + `.aab` |
 | iOS Simulator arm64 | Remote-only | Simulator `.zip` |
 
-## v0.2.8 安装与升级体验
+## v0.2.9 安装与升级体验
 
 - 统一 1024x1024 HarnessDock 品牌源图，candidate 自动生成桌面、Android、iOS 所需图标。
 - Windows NSIS 安装器和卸载器显式使用 HarnessDock 图标，并使用品牌化 header/sidebar；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
@@ -40,8 +40,10 @@
 - 启动只显示本地 splash，后台控制页和插件诊断均不抢占首屏；自动更新统一从主界面菜单、托盘或应用菜单进入，失败会留在界面内并给出明确降级路径。
 - Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
 - 顶部入口明确命名为“菜单”，并统一承载 Web 刷新、Runtime 重启、插件隔离恢复、插件诊断和自动更新；插件诊断保持只读、按需打开。
+- 桌面启动由原生协调器直接启动 Runtime，Harness Web 完成绘制后才显示；白板、启动超时和窗口切换期间自动退出均进入可操作恢复路径。
+- loopback 根路径和子路径统一纳入外壳 ACL，避免 Harness Web 首屏或菜单调用出现 `Command ... not allowed by ACL`。
 
-完整的 v0.2.8 外壳交互和发布前验收方案见 [`docs/plan/v0.2.8-shell-interaction-and-progress.md`](docs/plan/v0.2.8-shell-interaction-and-progress.md)。
+完整的 v0.2.9 启动白板修复和发布前验收方案见 [`docs/plan/v0.2.9-startup-blank-window-recovery.md`](docs/plan/v0.2.9-startup-blank-window-recovery.md)。
 
 ## 架构
 

@@ -18,6 +18,17 @@
     $('gateway-host-card')?.classList.remove('hidden')
   }
 
+  // The native startup coordinator calls this when Runtime or Harness Web
+  // cannot become ready. Keeping the recovery renderer passive during normal
+  // boot prevents it from stealing the first window, while this hook makes a
+  // native failure immediately visible and actionable.
+  window.__harnessDockShowRecovery = (error) => {
+    showRecoveryCards()
+    runtimeState.textContent = 'error'
+    status(runtimeDetail, `Harness Web 启动失败，但 HarnessDock 仍在运行。\n${String(error || '请重试启动。')}`, true)
+    bootStatus('启动失败，当前控制页仍可重试', 'error')
+  }
+
   function status(element, value, bad = false) {
     if (!element) return
     element.textContent = value || ''
@@ -163,11 +174,8 @@
         bootStatus('Harness Web 已就绪', 'ready')
       } catch (error) {
         desktopStartup = undefined
-        void splashStatus('启动失败，正在打开插件诊断…')
-        runtimeState.textContent = 'error'
-        status(runtimeDetail, `Harness Web Runtime 启动失败，但控制页仍可用。\n${String(error)}`, true)
-        showRecoveryCards()
-        bootStatus('启动失败，当前控制页仍可重试', 'error')
+        void splashStatus('启动失败，正在打开恢复入口…')
+        window.__harnessDockShowRecovery?.(error)
         await showControl()
       } finally {
         $('runtime-start').disabled = false
@@ -182,13 +190,10 @@
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
       if (platform.runtimeMode === 'local') {
-        // The bundled page is a hidden bootstrap/recovery surface. Explicitly
-        // hide it before starting Runtime so upgrades from older builds cannot
-        // flash the virtual settings page before Harness Web is ready.
-        await call('control_hide')
+        // Native startup owns the normal desktop path. This page stays passive
+        // while hidden and is revealed only if native startup needs recovery.
         void splashStatus('正在准备本地 Runtime…')
         bootStatus('正在准备本地 Runtime，稍后直接打开 Harness Web…')
-        await autoStartDesktopRuntime()
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')
         $('mobile-remote-card').classList.remove('hidden')
@@ -196,7 +201,7 @@
       }
     } catch (error) {
       bootStatus('运行环境检测失败，当前页面仍可操作', 'error')
-      showRecoveryCards()
+      window.__harnessDockShowRecovery?.(error)
       status(runtimeDetail || gatewayDetail, String(error), true)
       await showControl()
     }

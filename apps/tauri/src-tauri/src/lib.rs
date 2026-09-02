@@ -6,6 +6,8 @@ mod platform;
 mod plugin_quarantine;
 mod process;
 mod runtime;
+#[cfg(not(mobile))]
+mod startup;
 mod update;
 #[cfg(not(mobile))]
 mod tray;
@@ -20,6 +22,7 @@ pub(crate) struct AppState {
     pub(crate) runtime_starting: AtomicBool,
     pub(crate) runtime_restarting: AtomicBool,
     pub(crate) web_action: AtomicBool,
+    pub(crate) harness_loading: AtomicBool,
     pub(crate) settings_opening: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
     pub(crate) starting_processes: process::StartingProcessRegistry,
@@ -33,6 +36,7 @@ impl Default for AppState {
             runtime_starting: AtomicBool::new(false),
             runtime_restarting: AtomicBool::new(false),
             web_action: AtomicBool::new(false),
+            harness_loading: AtomicBool::new(false),
             settings_opening: AtomicBool::new(false),
             gateway: Mutex::new(None),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
@@ -172,6 +176,10 @@ pub fn run() {
                 tray::create_tray(&app.handle())?;
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
+                // Startup is native-owned. The hidden `main` page is only a
+                // recovery surface and must not be responsible for opening
+                // the first user-visible WebView.
+                startup::spawn(app.handle().clone());
             }
             Ok(())
         })
@@ -228,12 +236,30 @@ pub fn run() {
                 // Closing any client window means "hide to tray". Only the
                 // explicit tray/settings Exit action terminates the process.
                 api.prevent_close();
+                if label == "harness" {
+                    app_handle
+                        .state::<AppState>()
+                        .harness_loading
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
                 if let Some(window) = app_handle.get_webview_window(&label) {
                     let _ = window.hide();
                 }
             }
             tauri::RunEvent::Exit => {
                 stop_managed_processes(app_handle);
+            }
+            tauri::RunEvent::ExitRequested { api, .. }
+                if !app_handle
+                    .state::<AppState>()
+                    .quitting
+                    .load(std::sync::atomic::Ordering::SeqCst) =>
+            {
+                // Tauri can request an automatic exit when all windows are
+                // temporarily hidden during WebView navigation. The splash,
+                // tray, and native startup task are still alive in that
+                // interval, so only the explicit quit coordinator may exit.
+                api.prevent_exit();
             }
             _ => {}
         }

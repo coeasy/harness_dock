@@ -249,6 +249,12 @@ pub async fn update_install(
             })?;
 
         crate::harness_window::show_splash(&app, "更新已安装，正在重启 HarnessDock…");
+        // The global ExitRequested guard protects WebView transitions from an
+        // accidental process exit. An updater restart is the one intentional
+        // exception, so open the same explicit quit gate before handing off to
+        // Tauri's restart implementation.
+        state.quitting.store(true, Ordering::SeqCst);
+        crate::stop_managed_processes(&app);
         app.restart();
     }
 }
