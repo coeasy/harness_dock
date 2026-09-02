@@ -1,6 +1,6 @@
 {
   "name": "@dsh/plugin-harness-shell",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "description": "Portable Harness Web shell and versioned dsh host bridge contract",
   "type": "module",
   "main": "./lib/index.js",
