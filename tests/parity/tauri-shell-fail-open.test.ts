@@ -23,8 +23,9 @@ describe('Tauri shell fail-open guarantees', () => {
     expect(tray).toContain('if let Some(icon) = app.default_window_icon()')
   })
 
-  it('keeps the managed remote Harness IPC surface minimal and loopback-complete', () => {
+  it('keeps the managed remote Harness IPC surface minimal and aligned with the IPv4 Runtime boundary', () => {
     const capability = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
+    const permissions = read('apps/tauri/src-tauri/permissions/harnessdock.toml')
     expect(capability.local).toBe(false)
     expect(capability.windows).toEqual(['harness'])
     expect(capability.permissions).toEqual([
@@ -33,14 +34,21 @@ describe('Tauri shell fail-open guarantees', () => {
       'core:window:allow-start-dragging',
       'harness-shell',
     ])
-    expect(capability.remote.urls).toEqual(expect.arrayContaining([
+    expect(capability.remote.urls).toEqual([
       'http://127.0.0.1:*/*',
+      'http://127.0.0.1:*',
       'http://localhost:*/*',
-      'http://[::1]:*/*',
+      'http://localhost:*',
       'https://127.0.0.1:*/*',
+      'https://127.0.0.1:*',
       'https://localhost:*/*',
-      'https://[::1]:*/*',
-    ]))
+      'https://localhost:*',
+    ])
+    expect(capability.remote.urls.every((url: string) => !url.includes('[::1]'))).toBe(true)
+    expect(permissions).toContain('identifier = "harness-shell"')
+    expect(permissions).toContain('"control_show"')
+    const harnessShellPermission = permissions.split('identifier = "harness-shell"')[1]?.split('[[permission]]')[0] || ''
+    expect(harnessShellPermission).not.toContain('gateway_host_')
   })
 
   it('keeps the first-party shell plugin optional across registration and navigation', () => {
