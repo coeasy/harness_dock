@@ -29,8 +29,8 @@ pub(crate) fn configure_child_command(command: &mut std::process::Command) {
 }
 
 /// The packaged dsh runtime currently follows `^22.19.0 || >=24.0.0`.
-/// Keep this check in the native launcher so an installed Node can be reused
-/// without ever downloading or installing another system-wide copy.
+/// Keep this check in the native launcher for the explicit system-Node escape
+/// hatch without ever downloading or installing another system-wide copy.
 pub(crate) fn is_supported_node_version(raw: &str) -> bool {
     let version = raw.trim().strip_prefix('v').unwrap_or(raw.trim());
     let mut parts = version.split('.');
@@ -61,12 +61,15 @@ fn command_output(command: &Path, args: &[&str]) -> Option<Vec<u8>> {
     child.output().ok().filter(|output| output.status.success()).map(|output| output.stdout)
 }
 
-fn system_node_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(value) = env::var_os("HARNESSDOCK_NODE_BIN").filter(|value| !value.is_empty()) {
-        candidates.push(node_cli_path(&PathBuf::from(value)));
-    }
+fn is_usable_node(candidate: &Path) -> bool {
+    candidate.is_file()
+        && command_output(candidate, &["--version"])
+            .map(|output| is_supported_node_version(&String::from_utf8_lossy(&output)))
+            .unwrap_or(false)
+}
 
+fn path_node_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
     let locator = if cfg!(windows) { "where.exe" } else { "which" };
     if let Some(output) = command_output(Path::new(locator), &["node"]) {
         for line in String::from_utf8_lossy(&output)
@@ -82,7 +85,6 @@ fn system_node_candidates() -> Vec<PathBuf> {
     }
     candidates
 }
-
 
 /// Remove the Windows verbatim path prefix before handing a path to Node's
 /// CLI/module loader. Node 24 currently mishandles \\?\\ paths as the main
@@ -109,25 +111,41 @@ pub(crate) fn node_cli_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Return a usable system Node path, if one is already installed. This is
-/// intentionally a probe only: it never mutates PATH, downloads files, or
+/// Return a usable Node from PATH only when the caller has explicitly opted
+/// into the system runtime. This probe never mutates PATH, downloads files, or
 /// writes an installer/runtime directory.
 pub(crate) fn find_usable_system_node() -> Option<PathBuf> {
-    system_node_candidates().into_iter().find(|candidate| {
-        candidate.is_file()
-            && command_output(candidate, &["--version"])
-                .map(|output| is_supported_node_version(&String::from_utf8_lossy(&output)))
-                .unwrap_or(false)
-    })
+    path_node_candidates()
+        .into_iter()
+        .find(|candidate| is_usable_node(candidate))
 }
 
+/// Full desktop packages are self-contained, so the pinned bundled Node is the
+/// default trust and reproducibility boundary. A system Node participates only
+/// through an explicit user/developer override:
+///
+/// - HARNESSDOCK_NODE_BIN=/absolute/path/to/node: try exactly that binary.
+/// - HARNESSDOCK_USE_SYSTEM_NODE=1: probe PATH for a compatible Node.
+///
+/// Invalid or incompatible overrides fail closed to the bundled Node rather
+/// than silently widening the search to other system binaries.
 pub(crate) fn resolve_node(bundled: &Path) -> (PathBuf, &'static str) {
-    if env::var("HARNESSDOCK_USE_SYSTEM_NODE").ok().as_deref() == Some("0") {
-        return (bundled.to_path_buf(), "bundled");
+    if let Some(value) = env::var_os("HARNESSDOCK_NODE_BIN").filter(|value| !value.is_empty()) {
+        let configured = node_cli_path(&PathBuf::from(value));
+        return if is_usable_node(&configured) {
+            (configured, "system")
+        } else {
+            (bundled.to_path_buf(), "bundled")
+        };
     }
-    find_usable_system_node()
-        .map(|path| (path, "system"))
-        .unwrap_or_else(|| (bundled.to_path_buf(), "bundled"))
+
+    if env::var("HARNESSDOCK_USE_SYSTEM_NODE").ok().as_deref() == Some("1") {
+        return find_usable_system_node()
+            .map(|path| (path, "system"))
+            .unwrap_or_else(|| (bundled.to_path_buf(), "bundled"));
+    }
+
+    (bundled.to_path_buf(), "bundled")
 }
 
 #[derive(Debug, Serialize)]
