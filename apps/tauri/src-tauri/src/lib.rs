@@ -31,6 +31,7 @@ pub(crate) struct AppState {
     pub(crate) gateway_starting: Arc<AtomicBool>,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: Arc<AtomicBool>,
+    pub(crate) tray_available: AtomicBool,
 }
 
 impl Default for AppState {
@@ -49,6 +50,7 @@ impl Default for AppState {
             gateway_starting: Arc::new(AtomicBool::new(false)),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: Arc::new(AtomicBool::new(false)),
+            tray_available: AtomicBool::new(false),
         }
     }
 }
@@ -204,8 +206,14 @@ pub fn run() {
                 // enhancements. None of them may block the mandatory Runtime ->
                 // Harness Web startup path when a desktop environment does not
                 // support the feature or its initialization fails.
-                if let Err(error) = tray::create_tray(&app.handle()) {
-                    eprintln!("HarnessDock tray unavailable; continuing without tray: {error}");
+                match tray::create_tray(&app.handle()) {
+                    Ok(()) => app
+                        .state::<AppState>()
+                        .tray_available
+                        .store(true, Ordering::Release),
+                    Err(error) => eprintln!(
+                        "HarnessDock tray unavailable; closing the last client window will exit cleanly: {error}"
+                    ),
                 }
                 if let Err(error) = app
                     .handle()
@@ -272,9 +280,23 @@ pub fn run() {
                 .load(std::sync::atomic::Ordering::SeqCst)
                 && (label == "main" || label == "harness" || label == "settings") =>
             {
-                // Closing any client window means "hide to tray". Only the
-                // explicit tray/settings Exit action terminates the process.
                 api.prevent_close();
+                let tray_available = app_handle
+                    .state::<AppState>()
+                    .tray_available
+                    .load(Ordering::Acquire);
+                if !tray_available {
+                    // Without a tray, hiding the last window would strand an
+                    // invisible process because ExitRequested is intentionally
+                    // guarded during normal shell navigation. Fall back to the
+                    // same managed shutdown path as the explicit Quit action.
+                    request_exit(app_handle);
+                    return;
+                }
+
+                // With a live tray, closing a client window means "hide to
+                // tray". Only the explicit tray/settings Exit action terminates
+                // the process.
                 if label == "harness" {
                     harness_window::cancel_harness_load(app_handle);
                     harness_window::hide_splash(app_handle);
