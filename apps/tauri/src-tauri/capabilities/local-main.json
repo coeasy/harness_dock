@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-main",
-  "description": "Local bundled HarnessDock control capability. Remote Harness/Gateway documents never receive Tauri IPC permissions.",
+  "description": "Local bundled HarnessDock control capability. Gateway/remote mobile documents receive no local Tauri IPC permissions; the managed desktop loopback Harness window has its own separately minimized harness-shell capability.",
   "windows": ["main"],
   "permissions": [
     "core:default",
