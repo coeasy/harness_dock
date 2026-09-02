@@ -3,6 +3,11 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { deflateSync, inflateSync } from 'node:zlib'
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+// Deliberately overscan the detected artwork by 2%. This removes the visible
+// safety ring that becomes disproportionately large at 16/24/32 px while
+// preserving the source aspect ratio and letting the platform apply its own
+// icon mask/inset rules.
+const TARGET_OCCUPANCY = 1.02
 
 function crc32(buffer) {
   let crc = 0xffffffff
@@ -125,8 +130,10 @@ function normalize(pixels, width, height) {
   const bounds = contentBounds(pixels, width, height)
   const contentWidth = bounds.maxX - bounds.minX + 1
   const contentHeight = bounds.maxY - bounds.minY + 1
-  const safePadding = Math.max(2, Math.round(Math.max(contentWidth, contentHeight) * 0.02))
-  const side = Math.max(contentWidth, contentHeight) + safePadding * 2
+  const dominantSpan = Math.max(contentWidth, contentHeight)
+  // No synthetic outer padding. A tiny 2% bleed removes residual source-art
+  // whitespace so small taskbar/tray icons visually fill the available square.
+  const side = dominantSpan / TARGET_OCCUPANCY
   const centerX = (bounds.minX + bounds.maxX) / 2
   const centerY = (bounds.minY + bounds.maxY) / 2
   const left = centerX - side / 2
@@ -161,7 +168,7 @@ function normalize(pixels, width, height) {
   }
 
   const occupancyBefore = Math.max(contentWidth / width, contentHeight / height)
-  const occupancyAfter = Math.max(contentWidth, contentHeight) / side
+  const occupancyAfter = dominantSpan / side
   return { pixels: output, occupancyBefore, occupancyAfter }
 }
 
@@ -199,4 +206,4 @@ const decoded = parsePng(readFileSync(input))
 const pixels = unfilter(decoded)
 const normalized = normalize(pixels, decoded.width, decoded.height)
 writeFileSync(output, encodePng(normalized.pixels, decoded.width, decoded.height))
-console.log(`icon normalized: occupancy ${(normalized.occupancyBefore * 100).toFixed(1)}% -> ${(normalized.occupancyAfter * 100).toFixed(1)}%`)
+console.log(`icon tight-fill: occupancy ${(normalized.occupancyBefore * 100).toFixed(1)}% -> ${(normalized.occupancyAfter * 100).toFixed(1)}% (2% bleed)`)
