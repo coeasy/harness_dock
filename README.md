@@ -42,7 +42,7 @@
 - 顶部入口明确命名为“菜单”，并统一承载 Web 刷新、Runtime 重启、插件隔离恢复、插件诊断和自动更新；插件诊断保持只读、按需打开。
 - `@dsh/plugin-harness-shell` 是独立可发布的 dsh 外壳插件；Tauri 通过 v1 Host Bridge 接入，能力由原生 Tauri 命令统一提供，未实现的菜单项会隐藏；插件入口自身采用 fail-open，宿主 service 注册失败不会阻断 Runtime/Harness Web。
 - 桌面启动由原生协调器直接启动 Runtime，Harness Web 完成绘制后才显示；白板、启动超时和窗口切换期间自动退出均进入可操作恢复路径。
-- loopback IPv4、localhost、IPv6 `::1` 根路径和子路径统一纳入外壳 ACL，避免 Harness Web 首屏或菜单调用出现 `Command ... not allowed by ACL`。
+- 桌面 Harness Shell 权限只授予受管的 `http://127.0.0.1:<ephemeral-port>` Runtime origin；localhost、IPv6、HTTPS alias 与其它本机服务均不获得外壳 IPC。
 - 桌面受管 loopback Harness WebView 只获得事件订阅、标题栏拖拽和显式 `harness-shell` Host Bridge 命令；不再授予整组 `core:default` 能力。
 
 完整的 v0.2.0 外壳重构与发布前验收方案见 [`docs/plan/v0.2.0-shell-first-implementation.md`](docs/plan/v0.2.0-shell-first-implementation.md)。

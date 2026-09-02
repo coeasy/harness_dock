@@ -4,7 +4,10 @@ use std::{
     fs,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -102,7 +105,10 @@ fn work_dir() -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("harnessdock-gateway-{}-{nonce}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "harnessdock-gateway-{}-{nonce}",
+        std::process::id()
+    ));
 
     // The Gateway ready file contains its bearer-style admin token and the log
     // can contain local Runtime diagnostics. Create a fresh private directory
@@ -156,11 +162,11 @@ impl Drop for GatewayStartGuard {
 }
 
 fn claim_gateway_start(state: &State<'_, AppState>) -> Result<GatewayStartGuard, String> {
-    let starting = Arc::clone(&state.gateway_starting);
-    if starting.swap(true, Ordering::AcqRel) {
-        return Err("Gateway 正在处理另一个启动操作，请稍候再试。".into());
+    let lifecycle = Arc::clone(&state.gateway_starting);
+    if lifecycle.swap(true, Ordering::AcqRel) {
+        return Err("Gateway 正在处理另一个生命周期操作，请稍候再启动。".into());
     }
-    let claim = GatewayStartGuard(starting);
+    let claim = GatewayStartGuard(lifecycle);
     if state.quitting.load(Ordering::Acquire)
         || state.runtime_restarting.load(Ordering::Acquire)
         || state.runtime_stopping.load(Ordering::Acquire)
@@ -168,6 +174,14 @@ fn claim_gateway_start(state: &State<'_, AppState>) -> Result<GatewayStartGuard,
         return Err("Runtime 正在处理生命周期操作，暂时无法启动 Gateway。".into());
     }
     Ok(claim)
+}
+
+fn claim_gateway_stop(state: &State<'_, AppState>) -> Result<GatewayStartGuard, String> {
+    let lifecycle = Arc::clone(&state.gateway_starting);
+    if lifecycle.swap(true, Ordering::AcqRel) {
+        return Err("Gateway 正在处理另一个生命周期操作，请稍候再停止。".into());
+    }
+    Ok(GatewayStartGuard(lifecycle))
 }
 
 fn begin_gateway_start(state: &State<'_, AppState>) -> Result<Option<GatewayReady>, String> {
@@ -202,15 +216,16 @@ fn required_gateway_ready(state: &State<'_, AppState>) -> Result<GatewayReady, S
 }
 
 fn stop_managed_if_matches(gateway: &Mutex<Option<GatewayProcess>>, expected: &GatewayReady) {
-    let process = gateway
-        .lock()
-        .ok()
-        .and_then(|mut guard| {
-            let matches = guard.as_ref().is_some_and(|current| {
-                current.ready.pid == expected.pid && current.ready.admin_token == expected.admin_token
-            });
-            if matches { guard.take() } else { None }
+    let process = gateway.lock().ok().and_then(|mut guard| {
+        let matches = guard.as_ref().is_some_and(|current| {
+            current.ready.pid == expected.pid && current.ready.admin_token == expected.admin_token
         });
+        if matches {
+            guard.take()
+        } else {
+            None
+        }
+    });
     if let Some(mut process) = process {
         process.stop();
     }
@@ -265,7 +280,9 @@ fn public_gateway_diagnostic(raw: &str) -> String {
 fn validated_gateway_port(local_port: Option<u16>) -> Result<u16, String> {
     let port = local_port.unwrap_or(43137);
     if port < 1024 {
-        return Err("Gateway 本地端口必须在 1024-65535 之间，避免系统保留端口和管理员权限要求。".into());
+        return Err(
+            "Gateway 本地端口必须在 1024-65535 之间，避免系统保留端口和管理员权限要求。".into(),
+        );
     }
     Ok(port)
 }
@@ -333,13 +350,14 @@ fn spawn_sidecar(
         command.env("HARNESSDOCK_GATEWAY_PUBLIC_URL", value);
     }
     platform::configure_child_command(&mut command);
-    let (mut child, registration) = match process_control::spawn_registered(&mut command, starting_processes, quitting) {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&dir);
-            return Err(format!("无法启动 Gateway sidecar: {error}"));
-        }
-    };
+    let (mut child, registration) =
+        match process_control::spawn_registered(&mut command, starting_processes, quitting) {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&dir);
+                return Err(format!("无法启动 Gateway sidecar: {error}"));
+            }
+        };
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if quitting.load(Ordering::Acquire) {
@@ -350,10 +368,13 @@ fn spawn_sidecar(
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                let detail = public_gateway_diagnostic(&fs::read_to_string(&log_file).unwrap_or_default());
+                let detail =
+                    public_gateway_diagnostic(&fs::read_to_string(&log_file).unwrap_or_default());
                 registration.complete();
                 let _ = fs::remove_dir_all(&dir);
-                return Err(format!("Gateway sidecar 在 ready 前退出: {status}\n{detail}"));
+                return Err(format!(
+                    "Gateway sidecar 在 ready 前退出: {status}\n{detail}"
+                ));
             }
             Ok(None) => {}
             Err(error) => {
@@ -413,7 +434,8 @@ fn spawn_sidecar(
         if deadline <= Instant::now() {
             process_control::stop_child_tree(&mut child);
             registration.complete();
-            let detail = public_gateway_diagnostic(&fs::read_to_string(&log_file).unwrap_or_default());
+            let detail =
+                public_gateway_diagnostic(&fs::read_to_string(&log_file).unwrap_or_default());
             let _ = fs::remove_dir_all(&dir);
             return Err(format!("等待 Gateway sidecar ready 超时。\n{detail}"));
         }
@@ -468,7 +490,10 @@ async fn admin_json<T: DeserializeOwned>(
         .build()
         .map_err(|error| error.to_string())?;
     let request = match body {
-        Some(value) => client.post(url).bearer_auth(&ready.admin_token).json(&value),
+        Some(value) => client
+            .post(url)
+            .bearer_auth(&ready.admin_token)
+            .json(&value),
         None => client.get(url).bearer_auth(&ready.admin_token),
     };
     let response = request
@@ -555,7 +580,15 @@ pub async fn gateway_host_start(
     let quitting = Arc::clone(&state.quitting);
     let expected_upstream_url = upstream_url.clone();
     let process = tauri::async_runtime::spawn_blocking(move || {
-        spawn_sidecar(node, sidecar, upstream_url, public_url, port, &starting_processes, &quitting)
+        spawn_sidecar(
+            node,
+            sidecar,
+            upstream_url,
+            public_url,
+            port,
+            &starting_processes,
+            &quitting,
+        )
     })
     .await
     .map_err(|error| format!("Gateway 启动任务失败: {error}"))??;
@@ -624,7 +657,9 @@ pub async fn gateway_host_revoke(
     device_id: String,
 ) -> Result<bool, String> {
     let ready = required_gateway_ready(&state)?;
-    match admin_json::<RevokeResponse>(&ready, "revoke", Some(json!({ "deviceId": device_id }))).await {
+    match admin_json::<RevokeResponse>(&ready, "revoke", Some(json!({ "deviceId": device_id })))
+        .await
+    {
         Ok(response) => Ok(response.revoked),
         Err(error) => {
             stop_managed_if_matches(&state.gateway, &ready);
@@ -647,13 +682,11 @@ pub async fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize
 
 #[tauri::command]
 pub fn gateway_host_stop(state: State<'_, AppState>) -> Result<GatewayHostStatus, String> {
+    let _stopping = claim_gateway_stop(&state)?;
     let mut guard = state
         .gateway
         .lock()
         .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
-    if state.gateway_starting.load(Ordering::Acquire) {
-        return Err("Gateway 正在启动，请稍候再停止。".into());
-    }
     if let Some(mut process) = guard.take() {
         process.stop();
     }
@@ -678,9 +711,17 @@ mod tests {
         assert!(validated_public_gateway_url(Some("http://127.0.0.1:43137/".into())).is_ok());
         assert!(validated_public_gateway_url(Some("http://localhost:43137/".into())).is_ok());
         assert!(validated_public_gateway_url(Some("http://gateway.example.com/".into())).is_err());
-        assert!(validated_public_gateway_url(Some("https://user:pass@gateway.example.com/".into())).is_err());
-        assert!(validated_public_gateway_url(Some("https://gateway.example.com/path".into())).is_err());
-        assert!(validated_public_gateway_url(Some("https://gateway.example.com/?token=x".into())).is_err());
+        assert!(validated_public_gateway_url(Some(
+            "https://user:pass@gateway.example.com/".into()
+        ))
+        .is_err());
+        assert!(
+            validated_public_gateway_url(Some("https://gateway.example.com/path".into())).is_err()
+        );
+        assert!(
+            validated_public_gateway_url(Some("https://gateway.example.com/?token=x".into()))
+                .is_err()
+        );
     }
 
     #[test]

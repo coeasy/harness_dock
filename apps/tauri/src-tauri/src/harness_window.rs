@@ -145,9 +145,7 @@ fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &U
         // current loading generation and watchdog untouched.
         return;
     }
-    if state
-        .quitting
-        .load(std::sync::atomic::Ordering::Acquire)
+    if state.quitting.load(std::sync::atomic::Ordering::Acquire)
         || !state
             .harness_loading
             .swap(false, std::sync::atomic::Ordering::AcqRel)
@@ -157,11 +155,16 @@ fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &U
         // surface after that explicit intent.
         return;
     }
-    if let Err(error) = window.eval(init_script()) {
-        // The Harness document remains the primary surface even if a best-
-        // effort toolbar injection is rejected by a WebView implementation.
-        // Menu and native commands remain available for a later retry.
-        eprintln!("Unable to install Harness Shell; continuing with Harness Web: {error}");
+    match window.eval(init_script()) {
+        Ok(()) => {
+            let _ = window.set_decorations(false);
+        }
+        Err(error) => {
+            // The Shell is optional. Restore the native titlebar so a failed
+            // injection can never strand a borderless primary window.
+            eprintln!("Unable to install Harness Shell; restoring native window controls: {error}");
+            let _ = window.set_decorations(true);
+        }
     }
     if let Err(error) = window.show() {
         let _ = window.hide();
@@ -225,20 +228,23 @@ fn schedule_harness_watchdog(app: &AppHandle, generation: u64) {
 
 fn validated_runtime_url(value: &str) -> Result<Url, String> {
     let url = Url::parse(value).map_err(|_| "Runtime URL 无效。".to_string())?;
-    if url.scheme() != "http" && url.scheme() != "https" {
-        return Err("Runtime WebView 只允许 HTTP(S)。".into());
+    if url.scheme() != "http" {
+        return Err("桌面 Harness WebView 只允许受管的 HTTP Runtime。".into());
     }
-    let host = url.host_str().ok_or_else(|| "Runtime URL 缺少主机名。".to_string())?;
-    // The managed desktop Runtime is spawned on 127.0.0.1 and the Tauri
-    // capability grants the shell bridge only to 127.0.0.1/localhost. Do not
-    // accept every address that the OS classifies as loopback: doing so can
-    // create a false-ready WebView that passes Rust validation but receives no
-    // shell capability (and broadens the privileged navigation surface).
-    if host != "127.0.0.1" && !host.eq_ignore_ascii_case("localhost") {
-        return Err("桌面 Harness WebView 只允许受管的 127.0.0.1/localhost Runtime。".into());
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Runtime URL 缺少主机名。".to_string())?;
+    if host != "127.0.0.1" {
+        return Err("桌面 Harness WebView 只允许受管的 http://127.0.0.1:<port> Runtime。".into());
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err("Runtime URL 不能包含用户名或密码。".into());
+    }
+    let port = url
+        .port()
+        .ok_or_else(|| "Runtime URL 必须显式包含受管端口。".to_string())?;
+    if port == 0 {
+        return Err("Runtime URL 端口无效。".into());
     }
     Ok(url)
 }
@@ -275,35 +281,36 @@ fn hide_harness_for_recovery(window: &tauri::WebviewWindow<tauri::Wry>) {
 #[cfg(not(mobile))]
 async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
-        window.show().map_err(|error| format!("无法显示插件诊断窗口: {error}"))?;
-        window.set_focus().map_err(|error| format!("无法聚焦插件诊断窗口: {error}"))?;
+        window
+            .show()
+            .map_err(|error| format!("无法显示插件诊断窗口: {error}"))?;
+        window
+            .set_focus()
+            .map_err(|error| format!("无法聚焦插件诊断窗口: {error}"))?;
         return Ok(());
     }
 
-    let _window = WebviewWindowBuilder::new(
-        app,
-        "settings",
-        WebviewUrl::App("settings.html".into()),
-    )
-    .title("HarnessDock · 插件诊断")
-    .inner_size(560.0, 520.0)
-    .min_inner_size(480.0, 420.0)
-    .resizable(true)
-    .center()
-    // Window creation must stay inside an async command on Windows. Keeping
-    // the page hidden until the native window exists also prevents a half-built
-    // settings surface from flashing during startup.
-    .visible(false)
-    .on_page_load(|window, payload| {
-        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-            // Do not expose an unpainted WebView. The settings plugin becomes
-            // visible only after its HTML/CSS/JS document has finished loading.
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    })
-    .build()
-    .map_err(|error| format!("无法创建插件诊断窗口: {error}"))?;
+    let _window =
+        WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+            .title("HarnessDock · 插件诊断")
+            .inner_size(560.0, 520.0)
+            .min_inner_size(480.0, 420.0)
+            .resizable(true)
+            .center()
+            // Window creation must stay inside an async command on Windows. Keeping
+            // the page hidden until the native window exists also prevents a half-built
+            // settings surface from flashing during startup.
+            .visible(false)
+            .on_page_load(|window, payload| {
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                    // Do not expose an unpainted WebView. The settings plugin becomes
+                    // visible only after its HTML/CSS/JS document has finished loading.
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            })
+            .build()
+            .map_err(|error| format!("无法创建插件诊断窗口: {error}"))?;
     Ok(())
 }
 
@@ -320,7 +327,9 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(mobile)]
     {
         let _ = (app, url);
-        return Err("Android/iOS 在主 WebView 中连接 Remote Gateway，不创建桌面 Harness 窗口。".into());
+        return Err(
+            "Android/iOS 在主 WebView 中连接 Remote Gateway，不创建桌面 Harness 窗口。".into(),
+        );
     }
 
     #[cfg(not(mobile))]
@@ -486,7 +495,9 @@ pub async fn harness_close(app: AppHandle) -> Result<(), String> {
         cancel_harness_load(&app);
         hide_splash(&app);
         if let Some(window) = app.get_webview_window("harness") {
-            window.hide().map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
+            window
+                .hide()
+                .map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
         }
         Ok(())
     }
@@ -510,7 +521,10 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
         if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
             return Err("HarnessDock 正在退出，已拒绝 Web 刷新。".into());
         }
-        if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        if state
+            .web_action
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
             return Err("Harness Web 正在处理另一个操作，请稍候。".into());
         }
         let _action = WebActionGuard(&state.web_action);
@@ -624,10 +638,7 @@ async fn restart_harness_web_impl(
         }
     };
     let Some(url) = status.app_url.clone() else {
-        show_startup_recovery(
-            &app,
-            "Runtime 重启成功，但没有返回 Harness Web 地址。",
-        );
+        show_startup_recovery(&app, "Runtime 重启成功，但没有返回 Harness Web 地址。");
         return Err("Runtime 重启成功，但没有返回 Harness Web 地址。".into());
     };
     if state
@@ -667,7 +678,10 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
         }
         let state_app = app.clone();
         let state = state_app.state::<crate::AppState>();
-        if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        if state
+            .web_action
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }
         let _restarting = WebActionGuard(&state.web_action);
@@ -679,7 +693,9 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
 /// user's plugin configuration is not changed and the normal Web surface stays
 /// the only visible application page when this succeeds.
 #[tauri::command]
-pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
+pub async fn harness_safe_mode_restart(
+    app: AppHandle,
+) -> Result<crate::runtime::RuntimeStatus, String> {
     #[cfg(mobile)]
     {
         let _ = app;
@@ -696,7 +712,10 @@ pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime:
             return Err("HarnessDock 正在退出，已拒绝隔离插件启动。".into());
         }
         let state = app.state::<crate::AppState>();
-        if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        if state
+            .web_action
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }
         let _restarting = WebActionGuard(&state.web_action);
@@ -770,7 +789,10 @@ pub async fn harness_clear_quarantine_restart(
         }
         let state_app = app.clone();
         let state = state_app.state::<crate::AppState>();
-        if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        if state
+            .web_action
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }
         let _restarting = WebActionGuard(&state.web_action);
@@ -806,7 +828,9 @@ pub fn harness_minimize(app: AppHandle) -> Result<(), String> {
 
     #[cfg(not(mobile))]
     {
-        harness_window(&app)?.minimize().map_err(|error| format!("无法最小化 Harness 窗口: {error}"))
+        harness_window(&app)?
+            .minimize()
+            .map_err(|error| format!("无法最小化 Harness 窗口: {error}"))
     }
 }
 
@@ -821,10 +845,17 @@ pub fn harness_toggle_maximize(app: AppHandle) -> Result<HarnessWindowState, Str
     #[cfg(not(mobile))]
     {
         let window = harness_window(&app)?;
-        if window.is_maximized().map_err(|error| format!("无法读取 Harness 窗口状态: {error}"))? {
-            window.unmaximize().map_err(|error| format!("无法还原 Harness 窗口: {error}"))?;
+        if window
+            .is_maximized()
+            .map_err(|error| format!("无法读取 Harness 窗口状态: {error}"))?
+        {
+            window
+                .unmaximize()
+                .map_err(|error| format!("无法还原 Harness 窗口: {error}"))?;
         } else {
-            window.maximize().map_err(|error| format!("无法最大化 Harness 窗口: {error}"))?;
+            window
+                .maximize()
+                .map_err(|error| format!("无法最大化 Harness 窗口: {error}"))?;
         }
         Ok(HarnessWindowState {
             maximized: window.is_maximized().unwrap_or(false),
@@ -863,6 +894,21 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
         let control = app
             .get_webview_window("main")
             .ok_or_else(|| "HarnessDock 控制页窗口不存在。".to_string())?;
+        let surface = app
+            .state::<crate::AppState>()
+            .startup_recovery_error
+            .lock()
+            .map(|recovery| {
+                if recovery.is_some() {
+                    "recovery"
+                } else {
+                    "gateway-host"
+                }
+            })
+            .unwrap_or("recovery");
+        if let Ok(value) = serde_json::to_string(surface) {
+            let _ = control.eval(format!("window.__harnessDockSetSurface?.({value})"));
+        }
         control
             .show()
             .map_err(|error| format!("无法显示 HarnessDock 控制页: {error}"))?;
@@ -936,7 +982,9 @@ pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         if let Some(window) = app.get_webview_window("settings") {
-            window.hide().map_err(|error| format!("无法隐藏插件诊断窗口: {error}"))?;
+            window
+                .hide()
+                .map_err(|error| format!("无法隐藏插件诊断窗口: {error}"))?;
         }
         Ok(())
     }
@@ -949,9 +997,11 @@ mod tests {
     #[test]
     fn only_explicit_nonempty_token_query_is_a_launch_credential() {
         let clean = validated_runtime_url("http://127.0.0.1:4321/").unwrap();
-        let ordinary = validated_runtime_url("http://127.0.0.1:4321/?tab=plugins&view=compact").unwrap();
+        let ordinary =
+            validated_runtime_url("http://127.0.0.1:4321/?tab=plugins&view=compact").unwrap();
         let launch = validated_runtime_url("http://127.0.0.1:4321/?token=abc123").unwrap();
-        let mixed = validated_runtime_url("http://127.0.0.1:4321/?view=compact&token=abc123").unwrap();
+        let mixed =
+            validated_runtime_url("http://127.0.0.1:4321/?view=compact&token=abc123").unwrap();
         let empty = validated_runtime_url("http://127.0.0.1:4321/?token=&view=compact").unwrap();
 
         assert!(!has_launch_token(&clean));

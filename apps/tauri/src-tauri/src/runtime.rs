@@ -3,7 +3,10 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -75,7 +78,11 @@ pub(crate) struct RuntimeProcess {
 impl RuntimeProcess {
     fn status(&self) -> RuntimeStatus {
         RuntimeStatus {
-            state: if self.safe_mode || !self.isolated_plugins.is_empty() { "degraded".into() } else { "ready".into() },
+            state: if self.safe_mode || !self.isolated_plugins.is_empty() {
+                "degraded".into()
+            } else {
+                "ready".into()
+            },
             app_url: Some(self.ready.url.clone()),
             dsh_version: Some(self.ready.dsh_version.clone()),
             pid: Some(self.ready.pid),
@@ -178,16 +185,28 @@ fn quarantine_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn node_path(root: &Path) -> PathBuf {
-    if cfg!(target_os = "windows") { root.join("node.exe") } else { root.join("bin").join("node") }
+    if cfg!(target_os = "windows") {
+        root.join("node.exe")
+    } else {
+        root.join("bin").join("node")
+    }
 }
 
 fn dsh_path(root: &Path) -> PathBuf {
-    root.join("node_modules").join("@deepseek-ai").join("dsh").join("lib").join("bin.js")
+    root.join("node_modules")
+        .join("@deepseek-ai")
+        .join("dsh")
+        .join("lib")
+        .join("bin.js")
 }
 
 fn work_dir() -> Result<PathBuf, String> {
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos();
-    let dir = std::env::temp_dir().join(format!("harnessdock-tauri-{}-{nonce}", std::process::id()));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("harnessdock-tauri-{}-{nonce}", std::process::id()));
 
     // ready.json can contain the reusable launch token and the directory also
     // stores Runtime stdout/stderr and generated plugin patches. Never reuse a
@@ -231,7 +250,8 @@ fn embedded_patch(plugin: &Path, compatibility: &Path, shell: &Path) -> Result<S
 fn decode_yaml_scalar(raw: &str) -> String {
     let value = raw.trim();
     if value.starts_with('"') && value.ends_with('"') {
-        return serde_json::from_str::<String>(value).unwrap_or_else(|_| value[1..value.len().saturating_sub(1)].to_string());
+        return serde_json::from_str::<String>(value)
+            .unwrap_or_else(|_| value[1..value.len().saturating_sub(1)].to_string());
     }
     if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
         return value[1..value.len() - 1].replace("''", "'");
@@ -246,12 +266,21 @@ fn parse_config_dump_rows(dump: &str) -> Vec<ConfigDumpRow> {
 
     for line in dump.lines() {
         if let Some(label) = line.strip_prefix("# == ") {
-            if let Some(row) = current.take() { rows.push(row); }
-            source = label.split(", patched by ").next().unwrap_or(label).trim().to_string();
+            if let Some(row) = current.take() {
+                rows.push(row);
+            }
+            source = label
+                .split(", patched by ")
+                .next()
+                .unwrap_or(label)
+                .trim()
+                .to_string();
             continue;
         }
         if let Some(raw_id) = line.strip_prefix("- id:") {
-            if let Some(row) = current.take() { rows.push(row); }
+            if let Some(row) = current.take() {
+                rows.push(row);
+            }
             current = Some(ConfigDumpRow {
                 id: decode_yaml_scalar(raw_id),
                 name: None,
@@ -265,7 +294,9 @@ fn parse_config_dump_rows(dump: &str) -> Vec<ConfigDumpRow> {
             }
         }
     }
-    if let Some(row) = current { rows.push(row); }
+    if let Some(row) = current {
+        rows.push(row);
+    }
     rows
 }
 
@@ -287,8 +318,7 @@ fn recovery_candidates(rows: &[ConfigDumpRow]) -> Vec<ConfigDumpRow> {
             !matches!(
                 row.id.as_str(),
                 "embedded-client" | "harnessdock-client-runtime-compat" | "harness-shell"
-            )
-                && !row.source.is_empty()
+            ) && !row.source.is_empty()
                 && !is_official_row(row)
         })
         .cloned()
@@ -306,20 +336,29 @@ fn diagnostic_matches(row: &ConfigDumpRow, diagnostic: &str) -> bool {
         tokens.push(name);
         tokens.push(basename(name));
     }
-    tokens.into_iter()
+    tokens
+        .into_iter()
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| value.len() >= 3)
         .any(|value| haystack.contains(&value))
 }
 
-fn recovery_plan(rows: &[ConfigDumpRow], diagnostic: &str) -> (Vec<ConfigDumpRow>, Vec<String>, String) {
+fn recovery_plan(
+    rows: &[ConfigDumpRow],
+    diagnostic: &str,
+) -> (Vec<ConfigDumpRow>, Vec<String>, String) {
     let candidates = recovery_candidates(rows);
     let suspected = candidates
         .iter()
         .filter(|row| diagnostic_matches(row, diagnostic))
         .map(|row| row.id.clone())
         .collect::<Vec<_>>();
-    let reason = if suspected.is_empty() { "ambiguous" } else { "diagnostic-match" }.to_string();
+    let reason = if suspected.is_empty() {
+        "ambiguous"
+    } else {
+        "diagnostic-match"
+    }
+    .to_string();
     (candidates, suspected, reason)
 }
 
@@ -332,7 +371,9 @@ fn recovery_patch_ids(ids: &[String]) -> Result<String, String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut output = String::new();
     for value in ids {
-        if !seen.insert(value.clone()) { continue; }
+        if !seen.insert(value.clone()) {
+            continue;
+        }
         let id = serde_json::to_string(value).map_err(|error| error.to_string())?;
         output.push_str(&format!("- id: {id}\n  disabled: true\n"));
     }
@@ -343,31 +384,49 @@ fn recovery_patch(rows: &[ConfigDumpRow]) -> Result<String, String> {
     recovery_patch_ids(&rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>())
 }
 
-fn validated_ready(raw: &str, expected_version: &str, expected_pid: u32) -> Result<ReadyInfo, String> {
-    let ready: ReadyInfo = serde_json::from_str(raw).map_err(|error| format!("Runtime ready.json 无效: {error}"))?;
+fn validated_ready(
+    raw: &str,
+    expected_version: &str,
+    expected_pid: u32,
+) -> Result<ReadyInfo, String> {
+    let ready: ReadyInfo =
+        serde_json::from_str(raw).map_err(|error| format!("Runtime ready.json 无效: {error}"))?;
     if ready.dsh_version != expected_version {
-        return Err(format!("Runtime 版本不一致: expected {expected_version}, got {}", ready.dsh_version));
+        return Err(format!(
+            "Runtime 版本不一致: expected {expected_version}, got {}",
+            ready.dsh_version
+        ));
     }
     // HarnessDock starts dsh with an explicit `--host 127.0.0.1`. Accepting
     // another loopback address here would let native state report ready while
     // the privileged Harness WebView capability is scoped to a different host.
     if ready.host != "127.0.0.1" {
-        return Err(format!("Runtime 返回了非受管 host: expected 127.0.0.1, got {}", ready.host));
+        return Err(format!(
+            "Runtime 返回了非受管 host: expected 127.0.0.1, got {}",
+            ready.host
+        ));
     }
     if ready.port == 0 || ready.pid == 0 || ready.pid != expected_pid {
         return Err("Runtime ready.json 缺少有效端口或 PID。".into());
     }
     let app_url = Url::parse(&ready.url).map_err(|_| "Runtime 返回了无效 Web URL。".to_string())?;
-    let host = app_url.host_str().ok_or_else(|| "Runtime Web URL 缺少主机名。".to_string())?;
-    if host != "127.0.0.1" || (app_url.scheme() != "http" && app_url.scheme() != "https") {
-        return Err("Runtime Web URL 必须使用受管的 127.0.0.1 HTTP(S) 地址。".into());
+    let host = app_url
+        .host_str()
+        .ok_or_else(|| "Runtime Web URL 缺少主机名。".to_string())?;
+    if host != "127.0.0.1" || app_url.scheme() != "http" {
+        return Err("Runtime Web URL 必须使用受管的 http://127.0.0.1:<port> 地址。".into());
     }
     if !app_url.username().is_empty() || app_url.password().is_some() {
         return Err("Runtime Web URL 不能包含用户名或密码。".into());
     }
-    let app_port = app_url.port().unwrap_or(if app_url.scheme() == "https" { 443 } else { 80 });
+    let app_port = app_url
+        .port()
+        .ok_or_else(|| "Runtime Web URL 必须显式包含受管端口。".to_string())?;
     if app_port != ready.port {
-        return Err(format!("Runtime Web URL 端口与 ready.json 不一致: expected {}, got {app_port}", ready.port));
+        return Err(format!(
+            "Runtime Web URL 端口与 ready.json 不一致: expected {}, got {app_port}",
+            ready.port
+        ));
     }
     Ok(ready)
 }
@@ -376,12 +435,22 @@ fn read_attempt_logs(stdout_path: &Path, stderr_path: &Path) -> String {
     let stdout = fs::read_to_string(stdout_path).unwrap_or_default();
     let stderr = fs::read_to_string(stderr_path).unwrap_or_default();
     let combined = format!("{stdout}\n{stderr}");
-    if combined.chars().count() <= 32_000 { return combined; }
-    combined.chars().rev().take(32_000).collect::<Vec<_>>().into_iter().rev().collect()
+    if combined.chars().count() <= 32_000 {
+        return combined;
+    }
+    combined
+        .chars()
+        .rev()
+        .take(32_000)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }
 
 fn public_diagnostic(diagnostic: &str) -> String {
-    let interesting: Vec<_> = diagnostic.lines()
+    let interesting: Vec<_> = diagnostic
+        .lines()
         .filter(|line| {
             let lower = line.to_ascii_lowercase();
             !lower.contains("http://")
@@ -394,7 +463,11 @@ fn public_diagnostic(diagnostic: &str) -> String {
         })
         .take(24)
         .collect();
-    if interesting.is_empty() { "dsh startup failed; see the application diagnostics for details".into() } else { interesting.join("\n") }
+    if interesting.is_empty() {
+        "dsh startup failed; see the application diagnostics for details".into()
+    } else {
+        interesting.join("\n")
+    }
 }
 
 fn spawn_runtime(
@@ -408,20 +481,35 @@ fn spawn_runtime(
     attempt: &str,
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &AtomicBool,
-) -> Result<(Child, PathBuf, PathBuf, process_control::StartingProcessGuard), String> {
+) -> Result<
+    (
+        Child,
+        PathBuf,
+        PathBuf,
+        process_control::StartingProcessGuard,
+    ),
+    String,
+> {
     let stdout_path = dir.join(format!("{attempt}.stdout.log"));
     let stderr_path = dir.join(format!("{attempt}.stderr.log"));
-    let stdout = fs::File::create(&stdout_path).map_err(|error| format!("无法创建 Runtime stdout 日志: {error}"))?;
-    let stderr = fs::File::create(&stderr_path).map_err(|error| format!("无法创建 Runtime stderr 日志: {error}"))?;
+    let stdout = fs::File::create(&stdout_path)
+        .map_err(|error| format!("无法创建 Runtime stdout 日志: {error}"))?;
+    let stderr = fs::File::create(&stderr_path)
+        .map_err(|error| format!("无法创建 Runtime stderr 日志: {error}"))?;
 
     let mut command = Command::new(platform::node_cli_path(node));
-    command.arg(platform::node_cli_path(dsh)).args(["--profile", "web"]);
+    command
+        .arg(platform::node_cli_path(dsh))
+        .args(["--profile", "web"]);
     for patch in patches {
         command.arg("--patch").arg(platform::node_cli_path(patch));
     }
     command
         .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
-        .env("DSH_EMBEDDED_READY_FILE", platform::node_cli_path(ready_file))
+        .env(
+            "DSH_EMBEDDED_READY_FILE",
+            platform::node_cli_path(ready_file),
+        )
         .env("DSH_EMBEDDED_VERSION", version)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
@@ -430,8 +518,9 @@ fn spawn_runtime(
         command.env("DSH_HOME", platform::node_cli_path(home));
     }
     platform::configure_child_command(&mut command);
-    let (child, registration) = process_control::spawn_registered(&mut command, starting_processes, quitting)
-        .map_err(|error| format!("无法启动本地 dsh Runtime: {error}"))?;
+    let (child, registration) =
+        process_control::spawn_registered(&mut command, starting_processes, quitting)
+            .map_err(|error| format!("无法启动本地 dsh Runtime: {error}"))?;
     Ok((child, stdout_path, stderr_path, registration))
 }
 
@@ -448,12 +537,18 @@ fn wait_for_ready(
         match child.try_wait() {
             Ok(Some(status)) => {
                 let diagnostic = read_attempt_logs(stdout_path, stderr_path);
-                return Err(AttemptFailure { message: format!("dsh Runtime 在 ready 前退出: {status}"), diagnostic });
+                return Err(AttemptFailure {
+                    message: format!("dsh Runtime 在 ready 前退出: {status}"),
+                    diagnostic,
+                });
             }
             Ok(None) => {}
             Err(error) => {
                 let diagnostic = read_attempt_logs(stdout_path, stderr_path);
-                return Err(AttemptFailure { message: format!("无法检查 dsh Runtime 状态: {error}"), diagnostic });
+                return Err(AttemptFailure {
+                    message: format!("无法检查 dsh Runtime 状态: {error}"),
+                    diagnostic,
+                });
             }
         }
         if let Ok(raw) = fs::read_to_string(ready_file) {
@@ -464,18 +559,27 @@ fn wait_for_ready(
                         Ok(None) => return Ok(ready),
                         Ok(Some(status)) => {
                             let diagnostic = read_attempt_logs(stdout_path, stderr_path);
-                            return Err(AttemptFailure { message: format!("dsh Runtime 在稳定窗口内退出: {status}"), diagnostic });
+                            return Err(AttemptFailure {
+                                message: format!("dsh Runtime 在稳定窗口内退出: {status}"),
+                                diagnostic,
+                            });
                         }
                         Err(error) => {
                             let diagnostic = read_attempt_logs(stdout_path, stderr_path);
-                            return Err(AttemptFailure { message: error.to_string(), diagnostic });
+                            return Err(AttemptFailure {
+                                message: error.to_string(),
+                                diagnostic,
+                            });
                         }
                     }
                 }
                 Err(error) if deadline <= Instant::now() => {
                     process_control::stop_child_tree(child);
                     let diagnostic = read_attempt_logs(stdout_path, stderr_path);
-                    return Err(AttemptFailure { message: error, diagnostic });
+                    return Err(AttemptFailure {
+                        message: error,
+                        diagnostic,
+                    });
                 }
                 Err(_) => {}
             }
@@ -483,7 +587,10 @@ fn wait_for_ready(
         if deadline <= Instant::now() {
             process_control::stop_child_tree(child);
             let diagnostic = read_attempt_logs(stdout_path, stderr_path);
-            return Err(AttemptFailure { message: "等待 dsh Runtime ready 超时。".into(), diagnostic });
+            return Err(AttemptFailure {
+                message: "等待 dsh Runtime ready 超时。".into(),
+                diagnostic,
+            });
         }
         thread::sleep(Duration::from_millis(100));
     }
@@ -506,7 +613,8 @@ fn start_safe_profile(
     quitting: &AtomicBool,
 ) -> Result<RuntimeProcess, String> {
     let safe_home = dir.join("safe-dsh-home");
-    fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建 Runtime 安全配置目录: {error}"))?;
+    fs::create_dir_all(&safe_home)
+        .map_err(|error| format!("无法创建 Runtime 安全配置目录: {error}"))?;
     let _ = fs::remove_file(ready_file);
     let (mut child, stdout_path, stderr_path, registration) = match spawn_runtime(
         node,
@@ -571,7 +679,9 @@ fn dump_config(
     quitting: &AtomicBool,
 ) -> Result<String, String> {
     let mut command = Command::new(platform::node_cli_path(node));
-    command.arg(platform::node_cli_path(dsh)).args(["--profile", "web"]);
+    command
+        .arg(platform::node_cli_path(dsh))
+        .args(["--profile", "web"]);
     if default_only {
         command.arg("--dump-default-config");
     } else {
@@ -585,8 +695,9 @@ fn dump_config(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     platform::configure_child_command(&mut command);
-    let (mut child, registration) = process_control::spawn_registered(&mut command, starting_processes, quitting)
-        .map_err(|error| format!("无法运行 dsh config dump: {error}"))?;
+    let (mut child, registration) =
+        process_control::spawn_registered(&mut command, starting_processes, quitting)
+            .map_err(|error| format!("无法运行 dsh config dump: {error}"))?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if quitting.load(Ordering::Acquire) {
@@ -603,8 +714,15 @@ fn dump_config(
                 if !output.status.success() {
                     return Err(format!(
                         "dsh {} 失败: {}",
-                        if default_only { "--dump-default-config" } else { "--dump-config" },
-                        String::from_utf8_lossy(&output.stderr).chars().take(2_000).collect::<String>()
+                        if default_only {
+                            "--dump-default-config"
+                        } else {
+                            "--dump-config"
+                        },
+                        String::from_utf8_lossy(&output.stderr)
+                            .chars()
+                            .take(2_000)
+                            .collect::<String>()
                     ));
                 }
                 return String::from_utf8(output.stdout)
@@ -642,20 +760,26 @@ fn dsh_home_path() -> Option<PathBuf> {
 /// blocked by a malformed user layer. This parser intentionally understands
 /// IDs/names only; it never evaluates YAML `!!js` or imports plugin modules.
 fn user_patch_rows() -> Vec<ConfigDumpRow> {
-    let Some(home) = dsh_home_path() else { return Vec::new() };
+    let Some(home) = dsh_home_path() else {
+        return Vec::new();
+    };
     let paths = [
         home.join("profiles").join("web").join("cordis.patch.yml"),
         home.join("cordis.patch.yml"),
     ];
     let mut rows = Vec::new();
     for path in paths {
-        let Ok(raw) = fs::read_to_string(&path) else { continue };
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
         let source = path.to_string_lossy().into_owned();
         let mut current: Option<ConfigDumpRow> = None;
         for line in raw.lines() {
             let line = line.trim_start();
             if let Some(raw_id) = line.strip_prefix("- id:") {
-                if let Some(row) = current.take() { rows.push(row); }
+                if let Some(row) = current.take() {
+                    rows.push(row);
+                }
                 current = Some(ConfigDumpRow {
                     id: decode_yaml_scalar(raw_id),
                     name: None,
@@ -667,7 +791,9 @@ fn user_patch_rows() -> Vec<ConfigDumpRow> {
                 }
             }
         }
-        if let Some(row) = current { rows.push(row); }
+        if let Some(row) = current {
+            rows.push(row);
+        }
     }
     rows
 }
@@ -679,10 +805,25 @@ fn recovery_rows(
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &AtomicBool,
 ) -> Result<Vec<ConfigDumpRow>, String> {
-    match dump_config(node, dsh, embedded_patch_file, false, starting_processes, quitting) {
+    match dump_config(
+        node,
+        dsh,
+        embedded_patch_file,
+        false,
+        starting_processes,
+        quitting,
+    ) {
         Ok(config) => Ok(parse_config_dump_rows(&config)),
         Err(full_error) => {
-            let default_config = dump_config(node, dsh, embedded_patch_file, true, starting_processes, quitting).map_err(|default_error| {
+            let default_config = dump_config(
+                node,
+                dsh,
+                embedded_patch_file,
+                true,
+                starting_processes,
+                quitting,
+            )
+            .map_err(|default_error| {
                 format!("{full_error}; 默认配置转储也失败: {default_error}")
             })?;
             let mut rows = parse_config_dump_rows(&default_config);
@@ -785,7 +926,11 @@ fn start_blocking(
     let (node, node_source) = forced_node.unwrap_or_else(|| platform::resolve_node(&bundled_node));
     let dsh = dsh_path(&runtime_root);
     if !dsh.is_file() || (node_source == "bundled" && !bundled_node.is_file()) {
-        return Err(format!("Tauri Full Runtime 不完整: node={} dsh={}", bundled_node.display(), dsh.display()));
+        return Err(format!(
+            "Tauri Full Runtime 不完整: node={} dsh={}",
+            bundled_node.display(),
+            dsh.display()
+        ));
     }
     if !plugin_path.is_file()
         || !compatibility_path.is_file()
@@ -794,8 +939,9 @@ fn start_blocking(
     {
         return Err("Tauri Runtime 缺少 origin.json、embedded-client 插件、Harness Shell 插件或客户端兼容层。".into());
     }
-    let origin: OriginInfo = serde_json::from_str(&fs::read_to_string(&origin_path).map_err(|error| error.to_string())?)
-        .map_err(|error| format!("origin.json 无效: {error}"))?;
+    let origin: OriginInfo =
+        serde_json::from_str(&fs::read_to_string(&origin_path).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("origin.json 无效: {error}"))?;
     let dir = work_dir()?;
     let patch_file = dir.join("embedded.patch.yml");
     let ready_file = dir.join("ready.json");
@@ -814,7 +960,8 @@ fn start_blocking(
         let _ = fs::remove_dir_all(&dir);
         return Err("HarnessDock 正在退出，已取消 Runtime 启动。".into());
     }
-    let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+    let recovery_enabled =
+        std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
 
     if force_safe_mode {
         return start_safe_profile(
@@ -832,7 +979,9 @@ fn start_blocking(
     }
 
     if recovery_enabled {
-        if let Some(quarantine) = plugin_quarantine::read(&quarantine_state_path, &origin.dsh_version) {
+        if let Some(quarantine) =
+            plugin_quarantine::read(&quarantine_state_path, &origin.dsh_version)
+        {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
             let patch = match recovery_patch_ids(&quarantine.isolated_plugins) {
                 Ok(value) => value,
@@ -846,24 +995,25 @@ fn start_blocking(
                 return Err(format!("无法写入插件隔离 patch: {error}"));
             }
             let _ = fs::remove_file(&ready_file);
-            let (mut quarantine_child, quarantine_stdout, quarantine_stderr, registration) = match spawn_runtime(
-                &node,
-                &dsh,
-                &[patch_file.as_path(), quarantine_file.as_path()],
-                None,
-                &ready_file,
-                &origin.dsh_version,
-                &dir,
-                "quarantine",
-                &starting_processes,
-                &quitting,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = fs::remove_dir_all(&dir);
-                    return Err(error);
-                }
-            };
+            let (mut quarantine_child, quarantine_stdout, quarantine_stderr, registration) =
+                match spawn_runtime(
+                    &node,
+                    &dsh,
+                    &[patch_file.as_path(), quarantine_file.as_path()],
+                    None,
+                    &ready_file,
+                    &origin.dsh_version,
+                    &dir,
+                    "quarantine",
+                    &starting_processes,
+                    &quitting,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = fs::remove_dir_all(&dir);
+                        return Err(error);
+                    }
+                };
             let quarantine_pid = quarantine_child.id();
             match wait_for_ready(
                 &mut quarantine_child,
@@ -922,7 +1072,14 @@ fn start_blocking(
         }
     };
     let child_pid = child.id();
-    match wait_for_ready(&mut child, &ready_file, &origin.dsh_version, child_pid, &stdout_path, &stderr_path) {
+    match wait_for_ready(
+        &mut child,
+        &ready_file,
+        &origin.dsh_version,
+        child_pid,
+        &stdout_path,
+        &stderr_path,
+    ) {
         Ok(ready) => {
             return Ok(RuntimeProcess {
                 child,
@@ -952,26 +1109,31 @@ fn start_blocking(
                 return Err(format!("{}\n{}", first_failure.message, summary));
             }
 
-            let config = match recovery_rows(&node, &dsh, &patch_file, &starting_processes, &quitting) {
-                Ok(value) => value,
-                Err(error) => {
-                    let summary = public_diagnostic(&first_failure.diagnostic);
-                    return start_safe_profile(
-                        &node,
-                        node_source,
-                        &dsh,
-                        &patch_file,
-                        &ready_file,
-                        &origin,
-                        &dir,
-                        &format!("{}\n{}\n插件兼容恢复未运行: {error}", first_failure.message, summary),
-                        &starting_processes,
-                        &quitting,
-                    );
-                }
-            };
+            let config =
+                match recovery_rows(&node, &dsh, &patch_file, &starting_processes, &quitting) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let summary = public_diagnostic(&first_failure.diagnostic);
+                        return start_safe_profile(
+                            &node,
+                            node_source,
+                            &dsh,
+                            &patch_file,
+                            &ready_file,
+                            &origin,
+                            &dir,
+                            &format!(
+                                "{}\n{}\n插件兼容恢复未运行: {error}",
+                                first_failure.message, summary
+                            ),
+                            &starting_processes,
+                            &quitting,
+                        );
+                    }
+                };
             let rows = config;
-            let (selected, suspected_plugins, reason) = recovery_plan(&rows, &first_failure.diagnostic);
+            let (selected, suspected_plugins, reason) =
+                recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 return start_safe_profile(
@@ -982,7 +1144,10 @@ fn start_blocking(
                     &ready_file,
                     &origin,
                     &dir,
-                    &format!("{}\n{}\n未找到可隔离的第三方插件", first_failure.message, summary),
+                    &format!(
+                        "{}\n{}\n未找到可隔离的第三方插件",
+                        first_failure.message, summary
+                    ),
                     &starting_processes,
                     &quitting,
                 );
@@ -1002,34 +1167,35 @@ fn start_blocking(
             }
             let _ = fs::remove_file(&ready_file);
             let isolated_plugins: Vec<String> = selected.iter().map(|row| row.id.clone()).collect();
-            let (mut recovery_child, recovery_stdout, recovery_stderr, registration) = match spawn_runtime(
-                &node,
-                &dsh,
-                &[patch_file.as_path(), recovery_file.as_path()],
-                None,
-                &ready_file,
-                &origin.dsh_version,
-                &dir,
-                "recovery",
-                &starting_processes,
-                &quitting,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    return start_safe_profile(
-                        &node,
-                        node_source,
-                        &dsh,
-                        &patch_file,
-                        &ready_file,
-                        &origin,
-                        &dir,
-                        &format!("插件兼容恢复进程无法启动: {error}"),
-                        &starting_processes,
-                        &quitting,
-                    );
-                }
-            };
+            let (mut recovery_child, recovery_stdout, recovery_stderr, registration) =
+                match spawn_runtime(
+                    &node,
+                    &dsh,
+                    &[patch_file.as_path(), recovery_file.as_path()],
+                    None,
+                    &ready_file,
+                    &origin.dsh_version,
+                    &dir,
+                    "recovery",
+                    &starting_processes,
+                    &quitting,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return start_safe_profile(
+                            &node,
+                            node_source,
+                            &dsh,
+                            &patch_file,
+                            &ready_file,
+                            &origin,
+                            &dir,
+                            &format!("插件兼容恢复进程无法启动: {error}"),
+                            &starting_processes,
+                            &quitting,
+                        );
+                    }
+                };
             let recovery_pid = recovery_child.id();
             match wait_for_ready(
                 &mut recovery_child,
@@ -1046,7 +1212,8 @@ fn start_blocking(
                         isolated_plugins.clone(),
                         suspected_plugins.clone(),
                         &reason,
-                    ).ok();
+                    )
+                    .ok();
                     Ok(RuntimeProcess {
                         child: recovery_child,
                         stopped: false,
@@ -1092,7 +1259,9 @@ fn start_blocking(
 }
 
 pub(crate) fn status_snapshot(state: &AppState) -> RuntimeStatus {
-    let Ok(mut guard) = state.runtime.lock() else { return stopped() };
+    let Ok(mut guard) = state.runtime.lock() else {
+        return stopped();
+    };
     let dead = guard.as_mut().is_some_and(|process| !process.is_alive());
     if dead {
         guard.take();
@@ -1103,7 +1272,10 @@ pub(crate) fn status_snapshot(state: &AppState) -> RuntimeStatus {
         crate::gateway_host::stop_managed(&state.gateway);
         return stopped();
     }
-    guard.as_ref().map(RuntimeProcess::status).unwrap_or_else(stopped)
+    guard
+        .as_ref()
+        .map(RuntimeProcess::status)
+        .unwrap_or_else(stopped)
 }
 
 #[tauri::command]
@@ -1112,7 +1284,10 @@ pub fn runtime_status(state: State<'_, AppState>) -> RuntimeStatus {
 }
 
 #[tauri::command]
-pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
+pub async fn runtime_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RuntimeStatus, String> {
     if state.runtime_restarting.load(Ordering::Acquire) {
         return Err("Runtime 正在重启，请稍候再试。".into());
     }
@@ -1129,7 +1304,9 @@ async fn runtime_start_impl(
     allow_restarting: bool,
 ) -> Result<RuntimeStatus, String> {
     if cfg!(mobile) {
-        return Err("Android/iOS 使用 Remote Gateway，不允许在移动设备内启动桌面 dsh Runtime。".into());
+        return Err(
+            "Android/iOS 使用 Remote Gateway，不允许在移动设备内启动桌面 dsh Runtime。".into(),
+        );
     }
     // Claim the complete startup operation before inspecting or repairing
     // existing state. This closes the interval in which a concurrent stop or
@@ -1149,7 +1326,10 @@ async fn runtime_start_impl(
     }
     let mut removed_dead_runtime = false;
     {
-        let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
+        let mut guard = state
+            .runtime
+            .lock()
+            .map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
         if let Some(current) = guard.as_mut() {
             if current.is_alive() {
                 return Ok(current.status());
@@ -1191,10 +1371,13 @@ async fn runtime_start_impl(
             quitting,
         )
     })
-        .await
-        .map_err(|error| format!("Runtime 启动任务失败: {error}"))??;
+    .await
+    .map_err(|error| format!("Runtime 启动任务失败: {error}"))??;
     let status = process.status();
-    let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
+    let mut guard = state
+        .runtime
+        .lock()
+        .map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
     if state.quitting.load(Ordering::Acquire) || state.runtime_stopping.load(Ordering::Acquire) {
         let mut process = process;
         process.stop();
@@ -1227,7 +1410,10 @@ pub(crate) async fn restart_managed_safe(app: AppHandle) -> Result<RuntimeStatus
     restart_managed_with_mode(app, true).await
 }
 
-async fn restart_managed_with_mode(app: AppHandle, force_safe_mode: bool) -> Result<RuntimeStatus, String> {
+async fn restart_managed_with_mode(
+    app: AppHandle,
+    force_safe_mode: bool,
+) -> Result<RuntimeStatus, String> {
     let state = app.state::<AppState>();
     if state.quitting.load(Ordering::Acquire) {
         return Err("HarnessDock 正在退出，已拒绝 Runtime 重启。".into());
@@ -1277,7 +1463,10 @@ pub fn runtime_stop(state: State<'_, AppState>) -> Result<RuntimeStatus, String>
     // startup that is already in flight observes runtime_stopping before it
     // can publish its sidecar, preventing a stale/upstream-less process.
     crate::gateway_host::stop_managed(&state.gateway);
-    let mut guard = state.runtime.lock().map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
+    let mut guard = state
+        .runtime
+        .lock()
+        .map_err(|_| "Runtime 状态锁已损坏。".to_string())?;
     if let Some(mut process) = guard.take() {
         process.stop();
     }
@@ -1309,14 +1498,23 @@ mod tests {
         assert_eq!(rows.len(), 6);
         assert_eq!(rows[0].id, "official-core");
         assert_eq!(rows[1].source, "third-party-bundle");
-        assert_eq!(rows[2].name.as_deref(), Some("file:///C:/Users/me/plugin.js"));
+        assert_eq!(
+            rows[2].name.as_deref(),
+            Some("file:///C:/Users/me/plugin.js")
+        );
     }
 
     #[test]
     fn recovery_never_targets_official_or_embedded_rows() {
         let rows = parse_config_dump_rows(DUMP);
         let candidates = recovery_candidates(&rows);
-        assert_eq!(candidates.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old-market-plugin", "user-added"]
+        );
     }
 
     #[test]
@@ -1346,28 +1544,50 @@ mod tests {
         let ipv6 = r#"{"url":"http://[::1]:43123/?token=launch","host":"::1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
         let alternate_loopback = r#"{"url":"http://127.0.0.2:43123/?token=launch","host":"127.0.0.2","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
         let localhost_alias = r#"{"url":"http://localhost:43123/?token=launch","host":"localhost","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
+        let https_alias = r#"{"url":"https://127.0.0.1:43123/?token=launch","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
+        let missing_port = r#"{"url":"http://127.0.0.1/?token=launch","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
         assert!(validated_ready(ipv6, "0.1.2-alpha.1", 42).is_err());
         assert!(validated_ready(alternate_loopback, "0.1.2-alpha.1", 42).is_err());
         assert!(validated_ready(localhost_alias, "0.1.2-alpha.1", 42).is_err());
+        assert!(validated_ready(https_alias, "0.1.2-alpha.1", 42).is_err());
+        assert!(validated_ready(missing_port, "0.1.2-alpha.1", 42).is_err());
     }
 
     #[test]
     fn recovery_isolates_all_external_rows_and_attributes_the_first_failure() {
         let rows = parse_config_dump_rows(DUMP);
-        let (selected, suspected, reason) = recovery_plan(&rows, "failed to load @legacy/old-market-plugin");
-        assert_eq!(selected.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
+        let (selected, suspected, reason) =
+            recovery_plan(&rows, "failed to load @legacy/old-market-plugin");
+        assert_eq!(
+            selected
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old-market-plugin", "user-added"]
+        );
         assert_eq!(suspected, vec!["old-market-plugin"]);
         assert_eq!(reason, "diagnostic-match");
-        assert_eq!(select_recovery_rows(&rows, "failed to load @legacy/old-market-plugin").len(), 2);
+        assert_eq!(
+            select_recovery_rows(&rows, "failed to load @legacy/old-market-plugin").len(),
+            2
+        );
     }
 
     #[test]
     fn ambiguous_failure_falls_back_to_external_rows_only() {
         let rows = parse_config_dump_rows(DUMP);
         let (selected, suspected, reason) = recovery_plan(&rows, "Cordis boot failed");
-        assert_eq!(selected.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), vec!["old-market-plugin", "user-added"]);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old-market-plugin", "user-added"]
+        );
         assert!(suspected.is_empty());
         assert_eq!(reason, "ambiguous");
-        assert!(recovery_patch(&selected).unwrap().contains("disabled: true"));
+        assert!(recovery_patch(&selected)
+            .unwrap()
+            .contains("disabled: true"));
     }
 }

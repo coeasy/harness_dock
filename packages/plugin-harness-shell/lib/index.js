@@ -19,6 +19,7 @@ var service = {
     "web.restart",
     "runtime.safe-mode",
     "runtime.clear-quarantine",
+    "gateway.manage",
     "diagnostics.open",
     "app.update.check",
     "app.update.install",
@@ -36,7 +37,8 @@ function apply(ctx = {}) {
   try {
     writeFileSync(
       readyFile,
-      `${JSON.stringify({ pluginId: name, version, apiVersion, pid: process.pid })}\n`,
+      `${JSON.stringify({ pluginId: name, version, apiVersion, pid: process.pid })}
+`,
       { encoding: "utf8", mode: 384 }
     );
   } catch {

@@ -61,6 +61,19 @@ describe('Tauri shell fail-open guarantees', () => {
     expect(shellBundle).toBe(shell)
   })
 
+  it('falls back to native window controls when the optional shell cannot be installed', () => {
+    const harnessWindow = read('apps/tauri/src-tauri/src/harness_window.rs')
+    const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
+    const shellService = read('packages/plugin-harness-shell/src/index.ts')
+    const shellBundle = read('packages/plugin-harness-shell/lib/index.js')
+    expect(harnessWindow).toContain('window.set_decorations(true)')
+    expect(harnessWindow).toContain('window.set_decorations(false)')
+    expect(harnessWindow).toContain('http://127.0.0.1:<port> Runtime')
+    expect(runtime).toContain('app_url.scheme() != "http"')
+    expect(shellService).toContain("'gateway.manage'")
+    expect(shellBundle).toContain('"gateway.manage"')
+  })
+
   it('uses the packaged Node by default and requires an explicit system-Node opt-in', () => {
     const platform = read('apps/tauri/src-tauri/src/platform.rs')
     expect(platform).toContain('HARNESSDOCK_NODE_BIN')

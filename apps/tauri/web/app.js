@@ -12,6 +12,27 @@
   const deviceName = $('device-name')
   let currentRuntime
   let desktopStartup
+  let surfaceMode = 'hidden'
+
+  function setSurfaceMode(mode) {
+    surfaceMode = mode
+    const visibility = {
+      recovery: ['desktop-card'],
+      'gateway-host': ['gateway-host-card'],
+      'mobile-remote': ['mobile-remote-card'],
+      hidden: [],
+    }
+    const visible = new Set(visibility[mode] || [])
+    for (const id of ['desktop-card', 'gateway-host-card', 'mobile-remote-card']) {
+      $(id)?.classList.toggle('hidden', !visible.has(id))
+    }
+  }
+
+  window.__harnessDockSetSurface = (mode) => {
+    if (!['recovery', 'gateway-host', 'mobile-remote', 'hidden'].includes(mode)) return
+    setSurfaceMode(mode)
+    if (mode === 'gateway-host') void refreshVisibleControl()
+  }
 
   function showRecoveryCards() {
     // A normal desktop user should never land in a mixed Runtime/Gateway
@@ -19,8 +40,7 @@
     // startup recovery focused on the broken local Runtime; the Gateway card
     // is exposed only from the explicit secondary control entry in healthy
     // desktop sessions.
-    $('desktop-card')?.classList.remove('hidden')
-    $('gateway-host-card')?.classList.add('hidden')
+    setSurfaceMode('recovery')
   }
 
   // The native startup coordinator calls this when Runtime or Harness Web
@@ -230,12 +250,12 @@
         // Native startup owns the normal desktop path. The control window stays
         // hidden during normal launch, but its secondary Mobile Gateway card is
         // ready when the user explicitly opens this window from Shell/Tray.
-        $('gateway-host-card')?.classList.remove('hidden')
+        setSurfaceMode('gateway-host')
         void splashStatus('正在准备本地 Runtime…')
         bootStatus('Harness Web 为主界面；此控制页仅在需要管理移动设备时打开。', 'ready')
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')
-        $('mobile-remote-card').classList.remove('hidden')
+        setSurfaceMode('mobile-remote')
         deviceName.value = defaultDeviceName(platform)
       }
     } catch (error) {

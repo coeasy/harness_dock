@@ -33,6 +33,7 @@ export const service: HarnessShellService = {
     'web.restart',
     'runtime.safe-mode',
     'runtime.clear-quarantine',
+    'gateway.manage',
     'diagnostics.open',
     'app.update.check',
     'app.update.install',
