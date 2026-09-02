@@ -229,10 +229,13 @@ fn validated_runtime_url(value: &str) -> Result<Url, String> {
         return Err("Runtime WebView 只允许 HTTP(S)。".into());
     }
     let host = url.host_str().ok_or_else(|| "Runtime URL 缺少主机名。".to_string())?;
-    let loopback = host.eq_ignore_ascii_case("localhost")
-        || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false);
-    if !loopback {
-        return Err("桌面 Harness WebView 只允许本地 loopback Runtime。".into());
+    // The managed desktop Runtime is spawned on 127.0.0.1 and the Tauri
+    // capability grants the shell bridge only to 127.0.0.1/localhost. Do not
+    // accept every address that the OS classifies as loopback: doing so can
+    // create a false-ready WebView that passes Rust validation but receives no
+    // shell capability (and broadens the privileged navigation surface).
+    if host != "127.0.0.1" && !host.eq_ignore_ascii_case("localhost") {
+        return Err("桌面 Harness WebView 只允许受管的 127.0.0.1/localhost Runtime。".into());
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err("Runtime URL 不能包含用户名或密码。".into());
@@ -956,5 +959,14 @@ mod tests {
         assert!(has_launch_token(&launch));
         assert!(has_launch_token(&mixed));
         assert!(!has_launch_token(&empty));
+    }
+
+    #[test]
+    fn runtime_url_matches_the_tauri_shell_capability_boundary() {
+        assert!(validated_runtime_url("http://127.0.0.1:4321/").is_ok());
+        assert!(validated_runtime_url("https://localhost:4321/").is_ok());
+        assert!(validated_runtime_url("http://127.0.0.2:4321/").is_err());
+        assert!(validated_runtime_url("http://[::1]:4321/").is_err());
+        assert!(validated_runtime_url("http://example.com:4321/").is_err());
     }
 }
