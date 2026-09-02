@@ -183,15 +183,12 @@ describe('Tauri v0.2 host contract', () => {
       'http://127.0.0.1:*',
       'http://localhost:*/*',
       'http://localhost:*',
-      'http://[::1]:*/*',
-      'http://[::1]:*',
       'https://127.0.0.1:*/*',
       'https://127.0.0.1:*',
       'https://localhost:*/*',
       'https://localhost:*',
-      'https://[::1]:*/*',
-      'https://[::1]:*',
     ])
+    expect(capability.remote.urls.every((url: string) => !url.includes('[::1]'))).toBe(true)
     expect(capability.permissions).toEqual([
       'core:event:allow-listen',
       'core:event:allow-unlisten',
