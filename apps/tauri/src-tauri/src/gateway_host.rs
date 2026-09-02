@@ -103,7 +103,23 @@ fn work_dir() -> Result<PathBuf, String> {
         .map_err(|error| error.to_string())?
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("harnessdock-gateway-{}-{nonce}", std::process::id()));
-    fs::create_dir_all(&dir).map_err(|error| format!("无法创建 Gateway 临时目录: {error}"))?;
+
+    // The Gateway ready file contains its bearer-style admin token and the log
+    // can contain local Runtime diagnostics. Create a fresh private directory
+    // instead of relying on the process umask or reusing an existing path.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder
+            .create(&dir)
+            .map_err(|error| format!("无法创建私有 Gateway 临时目录: {error}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(&dir).map_err(|error| format!("无法创建 Gateway 临时目录: {error}"))?;
+    }
     Ok(dir)
 }
 
@@ -215,6 +231,62 @@ fn runtime_gateway_inputs(state: &State<'_, AppState>) -> Result<(PathBuf, Strin
     Ok(runtime.gateway_inputs())
 }
 
+fn public_gateway_diagnostic(raw: &str) -> String {
+    let safe = raw
+        .lines()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("http://")
+                || lower.contains("https://")
+                || lower.contains("token")
+                || lower.contains("authorization")
+                || lower.contains("bearer")
+                || lower.contains("secret")
+                || lower.contains("upstream_url")
+            {
+                return None;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.chars().take(500).collect::<String>())
+            }
+        })
+        .take(24)
+        .collect::<Vec<_>>();
+    if safe.is_empty() {
+        "Gateway sidecar 启动失败；敏感 URL/令牌已从用户可见诊断中隐藏。".into()
+    } else {
+        safe.join("\n")
+    }
+}
+
+fn validated_gateway_port(local_port: Option<u16>) -> Result<u16, String> {
+    let port = local_port.unwrap_or(43137);
+    if port < 1024 {
+        return Err("Gateway 本地端口必须在 1024-65535 之间，避免系统保留端口和管理员权限要求。".into());
+    }
+    Ok(port)
+}
+
+fn validated_public_gateway_url(public_url: Option<String>) -> Result<Option<String>, String> {
+    let Some(value) = public_url else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if !is_public_gateway_url(value) {
+        return Err("Gateway 公网地址必须是 HTTPS 根地址（例如 https://gateway.example.com/）；仅本机调试允许 http://127.0.0.1:端口/。地址不能包含账号、密码、路径、查询参数或片段。".into());
+    }
+    let normalized = reqwest::Url::parse(value)
+        .map_err(|error| format!("Gateway 公网地址无效: {error}"))?
+        .to_string();
+    Ok(Some(normalized))
+}
+
 fn spawn_sidecar(
     node: PathBuf,
     sidecar: PathBuf,
@@ -257,11 +329,7 @@ fn spawn_sidecar(
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
-    if let Some(value) = public_url
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(value) = public_url.as_deref() {
         command.env("HARNESSDOCK_GATEWAY_PUBLIC_URL", value);
     }
     platform::configure_child_command(&mut command);
@@ -282,10 +350,10 @@ fn spawn_sidecar(
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                let detail = fs::read_to_string(&log_file).unwrap_or_default();
+                let detail = public_gateway_diagnostic(&fs::read_to_string(&log_file).unwrap_or_default());
                 registration.complete();
                 let _ = fs::remove_dir_all(&dir);
-                return Err(format!("Gateway sidecar 在 ready 前退出: {status}\n{}", detail.trim()));
+                return Err(format!("Gateway sidecar 在 ready 前退出: {status}\n{detail}"));
             }
             Ok(None) => {}
             Err(error) => {
@@ -305,7 +373,12 @@ fn spawn_sidecar(
                     return Err(format!("Gateway ready.json 无效: {error}"));
                 }
             };
-            if ready.schema_version != 1 || ready.pid == 0 || ready.pid != child.id() || ready.admin_token.len() < 32 {
+            if ready.schema_version != 1
+                || ready.pid == 0
+                || ready.pid != child.id()
+                || ready.admin_token.len() < 32
+                || ready.admin_token.len() > 512
+            {
                 process_control::stop_child_tree(&mut child);
                 registration.complete();
                 let _ = fs::remove_dir_all(&dir);
@@ -315,13 +388,13 @@ fn spawn_sidecar(
                 process_control::stop_child_tree(&mut child);
                 registration.complete();
                 let _ = fs::remove_dir_all(&dir);
-                return Err("Gateway admin API 不是 loopback 地址。".into());
+                return Err("Gateway admin API 不是受管的 127.0.0.1 地址。".into());
             }
             if !is_loopback_http_url(&ready.local_url) {
                 process_control::stop_child_tree(&mut child);
                 registration.complete();
                 let _ = fs::remove_dir_all(&dir);
-                return Err("Gateway local URL 不是 loopback 地址。".into());
+                return Err("Gateway local URL 不是受管的 127.0.0.1 地址。".into());
             }
             if !is_public_gateway_url(&ready.public_url) {
                 process_control::stop_child_tree(&mut child);
@@ -340,9 +413,9 @@ fn spawn_sidecar(
         if deadline <= Instant::now() {
             process_control::stop_child_tree(&mut child);
             registration.complete();
-            let detail = fs::read_to_string(&log_file).unwrap_or_default();
+            let detail = public_gateway_diagnostic(&fs::read_to_string(&log_file).unwrap_or_default());
             let _ = fs::remove_dir_all(&dir);
-            return Err(format!("等待 Gateway sidecar ready 超时。 {}", detail.trim()));
+            return Err(format!("等待 Gateway sidecar ready 超时。\n{detail}"));
         }
         thread::sleep(Duration::from_millis(100));
     }
@@ -461,6 +534,8 @@ pub async fn gateway_host_start(
         return Err("请先启动本地 Runtime，再启动 Mobile Gateway。".into());
     }
 
+    let port = validated_gateway_port(local_port)?;
+    let public_url = validated_public_gateway_url(public_url)?;
     let _starting = claim_gateway_start(&state)?;
     let existing = begin_gateway_start(&state)?;
     if let Some(ready) = existing {
@@ -475,10 +550,6 @@ pub async fn gateway_host_start(
     }
 
     let (node, upstream_url) = runtime_gateway_inputs(&state)?;
-    let port = local_port.unwrap_or(43137);
-    if port == 0 {
-        return Err("Gateway 本地端口不能为 0；远程 HTTPS tunnel 需要稳定的 loopback 端口。".into());
-    }
     let sidecar = resource_path(&app, "gateway-sidecar.mjs")?;
     let starting_processes = std::sync::Arc::clone(&state.starting_processes);
     let quitting = Arc::clone(&state.quitting);
@@ -594,5 +665,51 @@ pub(crate) fn stop_managed(gateway: &Mutex<Option<GatewayProcess>>) {
         if let Some(mut process) = guard.take() {
             process.stop();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_public_url_is_https_or_explicit_local_debug_only() {
+        assert!(validated_public_gateway_url(Some("https://gateway.example.com".into())).is_ok());
+        assert!(validated_public_gateway_url(Some("http://127.0.0.1:43137/".into())).is_ok());
+        assert!(validated_public_gateway_url(Some("http://localhost:43137/".into())).is_ok());
+        assert!(validated_public_gateway_url(Some("http://gateway.example.com/".into())).is_err());
+        assert!(validated_public_gateway_url(Some("https://user:pass@gateway.example.com/".into())).is_err());
+        assert!(validated_public_gateway_url(Some("https://gateway.example.com/path".into())).is_err());
+        assert!(validated_public_gateway_url(Some("https://gateway.example.com/?token=x".into())).is_err());
+    }
+
+    #[test]
+    fn gateway_port_avoids_privileged_or_invalid_ports() {
+        assert_eq!(validated_gateway_port(None).unwrap(), 43137);
+        assert_eq!(validated_gateway_port(Some(1024)).unwrap(), 1024);
+        assert!(validated_gateway_port(Some(0)).is_err());
+        assert!(validated_gateway_port(Some(443)).is_err());
+    }
+
+    #[test]
+    fn user_visible_gateway_diagnostic_redacts_urls_and_tokens() {
+        let diagnostic = public_gateway_diagnostic(
+            "starting gateway\nupstream https://example.test/?token=secret\nAuthorization: Bearer secret\nport already in use",
+        );
+        assert!(diagnostic.contains("starting gateway"));
+        assert!(diagnostic.contains("port already in use"));
+        assert!(!diagnostic.contains("example.test"));
+        assert!(!diagnostic.contains("secret"));
+        assert!(!diagnostic.to_ascii_lowercase().contains("bearer"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gateway_work_dir_is_private_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = work_dir().unwrap();
+        let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let _ = fs::remove_dir_all(dir);
     }
 }
