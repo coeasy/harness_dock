@@ -34,7 +34,7 @@ describe('independent Harness Shell dsh plugin', () => {
 
   it('registers the shell service when the host accepts it', () => {
     let registeredKey = ''
-    let registeredValue
+    let registeredValue: typeof service | undefined
     apply({
       provide(key, value) {
         registeredKey = key
