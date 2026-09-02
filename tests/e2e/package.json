@@ -1,6 +1,6 @@
 {
   "name": "@dsh/e2e-tests",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "description": "Electron E2E smoke tests for the retained HarnessDock compatibility host (mock dsh, no real runtime)",
   "type": "module",

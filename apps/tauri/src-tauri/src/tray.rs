@@ -7,9 +7,21 @@ use tauri::{
 
 fn show_primary(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("harness") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return;
+        // A dynamically-created Harness window is hidden until its first
+        // document has painted. Showing it early is the exact whiteboard
+        // failure mode that the startup coordinator is designed to avoid.
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
+    }
+    if let Some(window) = app.get_webview_window("splash") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
     }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
