@@ -41,12 +41,18 @@ export const service: HarnessShellService = {
 }
 
 /**
- * dsh plugin entrypoint. It is deliberately feature-detected so older dsh
- * hosts can install it without making the Harness Web startup path fragile.
+ * dsh plugin entrypoint. The shell is an optional enhancement to Harness Web,
+ * never a Runtime boot dependency. Older or alternate hosts may expose a
+ * provide/set hook with different lifecycle rules, so even a host-side
+ * registration error must fail open and leave the official Harness Web usable.
  */
 export function apply(ctx: PluginContext = {}): void {
   const register = ctx.provide ?? ctx.set
-  register?.('harnessShell', service)
+  try {
+    register?.('harnessShell', service)
+  } catch {
+    // Do not let an optional shell-service registration failure abort dsh boot.
+  }
 
   const readyFile = process.env.DSH_SHELL_PLUGIN_READY_FILE
   if (!readyFile) return
