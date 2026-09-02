@@ -36,13 +36,14 @@ fn show_primary(app: &AppHandle) {
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "tray-open", "打开 Harness", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "tray-settings", "插件诊断", true, None::<&str>)?;
+    let gateway = MenuItem::with_id(app, "tray-gateway", "移动设备 / Gateway", true, None::<&str>)?;
     let refresh = MenuItem::with_id(app, "tray-refresh", "刷新 Harness Web", true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "tray-restart", "重启 Runtime 并刷新 Web", true, None::<&str>)?;
     let safe_mode = MenuItem::with_id(app, "tray-safe-mode", "隔离插件启动", true, None::<&str>)?;
     let clear_quarantine = MenuItem::with_id(app, "tray-clear-quarantine", "清除插件隔离并重启", true, None::<&str>)?;
     let update = MenuItem::with_id(app, "tray-update", "自动更新", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "tray-quit", "退出 HarnessDock", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &settings, &refresh, &restart, &safe_mode, &clear_quarantine, &update, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &settings, &gateway, &refresh, &restart, &safe_mode, &clear_quarantine, &update, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("harnessdock-tray")
         .tooltip("HarnessDock")
@@ -58,6 +59,11 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                         crate::report_shell_error(&report_handle, &error);
                     }
                 });
+            }
+            "tray-gateway" => {
+                if let Err(error) = harness_window::control_show(app.clone()) {
+                    crate::report_shell_error(app, &error);
+                }
             }
             "tray-refresh" => {
                 let handle = app.clone();
