@@ -5,6 +5,8 @@
 //! shell asset can be published and installed independently by other dsh
 //! hosts without copying Tauri-specific code into the Web application.
 
+use tauri::Manager;
+
 const SHELL_WEB_SCRIPT: &str = include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
 const BRIDGE_SCRIPT: &str = r#"
@@ -16,7 +18,7 @@ const BRIDGE_SCRIPT: &str = r#"
     'window.minimize': 'harness_minimize',
     'window.toggleMaximize': 'harness_toggle_maximize',
     'window.state': 'harness_window_state',
-    'window.close': 'harness_close',
+    'window.close': 'harness_shell_close',
     'web.reload': 'harness_reload_web',
     'web.restart': 'harness_restart_web',
     'runtime.safe-mode': 'harness_safe_mode_restart',
@@ -76,6 +78,23 @@ const BRIDGE_SCRIPT: &str = r#"
   });
 })();
 "#;
+
+/// The custom shell close button hides to tray only when a tray actually
+/// exists. On desktops where tray creation failed, hiding would strand an
+/// invisible process because the normal ExitRequested guard intentionally
+/// keeps the host alive during WebView transitions.
+#[tauri::command]
+pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
+    let tray_available = app
+        .state::<crate::AppState>()
+        .tray_available
+        .load(std::sync::atomic::Ordering::Acquire);
+    if tray_available {
+        return crate::harness_window::harness_close(app).await;
+    }
+    crate::request_exit(&app);
+    Ok(())
+}
 
 pub(crate) fn init_script() -> String {
     format!("{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
