@@ -133,13 +133,14 @@ jobs:
             local root="$1"
             local pattern="$2"
             local destination="$3"
-            local source
-            source="$(find "$root" -type f -name "$pattern" -print | sort | head -1)"
-            test -n "$source" || {
-              echo "missing release asset: root=$root pattern=$pattern" >&2
+            local -a sources=()
+            mapfile -t sources < <(find "$root" -type f -name "$pattern" -print | sort)
+            if [ "${#sources[@]}" -ne 1 ]; then
+              echo "release asset must match exactly once: root=$root pattern=$pattern matches=${#sources[@]}" >&2
+              printf '  %s\n' "${sources[@]:-<none>}" >&2
               exit 1
-            }
-            cp "$source" "$destination"
+            fi
+            cp "${sources[0]}" "$destination"
             test -s "$destination"
           }
 
@@ -161,14 +162,12 @@ jobs:
           pack_runtime() {
             local artifact="$1"
             local target="$2"
-            local manifest
-            local root
-            manifest="$(find "release-input/tauri-runtime-${artifact}" -type f -name manifest.json -print -quit)"
-            test -n "$manifest" || {
-              echo "missing runtime manifest for $artifact" >&2
+            local root="release-input/tauri-runtime-${artifact}"
+            local manifest="$root/manifest.json"
+            test -s "$manifest" || {
+              echo "missing runtime root manifest for $artifact: $manifest" >&2
               exit 1
             }
-            root="$(dirname "$manifest")"
             if [ "$target" != 'win32-x64' ]; then
               chmod 755 "$root/bin/node"
             fi
