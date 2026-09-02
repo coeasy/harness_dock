@@ -2,3 +2,4 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/resources/dsh-runtime/
 src-tauri/resources/gateway-sidecar.mjs
+src-tauri/icons/.app-icon-normalized.png
