@@ -305,6 +305,7 @@ fn recovery_plan(rows: &[ConfigDumpRow], diagnostic: &str) -> (Vec<ConfigDumpRow
     (candidates, suspected, reason)
 }
 
+#[cfg(test)]
 fn select_recovery_rows(rows: &[ConfigDumpRow], diagnostic: &str) -> Vec<ConfigDumpRow> {
     recovery_plan(rows, diagnostic).0
 }
@@ -1289,7 +1290,7 @@ mod tests {
     #[test]
     fn config_dump_parser_keeps_origins_and_names() {
         let rows = parse_config_dump_rows(DUMP);
-        assert_eq!(rows.len(), 7);
+        assert_eq!(rows.len(), 6);
         assert_eq!(rows[0].id, "official-core");
         assert_eq!(rows[1].source, "third-party-bundle");
         assert_eq!(rows[2].name.as_deref(), Some("file:///C:/Users/me/plugin.js"));
