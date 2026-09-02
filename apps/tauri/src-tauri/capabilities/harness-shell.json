@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "harness-shell",
-  "description": "v0.2.0 Harness Shell plugin capability for the managed loopback Harness WebView. It receives only the event/drag core primitives required by the injected shell plus the explicit HarnessDock host bridge commands.",
+  "description": "v0.2.0 Harness Shell plugin capability for the managed IPv4 loopback Harness WebView. The desktop Runtime is launched on 127.0.0.1, so the privileged shell bridge is intentionally not exposed to broader loopback or IPv6 origins.",
   "local": false,
   "platforms": ["linux", "macOS", "windows"],
   "remote": {
@@ -10,14 +10,10 @@
       "http://127.0.0.1:*",
       "http://localhost:*/*",
       "http://localhost:*",
-      "http://[::1]:*/*",
-      "http://[::1]:*",
       "https://127.0.0.1:*/*",
       "https://127.0.0.1:*",
       "https://localhost:*/*",
-      "https://localhost:*",
-      "https://[::1]:*/*",
-      "https://[::1]:*"
+      "https://localhost:*"
     ]
   },
   "windows": ["harness"],
