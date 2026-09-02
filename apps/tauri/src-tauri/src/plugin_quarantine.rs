@@ -46,6 +46,30 @@ pub(crate) fn read(path: &Path, dsh_version: &str) -> Option<PluginQuarantineRec
     Some(record)
 }
 
+fn commit_replace(tmp: &Path, path: &Path) -> Result<(), String> {
+    match fs::rename(tmp, path) {
+        Ok(()) => Ok(()),
+        Err(first_error) if path.exists() => {
+            // POSIX rename replaces an existing destination atomically, while
+            // Windows commonly rejects that form. Retry through an explicit
+            // destination removal only when an existing target is the reason
+            // the direct atomic path could not be used.
+            fs::remove_file(path).map_err(|error| {
+                let _ = fs::remove_file(tmp);
+                format!("无法替换旧的插件隔离状态: {error}; initial rename: {first_error}")
+            })?;
+            fs::rename(tmp, path).map_err(|error| {
+                let _ = fs::remove_file(tmp);
+                format!("无法提交新的插件隔离状态: {error}; initial rename: {first_error}")
+            })
+        }
+        Err(error) => {
+            let _ = fs::remove_file(tmp);
+            Err(format!("无法提交插件隔离状态: {error}"))
+        }
+    }
+}
+
 pub(crate) fn write(
     path: &Path,
     dsh_version: &str,
@@ -75,10 +99,7 @@ pub(crate) fn write(
     let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
     let bytes = serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?;
     fs::write(&tmp, bytes).map_err(|error| format!("无法写入插件隔离临时文件: {error}"))?;
-    fs::rename(&tmp, path).map_err(|error| {
-        let _ = fs::remove_file(&tmp);
-        format!("无法提交插件隔离状态: {error}")
-    })?;
+    commit_replace(&tmp, path)?;
     Ok(record)
 }
 
@@ -94,9 +115,17 @@ pub(crate) fn clear(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn test_root(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "harnessdock-quarantine-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
     #[test]
     fn version_mismatch_invalidates_quarantine() {
-        let root = std::env::temp_dir().join(format!("harnessdock-quarantine-test-{}", std::process::id()));
+        let root = test_root("version");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let file = root.join("plugin-quarantine.json");
@@ -109,6 +138,33 @@ mod tests {
         ).unwrap();
         assert!(read(&file, "new").is_none());
         assert!(!file.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn newer_quarantine_replaces_existing_record() {
+        let root = test_root("replace");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        write(
+            &file,
+            "same",
+            vec!["plugin-a".into()],
+            vec!["plugin-a".into()],
+            "diagnostic-match",
+        ).unwrap();
+        let second = write(
+            &file,
+            "same",
+            vec!["plugin-b".into()],
+            vec!["plugin-b".into()],
+            "ambiguous",
+        ).unwrap();
+        let persisted = read(&file, "same").expect("replacement quarantine should be readable");
+        assert_eq!(persisted.isolated_plugins, vec!["plugin-b"]);
+        assert_eq!(persisted.reason, "ambiguous");
+        assert_eq!(persisted, second);
         let _ = fs::remove_dir_all(root);
     }
 }
