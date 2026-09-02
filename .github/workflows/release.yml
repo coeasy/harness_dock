@@ -187,7 +187,7 @@ jobs:
           test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 20
           ls -lh release-assets
 
-      - name: Publish or replace validated HarnessDock release
+      - name: Publish validated HarnessDock release
         if: steps.release.outputs.publish == 'true'
         shell: bash
         env:
@@ -206,14 +206,22 @@ jobs:
             existing_tag_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha')"
           fi
 
-          if [ -n "$existing_tag_sha" ]; then
-            echo "Replacing validated ${RELEASE_TAG}: ${existing_tag_sha} -> ${RELEASE_SHA}"
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" \
-              -f sha="$RELEASE_SHA" -F force=true >/dev/null
-          else
+          # A published version is an immutable identity. Re-running the exact
+          # same candidate is idempotent (assets/notes may be repaired), but a
+          # same-version candidate from a different commit must never move the
+          # tag: updater signatures, SHA256SUMS and audit history all bind the
+          # version to the original source commit.
+          if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$RELEASE_SHA" ]; then
+            echo "release tag ${RELEASE_TAG} already points to ${existing_tag_sha}; refusing to move it to ${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
+          if [ -z "$existing_tag_sha" ]; then
             echo "Creating validated ${RELEASE_TAG} at ${RELEASE_SHA}"
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
               -f ref="refs/tags/${RELEASE_TAG}" -f sha="$RELEASE_SHA" >/dev/null
+          else
+            echo "Validated ${RELEASE_TAG} already points to ${RELEASE_SHA}; keeping tag immutable"
           fi
 
           if [ -n "$existing_release_id" ]; then
@@ -277,8 +285,7 @@ jobs:
           fi
 
           # Never append the marker to a newer main branch. The release tag is
-          # immutable in meaning even though the workflow can replace a
-          # previously validated tag, so the marker must be a fast-forward from
+          # immutable in meaning, and the marker must be a fast-forward from
           # the exact candidate SHA that was published.
           main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
           test "$main_sha" = "$RELEASE_SHA" || {
