@@ -54,4 +54,14 @@ describe('Tauri shell fail-open guarantees', () => {
     expect(shell).toContain("window.addEventListener('pagehide'")
     expect(shellBundle).toBe(shell)
   })
+
+  it('uses the packaged Node by default and requires an explicit system-Node opt-in', () => {
+    const platform = read('apps/tauri/src-tauri/src/platform.rs')
+    expect(platform).toContain('HARNESSDOCK_NODE_BIN')
+    expect(platform).toContain('HARNESSDOCK_USE_SYSTEM_NODE')
+    expect(platform).toContain('Some("1")')
+    expect(platform).not.toContain('Some("0")')
+    expect(platform).toContain('(bundled.to_path_buf(), "bundled")')
+    expect(platform).toContain('Invalid or incompatible overrides fail closed to the bundled Node')
+  })
 })
