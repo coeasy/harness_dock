@@ -188,7 +188,25 @@ fn dsh_path(root: &Path) -> PathBuf {
 fn work_dir() -> Result<PathBuf, String> {
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos();
     let dir = std::env::temp_dir().join(format!("harnessdock-tauri-{}-{nonce}", std::process::id()));
-    fs::create_dir_all(&dir).map_err(|error| format!("无法创建 Runtime 临时目录: {error}"))?;
+
+    // ready.json can contain the reusable launch token and the directory also
+    // stores Runtime stdout/stderr and generated plugin patches. Never reuse a
+    // pre-existing path. On Unix create the directory with 0700 atomically so
+    // access control does not depend on the caller's umask even for a brief
+    // interval between creation and chmod.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder
+            .create(&dir)
+            .map_err(|error| format!("无法创建私有 Runtime 临时目录: {error}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(&dir).map_err(|error| format!("无法创建 Runtime 临时目录: {error}"))?;
+    }
     Ok(dir)
 }
 
@@ -330,21 +348,19 @@ fn validated_ready(raw: &str, expected_version: &str, expected_pid: u32) -> Resu
     if ready.dsh_version != expected_version {
         return Err(format!("Runtime 版本不一致: expected {expected_version}, got {}", ready.dsh_version));
     }
-    if !ready.host.eq_ignore_ascii_case("127.0.0.1")
-        && !ready.host.eq_ignore_ascii_case("::1")
-        && !ready.host.eq_ignore_ascii_case("localhost")
-    {
-        return Err(format!("Runtime 返回了非 loopback host: {}", ready.host));
+    // HarnessDock starts dsh with an explicit `--host 127.0.0.1`. Accepting
+    // another loopback address here would let native state report ready while
+    // the privileged Harness WebView capability is scoped to a different host.
+    if ready.host != "127.0.0.1" {
+        return Err(format!("Runtime 返回了非受管 host: expected 127.0.0.1, got {}", ready.host));
     }
     if ready.port == 0 || ready.pid == 0 || ready.pid != expected_pid {
         return Err("Runtime ready.json 缺少有效端口或 PID。".into());
     }
     let app_url = Url::parse(&ready.url).map_err(|_| "Runtime 返回了无效 Web URL。".to_string())?;
     let host = app_url.host_str().ok_or_else(|| "Runtime Web URL 缺少主机名。".to_string())?;
-    let loopback = host.eq_ignore_ascii_case("localhost")
-        || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false);
-    if !loopback || (app_url.scheme() != "http" && app_url.scheme() != "https") {
-        return Err("Runtime Web URL 必须使用 loopback HTTP(S)。".into());
+    if host != "127.0.0.1" || (app_url.scheme() != "http" && app_url.scheme() != "https") {
+        return Err("Runtime Web URL 必须使用受管的 127.0.0.1 HTTP(S) 地址。".into());
     }
     if !app_url.username().is_empty() || app_url.password().is_some() {
         return Err("Runtime Web URL 不能包含用户名或密码。".into());
@@ -1323,6 +1339,16 @@ mod tests {
         let raw = r#"{"url":"http://127.0.0.1:43123/?token=launch","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
         assert!(validated_ready(raw, "0.1.2-alpha.1", 41).is_err());
         assert!(validated_ready(raw, "0.1.2-alpha.1", 42).is_ok());
+    }
+
+    #[test]
+    fn ready_file_must_match_the_managed_ipv4_loopback_contract() {
+        let ipv6 = r#"{"url":"http://[::1]:43123/?token=launch","host":"::1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
+        let alternate_loopback = r#"{"url":"http://127.0.0.2:43123/?token=launch","host":"127.0.0.2","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
+        let localhost_alias = r#"{"url":"http://localhost:43123/?token=launch","host":"localhost","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
+        assert!(validated_ready(ipv6, "0.1.2-alpha.1", 42).is_err());
+        assert!(validated_ready(alternate_loopback, "0.1.2-alpha.1", 42).is_err());
+        assert!(validated_ready(localhost_alias, "0.1.2-alpha.1", 42).is_err());
     }
 
     #[test]
