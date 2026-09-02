@@ -124,8 +124,9 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         .text("shell-restart-web", "重启并刷新 Harness Web")
         .text("shell-safe-mode", "隔离插件启动")
         .text("shell-clear-quarantine", "清除插件隔离并重启")
-        .text("shell-update", "自动更新")
+        .text("shell-gateway", "移动设备 / Gateway")
         .text("shell-settings", "插件诊断")
+        .text("shell-update", "自动更新")
         .build()
         .map_err(|error| format!("无法创建 HarnessDock 菜单项: {error}"))?;
     let menu = MenuBuilder::new(app)
@@ -161,6 +162,11 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
                         report_shell_error(&report_handle, &error);
                     }
                 });
+            }
+            "shell-gateway" => {
+                if let Err(error) = harness_window::control_show(app_handle.clone()) {
+                    report_shell_error(app_handle, &error);
+                }
             }
             "shell-settings" => {
                 let handle = app_handle.clone();
@@ -222,8 +228,8 @@ pub fn run() {
                     eprintln!("HarnessDock updater plugin unavailable; continuing without automatic install: {error}");
                 }
                 // Startup is native-owned. The hidden `main` page is only a
-                // recovery surface and must not be responsible for opening
-                // the first user-visible WebView.
+                // recovery/secondary control surface and must not be responsible
+                // for opening the first user-visible WebView.
                 startup::spawn(app.handle().clone());
             }
             Ok(())
