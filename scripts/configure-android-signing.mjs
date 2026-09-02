@@ -10,8 +10,9 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const androidRoot = path.join(repoRoot, 'apps', 'tauri', 'src-tauri', 'gen', 'android')
 const gradlePath = path.join(androidRoot, 'app', 'build.gradle.kts')
 const propertiesPath = path.join(androidRoot, 'keystore.properties')
@@ -32,13 +33,18 @@ if (!existsSync(gradlePath)) {
   throw new Error(`generated Android Gradle file is missing: ${gradlePath}; run tauri android init first`)
 }
 
-let keystore
-try {
-  keystore = Buffer.from(keyBase64.replace(/\s+/g, ''), 'base64')
-} catch (error) {
-  throw new Error(`ANDROID_KEY_BASE64 is not valid base64: ${error}`)
+const normalizedBase64 = keyBase64.replace(/\s+/g, '')
+if (
+  normalizedBase64.length % 4 !== 0
+  || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalizedBase64)
+) {
+  throw new Error('ANDROID_KEY_BASE64 is not valid canonical base64')
 }
-if (keystore.length < 128) throw new Error('ANDROID_KEY_BASE64 decoded to an unexpectedly small keystore')
+const keystore = Buffer.from(normalizedBase64, 'base64')
+const roundTrip = keystore.toString('base64').replace(/=+$/, '')
+if (roundTrip !== normalizedBase64.replace(/=+$/, '') || keystore.length < 128) {
+  throw new Error('ANDROID_KEY_BASE64 did not decode to a valid-sized canonical keystore payload')
+}
 writeFileSync(keystorePath, keystore, { mode: 0o600 })
 try { chmodSync(keystorePath, 0o600) } catch {}
 
