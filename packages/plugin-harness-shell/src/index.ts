@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 export const name = 'harness-shell'
 export const inject: readonly string[] = []
-export const version = '0.2.9' as const
+export const version = '0.2.0' as const
 export const apiVersion = 1 as const
 
 export interface HarnessShellService {
