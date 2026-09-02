@@ -27,14 +27,16 @@ var service = {
 };
 function apply(ctx = {}) {
   const register = ctx.provide ?? ctx.set;
-  register?.("harnessShell", service);
+  try {
+    register?.("harnessShell", service);
+  } catch {
+  }
   const readyFile = process.env.DSH_SHELL_PLUGIN_READY_FILE;
   if (!readyFile) return;
   try {
     writeFileSync(
       readyFile,
-      `${JSON.stringify({ pluginId: name, version, apiVersion, pid: process.pid })}
-`,
+      `${JSON.stringify({ pluginId: name, version, apiVersion, pid: process.pid })}\n`,
       { encoding: "utf8", mode: 384 }
     );
   } catch {
