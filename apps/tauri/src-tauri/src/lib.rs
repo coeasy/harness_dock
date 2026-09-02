@@ -200,11 +200,19 @@ pub fn run() {
         .setup(|app| {
             #[cfg(not(mobile))]
             {
-                // Create both entry points before Runtime boot. A Runtime or
-                // plugin failure must never remove the user's exit path.
-                tray::create_tray(&app.handle())?;
-                app.handle()
-                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                // Tray, updater integration and native menus are optional shell
+                // enhancements. None of them may block the mandatory Runtime ->
+                // Harness Web startup path when a desktop environment does not
+                // support the feature or its initialization fails.
+                if let Err(error) = tray::create_tray(&app.handle()) {
+                    eprintln!("HarnessDock tray unavailable; continuing without tray: {error}");
+                }
+                if let Err(error) = app
+                    .handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())
+                {
+                    eprintln!("HarnessDock updater plugin unavailable; continuing without automatic install: {error}");
+                }
                 // Startup is native-owned. The hidden `main` page is only a
                 // recovery surface and must not be responsible for opening
                 // the first user-visible WebView.
@@ -248,7 +256,9 @@ pub fn run() {
         .expect("failed to build HarnessDock Tauri application");
 
     #[cfg(not(mobile))]
-    install_shell_menu(&mut app).expect("failed to install HarnessDock shell settings menu");
+    if let Err(error) = install_shell_menu(&mut app) {
+        eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
+    }
 
     app.run(|app_handle, event| {
         match event {
