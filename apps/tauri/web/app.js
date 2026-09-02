@@ -14,8 +14,13 @@
   let desktopStartup
 
   function showRecoveryCards() {
+    // A normal desktop user should never land in a mixed Runtime/Gateway
+    // administration screen just because Harness Web failed to start. Keep
+    // startup recovery focused on the broken local Runtime; the Gateway card
+    // is exposed only from the explicit secondary control entry in healthy
+    // desktop sessions.
     $('desktop-card')?.classList.remove('hidden')
-    $('gateway-host-card')?.classList.remove('hidden')
+    $('gateway-host-card')?.classList.add('hidden')
   }
 
   // The native startup coordinator calls this when Runtime or Harness Web
@@ -187,6 +192,18 @@
     return desktopStartup
   }
 
+  async function refreshVisibleControl() {
+    const runtimeVisible = !$('desktop-card')?.classList.contains('hidden')
+    const gatewayVisible = !$('gateway-host-card')?.classList.contains('hidden')
+    if (!runtimeVisible && !gatewayVisible) return
+    try {
+      await refreshRuntime()
+      if (gatewayVisible) await refreshGatewayHost()
+    } catch (error) {
+      status(runtimeVisible ? runtimeDetail : hostDetail, String(error), true)
+    }
+  }
+
   async function boot() {
     try {
       void splashStatus('正在初始化客户端…')
@@ -202,10 +219,12 @@
         return
       }
       if (platform.runtimeMode === 'local') {
-        // Native startup owns the normal desktop path. This page stays passive
-        // while hidden and is revealed only if native startup needs recovery.
+        // Native startup owns the normal desktop path. The control window stays
+        // hidden during normal launch, but its secondary Mobile Gateway card is
+        // ready when the user explicitly opens this window from Shell/Tray.
+        $('gateway-host-card')?.classList.remove('hidden')
         void splashStatus('正在准备本地 Runtime…')
-        bootStatus('正在准备本地 Runtime，稍后直接打开 Harness Web…')
+        bootStatus('Harness Web 为主界面；此控制页仅在需要管理移动设备时打开。', 'ready')
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')
         $('mobile-remote-card').classList.remove('hidden')
@@ -388,6 +407,10 @@
       status(gatewayDetail, String(error), true)
       $('gateway-pair').disabled = false
     }
+  })
+
+  window.addEventListener('focus', () => {
+    void refreshVisibleControl()
   })
 
   void boot()
