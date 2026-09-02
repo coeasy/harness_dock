@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering as VersionOrdering;
 
 #[cfg(not(mobile))]
 use std::time::Duration;
@@ -58,26 +59,115 @@ fn normalized_version(value: &str) -> String {
     value.trim().trim_start_matches('v').to_ascii_lowercase()
 }
 
-fn version_tuple(value: &str) -> Option<(u64, u64, u64)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PrereleaseIdentifier {
+    Numeric(u64),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SemanticVersion {
+    core: (u64, u64, u64),
+    prerelease: Vec<PrereleaseIdentifier>,
+}
+
+fn parse_numeric_identifier(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if value.len() > 1 && value.starts_with('0') {
+        return None;
+    }
+    value.parse().ok()
+}
+
+fn semantic_version(value: &str) -> Option<SemanticVersion> {
     let normalized = normalized_version(value);
-    let core = normalized.split('-').next()?;
+    if normalized.is_empty() {
+        return None;
+    }
+    let without_build = normalized.split_once('+').map(|(version, _)| version).unwrap_or(&normalized);
+    let (core, prerelease_raw) = without_build
+        .split_once('-')
+        .map(|(core, prerelease)| (core, Some(prerelease)))
+        .unwrap_or((without_build, None));
     let mut parts = core.split('.');
-    let tuple = (
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-    );
+    let major = parse_numeric_identifier(parts.next()?)?;
+    let minor = parse_numeric_identifier(parts.next()?)?;
+    let patch = parse_numeric_identifier(parts.next()?)?;
     if parts.next().is_some() {
         return None;
     }
-    Some(tuple)
+
+    let prerelease = match prerelease_raw {
+        None => Vec::new(),
+        Some(raw) => {
+            if raw.is_empty() {
+                return None;
+            }
+            let mut identifiers = Vec::new();
+            for value in raw.split('.') {
+                if value.is_empty()
+                    || !value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                {
+                    return None;
+                }
+                if value.bytes().all(|byte| byte.is_ascii_digit()) {
+                    identifiers.push(PrereleaseIdentifier::Numeric(parse_numeric_identifier(value)?));
+                } else {
+                    identifiers.push(PrereleaseIdentifier::Text(value.to_string()));
+                }
+            }
+            identifiers
+        }
+    };
+
+    Some(SemanticVersion {
+        core: (major, minor, patch),
+        prerelease,
+    })
 }
 
-fn is_newer(latest: &str, current: &str) -> bool {
-    match (version_tuple(latest), version_tuple(current)) {
-        (Some(latest), Some(current)) => latest > current,
-        _ => normalized_version(latest) != normalized_version(current),
+fn compare_prerelease(left: &[PrereleaseIdentifier], right: &[PrereleaseIdentifier]) -> VersionOrdering {
+    if left.is_empty() && right.is_empty() {
+        return VersionOrdering::Equal;
     }
+    if left.is_empty() {
+        return VersionOrdering::Greater;
+    }
+    if right.is_empty() {
+        return VersionOrdering::Less;
+    }
+
+    for (left, right) in left.iter().zip(right.iter()) {
+        let ordering = match (left, right) {
+            (PrereleaseIdentifier::Numeric(left), PrereleaseIdentifier::Numeric(right)) => left.cmp(right),
+            (PrereleaseIdentifier::Numeric(_), PrereleaseIdentifier::Text(_)) => VersionOrdering::Less,
+            (PrereleaseIdentifier::Text(_), PrereleaseIdentifier::Numeric(_)) => VersionOrdering::Greater,
+            (PrereleaseIdentifier::Text(left), PrereleaseIdentifier::Text(right)) => left.cmp(right),
+        };
+        if ordering != VersionOrdering::Equal {
+            return ordering;
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
+fn compare_versions(left: &SemanticVersion, right: &SemanticVersion) -> VersionOrdering {
+    match left.core.cmp(&right.core) {
+        VersionOrdering::Equal => compare_prerelease(&left.prerelease, &right.prerelease),
+        ordering => ordering,
+    }
+}
+
+fn is_newer(latest: &str, current: &str) -> Result<bool, String> {
+    let latest = semantic_version(latest)
+        .ok_or_else(|| "更新服务返回了无效的 HarnessDock 版本号，已拒绝。".to_string())?;
+    let current = semantic_version(current)
+        .ok_or_else(|| "当前 HarnessDock 版本号无效，无法安全判断更新。".to_string())?;
+    Ok(compare_versions(&latest, &current) == VersionOrdering::Greater)
 }
 
 #[tauri::command]
@@ -118,11 +208,13 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
     }
 
     let latest_version = release.tag_name.trim_start_matches('v').trim().to_string();
-    if version_tuple(&latest_version).is_none() {
-        return Err("更新服务返回了无效的 HarnessDock 版本号，已拒绝。".into());
+    let parsed_latest = semantic_version(&latest_version)
+        .ok_or_else(|| "更新服务返回了无效的 HarnessDock 版本号，已拒绝。".to_string())?;
+    if !parsed_latest.prerelease.is_empty() {
+        return Err("GitHub 稳定 Release 使用了预发布版本号，已拒绝自动更新。".into());
     }
     Ok(UpdateInfo {
-        available: is_newer(&latest_version, &current_version),
+        available: is_newer(&latest_version, &current_version)?,
         current_version,
         latest_version,
         release_url: release.html_url,
@@ -265,5 +357,37 @@ pub async fn update_install(
         crate::stop_managed_processes(&app);
         crate::wait_for_managed_processes(app.clone()).await;
         app.restart();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semver_stable_release_supersedes_same_core_prerelease() {
+        assert!(is_newer("0.2.0", "0.2.0-beta.1").unwrap());
+        assert!(!is_newer("0.2.0-beta.1", "0.2.0").unwrap());
+    }
+
+    #[test]
+    fn semver_numeric_and_text_prerelease_identifiers_follow_precedence() {
+        assert!(is_newer("0.2.0-beta.11", "0.2.0-beta.2").unwrap());
+        assert!(is_newer("0.2.0-beta", "0.2.0-2").unwrap());
+        assert!(is_newer("0.2.0-beta.2", "0.2.0-beta").unwrap());
+    }
+
+    #[test]
+    fn semver_build_metadata_does_not_change_update_precedence() {
+        assert!(!is_newer("0.2.0+release.2", "0.2.0+release.1").unwrap());
+        assert!(is_newer("0.2.10", "0.2.9").unwrap());
+    }
+
+    #[test]
+    fn semver_parser_rejects_invalid_or_ambiguous_versions() {
+        assert!(semantic_version("0.2").is_none());
+        assert!(semantic_version("0.2.00").is_none());
+        assert!(semantic_version("0.2.0-beta.01").is_none());
+        assert!(semantic_version("release-0.2.0").is_none());
     }
 }
