@@ -10,6 +10,7 @@ const readJson = (relative: string) => JSON.parse(read(relative))
 describe('Tauri shell fail-open guarantees', () => {
   it('never lets optional tray, updater or native-menu setup block Harness Web startup', () => {
     const host = read('apps/tauri/src-tauri/src/lib.rs')
+    const tray = read('apps/tauri/src-tauri/src/tray.rs')
     expect(host).toContain('match tray::create_tray(&app.handle())')
     expect(host).toContain('tray_available')
     expect(host).toContain('continuing without automatic install')
@@ -18,6 +19,8 @@ describe('Tauri shell fail-open guarantees', () => {
     expect(host).not.toContain('install_shell_menu(&mut app).expect')
     expect(host).toContain('if !tray_available')
     expect(host).toContain('request_exit(app_handle)')
+    expect(tray).not.toContain('default_window_icon().unwrap()')
+    expect(tray).toContain('if let Some(icon) = app.default_window_icon()')
   })
 
   it('keeps the managed remote Harness IPC surface minimal and loopback-complete', () => {
