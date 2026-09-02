@@ -73,7 +73,12 @@ function verifyApkSignature(file, failures) {
 
 function verifyAabSignature(file, failures) {
   try {
-    const output = commandOutput('jarsigner', ['-verify', '-strict', '-verbose', '-certs', file])
+    // Android upload keys are normally self-signed. `jarsigner -strict` also
+    // treats certificate-chain trust warnings as a non-zero exit even when the
+    // archive signature itself is completely valid. For release gating we need
+    // cryptographic archive integrity plus a non-debug signer, not public-CA
+    // trust of the developer upload certificate.
+    const output = commandOutput('jarsigner', ['-verify', '-verbose', '-certs', file])
     if (!/jar verified\./i.test(output)) {
       failures.push('AAB 未通过 JAR/上传密钥签名验证')
       return
