@@ -28,7 +28,7 @@ pub(crate) struct AppState {
     pub(crate) startup_recovery_error: Mutex<Option<String>>,
     pub(crate) settings_opening: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
-    pub(crate) gateway_starting: AtomicBool,
+    pub(crate) gateway_starting: Arc<AtomicBool>,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: Arc<AtomicBool>,
 }
@@ -46,7 +46,7 @@ impl Default for AppState {
             startup_recovery_error: Mutex::new(None),
             settings_opening: AtomicBool::new(false),
             gateway: Mutex::new(None),
-            gateway_starting: AtomicBool::new(false),
+            gateway_starting: Arc::new(AtomicBool::new(false)),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: Arc::new(AtomicBool::new(false)),
         }

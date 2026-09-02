@@ -197,9 +197,6 @@ pub async fn update_install(
                 format!("无法配置安全更新服务: {error}")
             })?
             .timeout(Duration::from_secs(30))
-            // The host owns Runtime/Gateway teardown and must not be restarted
-            // by the updater before the explicit cleanup below has completed.
-            .restart_after_install(false)
             .on_before_exit({
                 let shutdown_app = app.clone();
                 move || crate::stop_managed_processes(&shutdown_app)

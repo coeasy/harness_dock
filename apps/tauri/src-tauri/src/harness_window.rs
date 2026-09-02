@@ -315,7 +315,8 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         let runtime_url = validated_runtime_url(&url)?;
-        let state = app.state::<crate::AppState>();
+        let state_app = app.clone();
+        let state = state_app.state::<crate::AppState>();
         let current = crate::runtime::status_snapshot(&*state);
         let expected = current
             .app_url
@@ -496,7 +497,8 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
 
     #[cfg(not(mobile))]
     {
-        let state = app.state::<crate::AppState>();
+        let state_app = app.clone();
+        let state = state_app.state::<crate::AppState>();
         if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
             return Err("HarnessDock 正在退出，已拒绝 Web 刷新。".into());
         }
@@ -651,7 +653,8 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
         {
             return Err("HarnessDock 正在退出，已拒绝 Web 重启。".into());
         }
-        let state = app.state::<crate::AppState>();
+        let state_app = app.clone();
+        let state = state_app.state::<crate::AppState>();
         if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }
@@ -753,7 +756,8 @@ pub async fn harness_clear_quarantine_restart(
         {
             return Err("HarnessDock 正在退出，已拒绝插件隔离恢复。".into());
         }
-        let state = app.state::<crate::AppState>();
+        let state_app = app.clone();
+        let state = state_app.state::<crate::AppState>();
         if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }

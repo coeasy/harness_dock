@@ -131,19 +131,20 @@ fn gateway_ready_snapshot(state: &State<'_, AppState>) -> Result<Option<GatewayR
     Ok(guard.as_ref().map(|process| process.ready.clone()))
 }
 
-struct GatewayStartGuard<'a>(&'a std::sync::atomic::AtomicBool);
+struct GatewayStartGuard(Arc<std::sync::atomic::AtomicBool>);
 
-impl Drop for GatewayStartGuard<'_> {
+impl Drop for GatewayStartGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
 }
 
-fn claim_gateway_start(state: &State<'_, AppState>) -> Result<GatewayStartGuard<'_>, String> {
-    if state.gateway_starting.swap(true, Ordering::AcqRel) {
+fn claim_gateway_start(state: &State<'_, AppState>) -> Result<GatewayStartGuard, String> {
+    let starting = Arc::clone(&state.gateway_starting);
+    if starting.swap(true, Ordering::AcqRel) {
         return Err("Gateway 正在处理另一个启动操作，请稍候再试。".into());
     }
-    let claim = GatewayStartGuard(&state.gateway_starting);
+    let claim = GatewayStartGuard(starting);
     if state.quitting.load(Ordering::Acquire)
         || state.runtime_restarting.load(Ordering::Acquire)
         || state.runtime_stopping.load(Ordering::Acquire)
@@ -552,7 +553,7 @@ pub async fn gateway_host_revoke(
     device_id: String,
 ) -> Result<bool, String> {
     let ready = required_gateway_ready(&state)?;
-    match admin_json(&ready, "revoke", Some(json!({ "deviceId": device_id }))).await {
+    match admin_json::<RevokeResponse>(&ready, "revoke", Some(json!({ "deviceId": device_id }))).await {
         Ok(response) => Ok(response.revoked),
         Err(error) => {
             stop_managed_if_matches(&state.gateway, &ready);
@@ -564,7 +565,7 @@ pub async fn gateway_host_revoke(
 #[tauri::command]
 pub async fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize, String> {
     let ready = required_gateway_ready(&state)?;
-    match admin_json(&ready, "revoke-all", Some(json!({}))).await {
+    match admin_json::<RevokeAllResponse>(&ready, "revoke-all", Some(json!({}))).await {
         Ok(response) => Ok(response.revoked),
         Err(error) => {
             stop_managed_if_matches(&state.gateway, &ready);
