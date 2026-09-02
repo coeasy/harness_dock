@@ -89,7 +89,9 @@
     status(runtimeDetail, runtimeDetailText(currentRuntime))
     $('runtime-open').disabled = !currentRuntime.appUrl
     $('shell-open-harness').disabled = !currentRuntime.appUrl
-    $('gateway-host-start').disabled = !currentRuntime.appUrl
+    if (!$('gateway-host-state')?.textContent?.includes('ready')) {
+      $('gateway-host-start').disabled = !currentRuntime.appUrl
+    }
     return currentRuntime
   }
 
@@ -118,6 +120,8 @@
       revoke.className = 'danger'
       revoke.textContent = '撤销'
       revoke.addEventListener('click', async () => {
+        const label = device.name || device.id
+        if (!window.confirm(`确认撤销设备“${label}”的 Gateway 会话？该设备需要重新配对才能连接。`)) return
         revoke.disabled = true
         try {
           await call('gateway_host_revoke', { deviceId: device.id })
@@ -139,6 +143,10 @@
     $('gateway-create-pairing').disabled = !current.running
     $('gateway-revoke-all').disabled = !current.running || !current.devices?.length
     $('gateway-host-stop').disabled = !current.running
+    $('gateway-host-start').disabled = current.running || !currentRuntime?.appUrl
+    $('gateway-public-url').disabled = current.running
+    $('gateway-local-port').disabled = current.running
+    if (!current.running) $('host-pairing').textContent = ''
     renderDevices(current.devices)
     return current
   }
@@ -299,21 +307,29 @@
   })
 
   $('gateway-host-start').addEventListener('click', async () => {
+    const portInput = $('gateway-local-port')
+    const publicInput = $('gateway-public-url')
+    if (!portInput.reportValidity() || !publicInput.reportValidity()) return
     $('gateway-host-start').disabled = true
     status(hostDetail, '正在启动受控 Mobile Gateway…')
+    let started = false
     try {
-      const rawPort = Number($('gateway-local-port').value)
-      const publicUrl = $('gateway-public-url').value.trim()
+      const rawPort = Number(portInput.value)
+      const publicUrl = publicInput.value.trim()
       await call('gateway_host_start', {
         publicUrl: publicUrl || null,
         localPort: Number.isInteger(rawPort) ? rawPort : 43137,
       })
       await refreshGatewayHost()
+      started = true
     } catch (error) {
       hostState.textContent = 'error'
       status(hostDetail, String(error), true)
     } finally {
-      $('gateway-host-start').disabled = false
+      // Do not undo refreshGatewayHost's running-state lock. The old logic
+      // unconditionally re-enabled Start after a successful launch, making an
+      // already-running Gateway look restartable with edited settings.
+      if (!started) $('gateway-host-start').disabled = !currentRuntime?.appUrl
     }
   })
 
@@ -363,6 +379,7 @@
   })
 
   $('gateway-revoke-all').addEventListener('click', async () => {
+    if (!window.confirm('确认撤销全部已配对设备？所有设备都需要重新配对后才能再次连接。')) return
     $('gateway-revoke-all').disabled = true
     try {
       const count = await call('gateway_host_revoke_all')
