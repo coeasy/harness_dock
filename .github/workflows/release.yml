@@ -123,11 +123,14 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           set -euo pipefail
 
           version="$(node -p "require('./package.json').version")"
           runtime_version="$(node -p "require('./packages/docs-sync/origin.json').dshVersion")"
+          source_date_epoch="$(git show -s --format=%ct "$RELEASE_SHA")"
+          updater_pub_date="$(git show -s --format=%cI "$RELEASE_SHA")"
 
           copy_one() {
             local root="$1"
@@ -164,6 +167,7 @@ jobs:
             local target="$2"
             local root="release-input/tauri-runtime-${artifact}"
             local manifest="$root/manifest.json"
+            local output="release-assets/HarnessDock-runtime-${runtime_version}-${target}.tar.gz"
             test -s "$manifest" || {
               echo "missing runtime root manifest for $artifact: $manifest" >&2
               exit 1
@@ -171,8 +175,15 @@ jobs:
             if [ "$target" != 'win32-x64' ]; then
               chmod 755 "$root/bin/node"
             fi
-            tar -C "$root" -czf "release-assets/HarnessDock-runtime-${runtime_version}-${target}.tar.gz" .
-            test -s "release-assets/HarnessDock-runtime-${runtime_version}-${target}.tar.gz"
+            # Release assembly runs on Linux. Normalize archive ordering,
+            # ownership and timestamps and suppress the gzip timestamp so an
+            # exact candidate run can be verified byte-for-byte on retry.
+            tar --sort=name \
+              --mtime="@${source_date_epoch}" \
+              --owner=0 --group=0 --numeric-owner \
+              -C "$root" -cf - . \
+              | gzip -n -9 > "$output"
+            test -s "$output"
           }
 
           pack_runtime win-x64 win32-x64
@@ -180,7 +191,7 @@ jobs:
           pack_runtime mac-x64 darwin-x64
           pack_runtime mac-arm64 darwin-arm64
 
-          node scripts/generate-tauri-updater-manifest.mjs release-assets "$RELEASE_TAG"
+          TAURI_UPDATER_PUB_DATE="$updater_pub_date" node scripts/generate-tauri-updater-manifest.mjs release-assets "$RELEASE_TAG"
           test -s release-assets/latest.json
           sha256sum release-assets/* > release-assets/SHA256SUMS
           test -s release-assets/SHA256SUMS
@@ -197,6 +208,7 @@ jobs:
           set -euo pipefail
 
           existing_release_id=""
+          release_json=""
           if release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>/dev/null)"; then
             existing_release_id="$(printf '%s' "$release_json" | jq -r '.id')"
           fi
@@ -207,10 +219,9 @@ jobs:
           fi
 
           # A published version is an immutable identity. Re-running the exact
-          # same candidate is idempotent (assets/notes may be repaired), but a
-          # same-version candidate from a different commit must never move the
-          # tag: updater signatures, SHA256SUMS and audit history all bind the
-          # version to the original source commit.
+          # same candidate is idempotent, but a same-version candidate from a
+          # different commit must never move the tag: updater signatures,
+          # SHA256SUMS and audit history bind the version to the original SHA.
           if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$RELEASE_SHA" ]; then
             echo "release tag ${RELEASE_TAG} already points to ${existing_tag_sha}; refusing to move it to ${RELEASE_SHA}" >&2
             exit 1
@@ -225,7 +236,41 @@ jobs:
           fi
 
           if [ -n "$existing_release_id" ]; then
-            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            # Never clobber an already published signed asset. Missing files can
+            # be repaired from the exact candidate run, but an existing file
+            # must be byte-identical. Prefer GitHub's SHA-256 digest when
+            # available; older assets fall back to an authenticated download.
+            compare_dir="$(mktemp -d)"
+            trap 'rm -rf "$compare_dir"' EXIT
+            for local_asset in release-assets/*; do
+              asset_name="$(basename "$local_asset")"
+              asset_id="$(printf '%s' "$release_json" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .id' | head -1)"
+              if [ -z "$asset_id" ]; then
+                echo "Uploading missing immutable release asset: $asset_name"
+                gh release upload "$RELEASE_TAG" "$local_asset"
+                continue
+              fi
+
+              local_sha="$(sha256sum "$local_asset" | awk '{print $1}')"
+              remote_digest="$(printf '%s' "$release_json" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest // empty' | head -1)"
+              if [ -n "$remote_digest" ]; then
+                test "$remote_digest" = "sha256:${local_sha}" || {
+                  echo "published asset differs from exact candidate: ${asset_name} remote=${remote_digest} local=sha256:${local_sha}" >&2
+                  exit 1
+                }
+              else
+                remote_asset="$compare_dir/$asset_name"
+                gh api -H 'Accept: application/octet-stream' \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$remote_asset"
+                remote_sha="$(sha256sum "$remote_asset" | awk '{print $1}')"
+                test "$remote_sha" = "$local_sha" || {
+                  echo "published asset differs from exact candidate: ${asset_name} remote=sha256:${remote_sha} local=sha256:${local_sha}" >&2
+                  exit 1
+                }
+              fi
+              echo "Immutable release asset matches: $asset_name"
+            done
+
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
               -f target_commitish="$RELEASE_SHA" \
               -f name="HarnessDock ${RELEASE_TAG}" \
