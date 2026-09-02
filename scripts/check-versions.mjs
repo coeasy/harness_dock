@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
- * Check that every version-bearing product artifact matches the repo root
- * package.json version (single source of truth for the current release train).
- * Exit 0 and print "all versions match: <version>" on success, exit 1 and
- * print each mismatch otherwise.
+ * Check that every active version-bearing product artifact matches the repo
+ * root package.json version. Historical release notes are intentionally not
+ * part of this gate; runtime/config/package/UI contracts are.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -64,10 +63,62 @@ if (existsSync(cargoPath)) {
   }
 }
 
+const releaseManifestPath = path.join(repoRoot, 'release-manifest.json')
+if (existsSync(releaseManifestPath)) {
+  const releaseManifest = JSON.parse(readFileSync(releaseManifestPath, 'utf8'))
+  if (releaseManifest.shell?.version !== rootVersion) {
+    mismatches.push(`release-manifest.json shell.version: ${releaseManifest.shell?.version} (root: ${rootVersion})`)
+  }
+}
+
+const originPath = path.join(repoRoot, 'packages', 'docs-sync', 'origin.json')
+if (existsSync(originPath)) {
+  const origin = JSON.parse(readFileSync(originPath, 'utf8'))
+  const expectedTag = `/releases/download/v${rootVersion}/`
+  for (const [target, bundle] of Object.entries(origin.runtimeBundles ?? {})) {
+    if (typeof bundle?.url !== 'string' || !bundle.url.includes(expectedTag)) {
+      mismatches.push(`packages/docs-sync/origin.json runtimeBundles.${target}.url: expected ${expectedTag}`)
+    }
+  }
+}
+
+const textVersionFiles = [
+  ['packages/plugin-harness-shell/src/index.ts', /export const version = '([^']+)'/],
+  ['packages/plugin-harness-shell/lib/index.js', /var version = "([^"]+)"/],
+]
+for (const [relativePath, pattern] of textVersionFiles) {
+  const filePath = path.join(repoRoot, relativePath)
+  if (!existsSync(filePath)) {
+    mismatches.push(`${relativePath}: file is missing`)
+    continue
+  }
+  const value = readFileSync(filePath, 'utf8').match(pattern)?.[1]
+  if (value !== rootVersion) {
+    mismatches.push(`${relativePath}: ${value} (root: ${rootVersion})`)
+  }
+}
+
+const activeDisplayFiles = [
+  ['README.md', `HarnessDock v${rootVersion}`],
+  ['apps/tauri/README.md', `HarnessDock Tauri v${rootVersion}`],
+  ['apps/tauri/web/index.html', `HarnessDock v${rootVersion}`],
+  ['apps/tauri/web/settings.html', `HarnessDock v${rootVersion}`],
+]
+for (const [relativePath, expected] of activeDisplayFiles) {
+  const filePath = path.join(repoRoot, relativePath)
+  if (!existsSync(filePath)) {
+    mismatches.push(`${relativePath}: file is missing`)
+    continue
+  }
+  if (!readFileSync(filePath, 'utf8').includes(expected)) {
+    mismatches.push(`${relativePath}: missing active version marker ${expected}`)
+  }
+}
+
 if (mismatches.length > 0) {
   console.error('version mismatch detected:')
   for (const mismatch of mismatches) console.error(`  ${mismatch}`)
   process.exit(1)
 }
 
-console.log(`all versions match: ${rootVersion}`)
+console.log(`all active versions match: ${rootVersion}`)
