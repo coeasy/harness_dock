@@ -14,6 +14,9 @@ pub(crate) fn hide_splash(app: &AppHandle) {
     }
 }
 
+#[cfg(mobile)]
+pub(crate) fn hide_splash(_app: &AppHandle) {}
+
 #[cfg(not(mobile))]
 fn set_splash_status(app: &AppHandle, status: &str) {
     let Some(window) = app.get_webview_window("splash") else {
@@ -53,31 +56,128 @@ fn show_control_recovery(app: &AppHandle, error: &str) {
 
 #[cfg(not(mobile))]
 pub(crate) fn show_startup_recovery(app: &AppHandle, error: &str) {
-    app.state::<crate::AppState>()
+    let state = app.state::<crate::AppState>();
+    state
         .harness_loading
         .store(false, std::sync::atomic::Ordering::Release);
+    if let Ok(mut recovery) = state.startup_recovery_error.lock() {
+        *recovery = Some(error.to_string());
+    }
     eprintln!("HarnessDock startup failed: {error}");
     show_control_recovery(app, error);
 }
 
-#[cfg(not(mobile))]
-fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>) {
-    window
-        .app_handle()
-        .state::<crate::AppState>()
-        .harness_loading
-        .store(false, std::sync::atomic::Ordering::Release);
-    let _ = window.eval(init_script());
-    let _ = window.show();
-    let _ = window.set_focus();
-    if let Some(control) = window.app_handle().get_webview_window("main") {
-        let _ = control.hide();
+fn clear_startup_recovery(app: &AppHandle) {
+    if let Ok(mut recovery) = app.state::<crate::AppState>().startup_recovery_error.lock() {
+        *recovery = None;
     }
-    hide_splash(&window.app_handle());
 }
 
 #[cfg(not(mobile))]
-fn schedule_harness_watchdog(app: &AppHandle) {
+fn begin_harness_load(state: &crate::AppState) -> u64 {
+    state
+        .harness_load_generation
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+        .wrapping_add(1)
+}
+
+#[cfg(not(mobile))]
+pub(crate) fn cancel_harness_load(app: &AppHandle) {
+    let state = app.state::<crate::AppState>();
+    state
+        .harness_load_generation
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    state
+        .harness_loading
+        .store(false, std::sync::atomic::Ordering::Release);
+}
+
+#[cfg(mobile)]
+pub(crate) fn cancel_harness_load(_app: &AppHandle) {}
+
+#[cfg(not(mobile))]
+fn allowed_runtime_navigation(app: &AppHandle, url: &Url) -> bool {
+    let Ok(candidate) = validated_runtime_url(url.as_str()) else {
+        return false;
+    };
+    let status = crate::runtime::status_snapshot(&*app.state::<crate::AppState>());
+    let Some(expected) = status
+        .app_url
+        .as_deref()
+        .and_then(|value| validated_runtime_url(value).ok())
+    else {
+        return false;
+    };
+    candidate.origin() == expected.origin()
+}
+
+#[cfg(not(mobile))]
+fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &Url) {
+    let app = window.app_handle();
+    let state = app.state::<crate::AppState>();
+    let navigation_allowed = allowed_runtime_navigation(&app, loaded_url);
+    let current_matches_event = window
+        .url()
+        .ok()
+        .map(|current| {
+            current.origin() == loaded_url.origin()
+                && current.path() == loaded_url.path()
+                && current.query() == loaded_url.query()
+        })
+        .unwrap_or(true);
+    if !navigation_allowed {
+        if state
+            .harness_loading
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            let _ = window.hide();
+            show_startup_recovery(
+                &app,
+                "Harness Web 导航到了不受管理的本地页面，已阻止加载。\n请重试打开 Harness。",
+            );
+        }
+        return;
+    }
+    if !current_matches_event {
+        // A previous navigation can deliver Finished after a newer reload or
+        // restart has already replaced the document. It is a stale callback,
+        // not evidence that the current managed navigation failed; leave the
+        // current loading generation and watchdog untouched.
+        return;
+    }
+    if state
+        .quitting
+        .load(std::sync::atomic::Ordering::Acquire)
+        || !state
+            .harness_loading
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+    {
+        // A Finished callback can arrive after the user closes the window (or
+        // after shutdown has begun). It must never resurrect the primary Web
+        // surface after that explicit intent.
+        return;
+    }
+    if let Err(error) = window.eval(init_script()) {
+        // The Harness document remains the primary surface even if a best-
+        // effort toolbar injection is rejected by a WebView implementation.
+        // Menu and native commands remain available for a later retry.
+        eprintln!("Unable to install Harness Shell; continuing with Harness Web: {error}");
+    }
+    if let Err(error) = window.show() {
+        let _ = window.hide();
+        show_startup_recovery(&app, &format!("无法显示 Harness Web 窗口: {error}"));
+        return;
+    }
+    clear_startup_recovery(&app);
+    let _ = window.set_focus();
+    if let Some(control) = app.get_webview_window("main") {
+        let _ = control.hide();
+    }
+    hide_splash(&app);
+}
+
+#[cfg(not(mobile))]
+fn schedule_harness_watchdog(app: &AppHandle, generation: u64) {
     let watchdog_app = app.clone();
     tauri::async_runtime::spawn(async move {
         let _ = tauri::async_runtime::spawn_blocking(|| {
@@ -86,6 +186,13 @@ fn schedule_harness_watchdog(app: &AppHandle) {
         .await;
         let state = watchdog_app.state::<crate::AppState>();
         if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+        if state
+            .harness_load_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+            != generation
+        {
             return;
         }
         if !state
@@ -97,7 +204,17 @@ fn schedule_harness_watchdog(app: &AppHandle) {
         let Some(window) = watchdog_app.get_webview_window("harness") else {
             return;
         };
-        if !window.is_visible().unwrap_or(false) {
+        if state
+            .harness_loading
+            .compare_exchange(
+                true,
+                false,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            let _ = window.hide();
             show_startup_recovery(
                 &watchdog_app,
                 "Harness Web 在 20 秒内没有完成加载。Runtime 仍可诊断，请重试打开 Harness。",
@@ -117,6 +234,9 @@ fn validated_runtime_url(value: &str) -> Result<Url, String> {
     if !loopback {
         return Err("桌面 Harness WebView 只允许本地 loopback Runtime。".into());
     }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Runtime URL 不能包含用户名或密码。".into());
+    }
     Ok(url)
 }
 
@@ -134,6 +254,11 @@ impl Drop for SettingsOpenGuard<'_> {
     fn drop(&mut self) {
         self.0.store(false, std::sync::atomic::Ordering::Release);
     }
+}
+
+#[cfg(not(mobile))]
+fn hide_harness_for_recovery(window: &tauri::WebviewWindow<tauri::Wry>) {
+    let _ = window.hide();
 }
 
 #[cfg(not(mobile))]
@@ -173,6 +298,14 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
+    if app
+        .state::<crate::AppState>()
+        .quitting
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("HarnessDock 正在退出，已拒绝打开 Harness Web。".into());
+    }
+
     #[cfg(mobile)]
     {
         let _ = (app, url);
@@ -182,35 +315,126 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(not(mobile))]
     {
         let runtime_url = validated_runtime_url(&url)?;
-        app.state::<crate::AppState>()
-            .harness_loading
-            .store(true, std::sync::atomic::Ordering::Release);
-        show_splash(&app, "正在打开 Harness Web…");
+        let state = app.state::<crate::AppState>();
+        let current = crate::runtime::status_snapshot(&*state);
+        let expected = current
+            .app_url
+            .as_deref()
+            .ok_or_else(|| "Runtime 尚未启动，暂时无法打开 Harness Web。".to_string())
+            .and_then(validated_runtime_url)?;
+        if runtime_url.origin() != expected.origin() {
+            return Err("Harness Web URL 与当前受管 Runtime 不一致，已拒绝导航。".into());
+        }
         if let Some(window) = app.get_webview_window("harness") {
+            let loading = state
+                .harness_loading
+                .load(std::sync::atomic::Ordering::Acquire);
+            let current_url = window
+                .url()
+                .ok()
+                .and_then(|current| validated_runtime_url(current.as_str()).ok());
+            let current_matches = current_url
+                .as_ref()
+                .is_some_and(|current| current.origin() == expected.origin());
+            if current_matches {
+                let current_has_launch_token = current_url
+                    .as_ref()
+                    .and_then(|current| current.query())
+                    .is_some_and(|query| !query.is_empty());
+                if loading {
+                    // A second open request must not create a new generation
+                    // while the first WebView navigation is still exchanging
+                    // its reusable process launch token. Keep the splash/watchdog that
+                    // belongs to the in-flight request intact.
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = window.set_focus();
+                    }
+                    if let Some(control) = app.get_webview_window("main") {
+                        let _ = control.hide();
+                    }
+                    return Ok(());
+                }
+                if !current_has_launch_token {
+                    let recovery_pending = state
+                        .startup_recovery_error
+                        .lock()
+                        .map(|recovery| recovery.is_some())
+                        .unwrap_or(true);
+                    if !recovery_pending {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        if let Some(control) = app.get_webview_window("main") {
+                            let _ = control.hide();
+                        }
+                        hide_splash(&app);
+                        return Ok(());
+                    }
+                    // A previous page-load callback may have failed after the
+                    // document was already authenticated. Reload that same
+                    // cookie-bearing URL instead of relying on the process
+                    // launch token returned by Runtime; the finished hook will
+                    // reinstall the shell and clear recovery state.
+                    let generation = begin_harness_load(&*state);
+                    state
+                        .harness_loading
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    show_splash(&app, "正在恢复 Harness Web…");
+                    if let Err(error) = window.reload() {
+                        state
+                            .harness_loading
+                            .store(false, std::sync::atomic::Ordering::Release);
+                        hide_harness_for_recovery(&window);
+                        show_startup_recovery(&app, &format!("无法恢复 Harness Web: {error}"));
+                        return Err(format!("无法恢复 Harness Web: {error}"));
+                    }
+                    if let Some(control) = app.get_webview_window("main") {
+                        let _ = control.hide();
+                    }
+                    schedule_harness_watchdog(&app, generation);
+                    return Ok(());
+                }
+            }
+
+            let generation = begin_harness_load(&*state);
+            state
+                .harness_loading
+                .store(true, std::sync::atomic::Ordering::Release);
+            show_splash(&app, "正在打开 Harness Web…");
             if let Err(error) = window.navigate(runtime_url) {
                 app.state::<crate::AppState>()
                     .harness_loading
                     .store(false, std::sync::atomic::Ordering::Release);
+                hide_harness_for_recovery(&window);
                 show_startup_recovery(&app, &format!("无法导航 Harness 窗口: {error}"));
                 return Err(format!("无法导航 Harness 窗口: {error}"));
             }
             if let Some(control) = app.get_webview_window("main") {
                 let _ = control.hide();
             }
-            schedule_harness_watchdog(&app);
+            schedule_harness_watchdog(&app, generation);
             return Ok(());
         }
 
+        let generation = begin_harness_load(&*state);
+        state
+            .harness_loading
+            .store(true, std::sync::atomic::Ordering::Release);
+        show_splash(&app, "正在打开 Harness Web…");
+        let navigation_app = app.clone();
         let _window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
             .title("HarnessDock · DeepSeek Harness")
             .initialization_script(init_script())
+            // The Harness page is allowed to navigate within the current
+            // managed Runtime origin, but it must never turn the privileged
+            // shell WebView into a bridge for another local service.
+            .on_navigation(move |url| allowed_runtime_navigation(&navigation_app, url))
             // Navigation replaces the document and therefore does not rerun
             // initialization_script. Reinstall the local toolbar after every
             // completed loopback navigation so refresh/restart cannot leave a
             // blank or unmanaged WebView.
             .on_page_load(|window, payload| {
                 if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-                    finish_harness_load(&window);
+                    finish_harness_load(&window, payload.url());
                 }
             })
             .inner_size(1180.0, 780.0)
@@ -229,7 +453,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
         if let Some(control) = app.get_webview_window("main") {
             let _ = control.hide();
         }
-        schedule_harness_watchdog(&app);
+        schedule_harness_watchdog(&app, generation);
         Ok(())
     }
 }
@@ -250,9 +474,8 @@ pub async fn harness_close(app: AppHandle) -> Result<(), String> {
 
     #[cfg(not(mobile))]
     {
-        app.state::<crate::AppState>()
-            .harness_loading
-            .store(false, std::sync::atomic::Ordering::Release);
+        cancel_harness_load(&app);
+        hide_splash(&app);
         if let Some(window) = app.get_webview_window("harness") {
             window.hide().map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
         }
@@ -281,30 +504,55 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
             return Err("Harness Web 正在处理另一个操作，请稍候。".into());
         }
         let _action = WebActionGuard(&state.web_action);
-        let status = crate::runtime::runtime_status(app.state());
+        let status = crate::runtime::status_snapshot(&*state);
         let url = status
             .app_url
             .ok_or_else(|| "Runtime 尚未启动，暂时无法刷新 Harness Web。".to_string())?;
         let url = validated_runtime_url(&url)?;
-        show_splash(&app, "正在刷新 Harness Web…");
         let Some(window) = app.get_webview_window("harness") else {
-            return harness_open(app.clone(), url.to_string()).await;
+            let result = harness_open(app.clone(), url.to_string()).await;
+            if result.is_err() {
+                hide_splash(&app);
+            }
+            return result;
         };
+        if state
+            .harness_loading
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("Harness Web 正在加载，请稍候再试。".into());
+        }
+        show_splash(&app, "正在刷新 Harness Web…");
         // Keep the current document visible while the next document loads.
         // Hiding first creates the blank-window failure mode users see when
         // WebView navigation is slow or a renderer misses its load callback.
         // The splash/progress surface still communicates that navigation is
         // in progress, and the page-load hook restores focus after success.
-        app.state::<crate::AppState>()
+        let current_url = window
+            .url()
+            .ok()
+            .and_then(|current| validated_runtime_url(current.as_str()).ok());
+        let same_runtime_origin = current_url
+            .as_ref()
+            .is_some_and(|current| current.origin() == url.origin());
+        let generation = begin_harness_load(&*state);
+        state
             .harness_loading
             .store(true, std::sync::atomic::Ordering::Release);
-        if let Err(error) = window.navigate(url) {
+        let result = if same_runtime_origin && current_url.as_ref().is_some_and(|current| current.query().is_none()) {
+            window.reload()
+        } else {
+            window.navigate(url)
+        };
+        if let Err(error) = result {
             app.state::<crate::AppState>()
                 .harness_loading
                 .store(false, std::sync::atomic::Ordering::Release);
-            show_startup_recovery(&app, &format!("无法导航刷新 Harness Web 界面: {error}"));
-            return Err(format!("无法导航刷新 Harness Web 界面: {error}"));
+            hide_harness_for_recovery(&window);
+            show_startup_recovery(&app, &format!("无法刷新 Harness Web 界面: {error}"));
+            return Err(format!("无法刷新 Harness Web 界面: {error}"));
         }
+        schedule_harness_watchdog(&app, generation);
         Ok(())
     }
 }
@@ -312,6 +560,80 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
 /// Replace the local Runtime/Gateway and reopen the Harness WebView at the new
 /// loopback URL. A failed restart returns the user to the recovery surface
 /// instead of leaving an apparently ready but disconnected WebView on screen.
+#[cfg(not(mobile))]
+async fn restart_harness_web_impl(
+    app: AppHandle,
+    clear_quarantine: bool,
+) -> Result<crate::runtime::RuntimeStatus, String> {
+    let state = app.state::<crate::AppState>();
+    show_splash(
+        &app,
+        if clear_quarantine {
+            "正在清除插件隔离并重启…"
+        } else {
+            "正在重启 Runtime…"
+        },
+    );
+
+    // Capture the generation before any longer operation. A concurrent close
+    // increments it, so the completed restart cannot resurrect a window the
+    // user explicitly hid while quarantine cleanup or Runtime startup ran.
+    let reopen_generation = {
+        let mut generation = state
+            .harness_load_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if let Some(window) = app.get_webview_window("harness") {
+            cancel_harness_load(&app);
+            generation = state
+                .harness_load_generation
+                .load(std::sync::atomic::Ordering::Acquire);
+            if let Err(error) = window.hide() {
+                hide_splash(&app);
+                return Err(format!("无法暂时隐藏 Harness Web 界面: {error}"));
+            }
+        }
+        generation
+    };
+
+    if clear_quarantine {
+        if let Err(error) = crate::runtime::runtime_clear_plugin_quarantine(app.clone()) {
+            hide_splash(&app);
+            return Err(error);
+        }
+    }
+
+    let status = match crate::runtime::restart_managed(app.clone()).await {
+        Ok(status) => status,
+        Err(error) => {
+            show_startup_recovery(&app, &error);
+            return Err(error);
+        }
+    };
+    let Some(url) = status.app_url.clone() else {
+        show_startup_recovery(
+            &app,
+            "Runtime 重启成功，但没有返回 Harness Web 地址。",
+        );
+        return Err("Runtime 重启成功，但没有返回 Harness Web 地址。".into());
+    };
+    if state
+        .harness_load_generation
+        .load(std::sync::atomic::Ordering::Acquire)
+        != reopen_generation
+    {
+        // A close/hide request arrived while Runtime was restarting. Keep
+        // that explicit user intent; do not resurrect the WebView after the
+        // operation completes.
+        hide_splash(&app);
+        return Ok(status);
+    }
+    if let Err(error) = harness_open(app.clone(), url).await {
+        show_startup_recovery(&app, &error);
+        return Err(error);
+    }
+    Ok(status)
+}
+
 #[tauri::command]
 pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
     #[cfg(mobile)]
@@ -334,36 +656,7 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
             return Err("Harness Web 正在重启，请稍候再试。".into());
         }
         let _restarting = WebActionGuard(&state.web_action);
-        show_splash(&app, "正在重启 Runtime…");
-
-        // Hide the stale WebView while its loopback Runtime is being replaced.
-        // If startup fails, surface the control page from the recovery path.
-        if let Some(window) = app.get_webview_window("harness") {
-            if let Err(error) = window.hide() {
-                hide_splash(&app);
-                return Err(format!("无法暂时隐藏 Harness Web 界面: {error}"));
-            }
-        }
-
-        let status = match crate::runtime::restart_managed(app.clone()).await {
-            Ok(status) => status,
-            Err(error) => {
-                show_startup_recovery(&app, &error);
-                return Err(error);
-            }
-        };
-        let Some(url) = status.app_url.clone() else {
-            show_startup_recovery(
-                &app,
-                "Runtime 重启成功，但没有返回 Harness Web 地址。",
-            );
-            return Err("Runtime 重启成功，但没有返回 Harness Web 地址。".into());
-        };
-        if let Err(error) = harness_open(app.clone(), url).await {
-            show_startup_recovery(&app, &error);
-            return Err(error);
-        }
-        Ok(status)
+        restart_harness_web_impl(app, false).await
     }
 }
 
@@ -393,12 +686,22 @@ pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime:
         }
         let _restarting = WebActionGuard(&state.web_action);
         show_splash(&app, "正在以隔离插件模式启动…");
-        if let Some(window) = app.get_webview_window("harness") {
-            if let Err(error) = window.hide() {
-                hide_splash(&app);
-                return Err(format!("无法暂时隐藏 Harness Web 界面: {error}"));
+        let reopen_generation = {
+            let mut generation = state
+                .harness_load_generation
+                .load(std::sync::atomic::Ordering::Acquire);
+            if let Some(window) = app.get_webview_window("harness") {
+                cancel_harness_load(&app);
+                generation = state
+                    .harness_load_generation
+                    .load(std::sync::atomic::Ordering::Acquire);
+                if let Err(error) = window.hide() {
+                    hide_splash(&app);
+                    return Err(format!("无法暂时隐藏 Harness Web 界面: {error}"));
+                }
             }
-        }
+            generation
+        };
 
         let status = match crate::runtime::restart_managed_safe(app.clone()).await {
             Ok(status) => status,
@@ -411,6 +714,14 @@ pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime:
             show_startup_recovery(&app, "隔离插件启动成功，但没有返回 Harness Web 地址。");
             return Err("隔离插件启动成功，但没有返回 Harness Web 地址。".into());
         };
+        if state
+            .harness_load_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+            != reopen_generation
+        {
+            hide_splash(&app);
+            return Ok(status);
+        }
         if let Err(error) = harness_open(app.clone(), url).await {
             show_startup_recovery(&app, &error);
             return Err(error);
@@ -435,8 +746,19 @@ pub async fn harness_clear_quarantine_restart(
 
     #[cfg(not(mobile))]
     {
-        crate::runtime::runtime_clear_plugin_quarantine(app.clone())?;
-        harness_restart_web(app).await
+        if app
+            .state::<crate::AppState>()
+            .quitting
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("HarnessDock 正在退出，已拒绝插件隔离恢复。".into());
+        }
+        let state = app.state::<crate::AppState>();
+        if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return Err("Harness Web 正在重启，请稍候再试。".into());
+        }
+        let _restarting = WebActionGuard(&state.web_action);
+        restart_harness_web_impl(app, true).await
     }
 }
 
@@ -553,26 +875,16 @@ pub fn splash_status(app: AppHandle, status: String) -> Result<(), String> {
     }
 }
 
-/// The bundled control page is a hidden bootstrap/recovery surface on desktop.
-/// Hiding it explicitly at boot also covers upgrades from builds that showed
-/// the page by default, so the first user-visible surface is always Harness Web.
+/// Read a startup error that may have occurred before the hidden control page
+/// finished loading. Keeping the error in native state closes the recovery-page
+/// timing gap without exposing it to the remote Harness WebView.
 #[tauri::command]
-pub fn control_hide(app: AppHandle) -> Result<(), String> {
-    #[cfg(mobile)]
-    {
-        let _ = app;
-        return Ok(());
-    }
-
-    #[cfg(not(mobile))]
-    {
-        let control = app
-            .get_webview_window("main")
-            .ok_or_else(|| "HarnessDock 启动控制页窗口不存在。".to_string())?;
-        control
-            .hide()
-            .map_err(|error| format!("无法隐藏 HarnessDock 启动控制页: {error}"))
-    }
+pub fn startup_recovery_status(app: AppHandle) -> Result<Option<String>, String> {
+    app.state::<crate::AppState>()
+        .startup_recovery_error
+        .lock()
+        .map(|recovery| recovery.clone())
+        .map_err(|_| "启动恢复状态锁已损坏。".to_string())
 }
 
 #[tauri::command]

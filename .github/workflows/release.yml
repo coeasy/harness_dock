@@ -121,6 +121,8 @@ jobs:
       - name: Assemble Tauri release assets
         if: steps.release.outputs.publish == 'true'
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
 
@@ -141,11 +143,17 @@ jobs:
             test -s "$destination"
           }
 
-          copy_one release-input/tauri-desktop-win-x64 '*.exe' "release-assets/HarnessDock-${version}-windows-x64-setup.exe"
+          copy_one release-input/tauri-desktop-win-x64 '*setup.exe' "release-assets/HarnessDock-${version}-windows-x64-setup.exe"
+          copy_one release-input/tauri-desktop-win-x64 '*.exe.sig' "release-assets/HarnessDock-${version}-windows-x64-setup.exe.sig"
           copy_one release-input/tauri-desktop-linux-x64 '*.deb' "release-assets/HarnessDock-${version}-linux-x64.deb"
           copy_one release-input/tauri-desktop-linux-x64 '*.AppImage' "release-assets/HarnessDock-${version}-linux-x64.AppImage"
+          copy_one release-input/tauri-desktop-linux-x64 '*.AppImage.sig' "release-assets/HarnessDock-${version}-linux-x64.AppImage.sig"
           copy_one release-input/tauri-desktop-mac-x64 '*.dmg' "release-assets/HarnessDock-${version}-macos-x64.dmg"
+          copy_one release-input/tauri-desktop-mac-x64 '*.app.tar.gz' "release-assets/HarnessDock-${version}-macos-x64.app.tar.gz"
+          copy_one release-input/tauri-desktop-mac-x64 '*.app.tar.gz.sig' "release-assets/HarnessDock-${version}-macos-x64.app.tar.gz.sig"
           copy_one release-input/tauri-desktop-mac-arm64 '*.dmg' "release-assets/HarnessDock-${version}-macos-arm64.dmg"
+          copy_one release-input/tauri-desktop-mac-arm64 '*.app.tar.gz' "release-assets/HarnessDock-${version}-macos-arm64.app.tar.gz"
+          copy_one release-input/tauri-desktop-mac-arm64 '*.app.tar.gz.sig' "release-assets/HarnessDock-${version}-macos-arm64.app.tar.gz.sig"
           copy_one release-input/tauri-android-arm64-candidate '*.apk' "release-assets/HarnessDock-${version}-android-arm64-release.apk"
           copy_one release-input/tauri-android-arm64-candidate '*.aab' "release-assets/HarnessDock-${version}-android-arm64-release.aab"
           copy_one release-input/tauri-ios-simulator-candidate '*.zip' "release-assets/HarnessDock-${version}-ios-arm64-simulator.zip"
@@ -173,9 +181,11 @@ jobs:
           pack_runtime mac-x64 darwin-x64
           pack_runtime mac-arm64 darwin-arm64
 
+          node scripts/generate-tauri-updater-manifest.mjs release-assets "$RELEASE_TAG"
+          test -s release-assets/latest.json
           sha256sum release-assets/* > release-assets/SHA256SUMS
           test -s release-assets/SHA256SUMS
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 13
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 20
           ls -lh release-assets
 
       - name: Publish or replace validated HarnessDock release
@@ -236,8 +246,45 @@ jobs:
           test "$(printf '%s' "$release_json" | jq -r '.draft')" = false
           test "$(printf '%s' "$release_json" | jq -r '.prerelease')" = false
           asset_count="$(printf '%s' "$release_json" | jq '[.assets[] | select(.size > 0)] | length')"
-          test "$asset_count" -eq 13 || {
-            echo "expected 13 non-empty assets, got $asset_count" >&2
+          test "$asset_count" -eq 20 || {
+            echo "expected 20 non-empty assets, got $asset_count" >&2
             exit 1
           }
           printf '%s' "$release_json" | jq -e '.assets[] | select(.name == "SHA256SUMS" and .size > 0)' >/dev/null
+          printf '%s' "$release_json" | jq -e '.assets[] | select(.name == "latest.json" and .size > 0)' >/dev/null
+          for asset in \
+            "HarnessDock-${RELEASE_TAG#v}-windows-x64-setup.exe.sig" \
+            "HarnessDock-${RELEASE_TAG#v}-linux-x64.AppImage.sig" \
+            "HarnessDock-${RELEASE_TAG#v}-macos-x64.app.tar.gz.sig" \
+            "HarnessDock-${RELEASE_TAG#v}-macos-arm64.app.tar.gz.sig"; do
+            printf '%s' "$release_json" | jq -e --arg asset "$asset" '.assets[] | select(.name == $asset and .size > 0)' >/dev/null
+          done
+
+      - name: Mark the exact origin as released
+        if: steps.release.outputs.publish == 'true'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/mark-released.mjs
+          git add packages/docs-sync/released-origin.json
+          if git diff --cached --quiet; then
+            echo "released-origin.json already matches ${RELEASE_TAG}"
+            exit 0
+          fi
+
+          # Never append the marker to a newer main branch. The release tag is
+          # immutable in meaning even though the workflow can replace a
+          # previously validated tag, so the marker must be a fast-forward from
+          # the exact candidate SHA that was published.
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$main_sha" = "$RELEASE_SHA" || {
+            echo "main advanced before release marker: main=$main_sha release=$RELEASE_SHA" >&2
+            exit 1
+          }
+          git commit -m "chore: mark ${RELEASE_TAG} as released"
+          git push origin HEAD:refs/heads/main

@@ -11,8 +11,8 @@ import { readOriginFile, type Origin } from '@dsh/docs-sync'
 import { backupOrigin, readPreviousOrigin } from './rollback.ts'
 
 /**
- * Shared host bootstrap orchestration (used by both the Electron desktop shell
- * and the VS Code / Cursor extension):
+ * Shared host bootstrap orchestration used by the Tauri desktop host and the
+ * VS Code / Cursor extension:
  *
  *   read origin → resolve runtime mode → backup last-known-good → construct
  *   DshRuntime → start (with rollback to last-known-good on failure) → ready.
@@ -127,6 +127,11 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
       await backupOrigin(options.originPath, previousOriginPath, log)
     }
   } catch (startError) {
+    // A failed DshRuntime can still own a temporary work directory or a child
+    // process created just before readiness failed. Always tear it down before
+    // trying the last-known-good version so rollback cannot leak processes or
+    // accumulate stale temp trees.
+    await runtime.stop().catch(() => undefined)
     const previous =
       options.enableRollback === false
         ? null
@@ -145,6 +150,7 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
         log?.(`bootstrap: rolled back to last-known-good dsh ${previous.dshVersion}`)
         options.onRollback?.(rolledBack)
       } catch (fallbackError) {
+        await fallbackRuntime.stop().catch(() => undefined)
         log?.(
           `bootstrap: rollback also failed: ${
             fallbackError instanceof Error ? fallbackError.message : String(fallbackError)

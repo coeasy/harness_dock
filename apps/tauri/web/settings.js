@@ -75,5 +75,11 @@
   })
 
   void refresh()
-  window.setInterval(() => { void refresh() }, 4000)
+  const refreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void refresh()
+  }, 4000)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refresh()
+  })
+  window.addEventListener('pagehide', () => window.clearInterval(refreshTimer), { once: true })
 })()

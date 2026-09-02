@@ -12,7 +12,7 @@ mod update;
 #[cfg(not(mobile))]
 mod tray;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -21,12 +21,16 @@ pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
     pub(crate) runtime_starting: AtomicBool,
     pub(crate) runtime_restarting: AtomicBool,
+    pub(crate) runtime_stopping: AtomicBool,
     pub(crate) web_action: AtomicBool,
     pub(crate) harness_loading: AtomicBool,
+    pub(crate) harness_load_generation: AtomicU64,
+    pub(crate) startup_recovery_error: Mutex<Option<String>>,
     pub(crate) settings_opening: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
+    pub(crate) gateway_starting: AtomicBool,
     pub(crate) starting_processes: process::StartingProcessRegistry,
-    pub(crate) quitting: AtomicBool,
+    pub(crate) quitting: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -35,12 +39,16 @@ impl Default for AppState {
             runtime: Mutex::new(None),
             runtime_starting: AtomicBool::new(false),
             runtime_restarting: AtomicBool::new(false),
+            runtime_stopping: AtomicBool::new(false),
             web_action: AtomicBool::new(false),
             harness_loading: AtomicBool::new(false),
+            harness_load_generation: AtomicU64::new(0),
+            startup_recovery_error: Mutex::new(None),
             settings_opening: AtomicBool::new(false),
             gateway: Mutex::new(None),
+            gateway_starting: AtomicBool::new(false),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            quitting: AtomicBool::new(false),
+            quitting: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -53,6 +61,31 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
     process::stop_starting_processes(&state.starting_processes);
     gateway_host::stop_managed(&state.gateway);
     runtime::stop_managed(&state.runtime);
+}
+
+pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            stop_managed_processes(&app);
+            if process::starting_processes_empty(&state.starting_processes)
+                && !state.runtime_starting.load(Ordering::Acquire)
+                && !state.gateway_starting.load(Ordering::Acquire)
+            {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                eprintln!("HarnessDock shutdown timed out while waiting for startup tasks; forcing process exit.");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        // One final idempotent pass covers a startup task that published its
+        // Child just as the last registry check completed.
+        stop_managed_processes(&app);
+    })
+    .await;
 }
 
 #[cfg(not(mobile))]
@@ -75,21 +108,7 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
     // before it has published the Child into AppState.
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let cleanup_handle = handle.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            let state = cleanup_handle.state::<AppState>();
-            for _ in 0..50 {
-                stop_managed_processes(&cleanup_handle);
-                if process::starting_processes_empty(&state.starting_processes) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            // One final idempotent pass covers a startup task that published
-            // its Child just as the last registry check completed.
-            stop_managed_processes(&cleanup_handle);
-        })
-        .await;
+        wait_for_managed_processes(handle.clone()).await;
         handle.exit(0);
     });
 }
@@ -209,7 +228,6 @@ pub fn run() {
             harness_window::harness_toggle_maximize,
             harness_window::harness_window_state,
             harness_window::control_show,
-            harness_window::control_hide,
             harness_window::harness_reload_web,
             harness_window::harness_restart_web,
             harness_window::harness_safe_mode_restart,
@@ -217,10 +235,10 @@ pub fn run() {
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,
             harness_window::splash_status,
+            harness_window::startup_recovery_status,
             harness_window::app_quit,
             runtime::runtime_status,
             runtime::runtime_start,
-            runtime::runtime_restart,
             runtime::runtime_stop,
             runtime::runtime_clear_plugin_quarantine,
             update::update_check,
@@ -248,10 +266,8 @@ pub fn run() {
                 // explicit tray/settings Exit action terminates the process.
                 api.prevent_close();
                 if label == "harness" {
-                    app_handle
-                        .state::<AppState>()
-                        .harness_loading
-                        .store(false, std::sync::atomic::Ordering::Release);
+                    harness_window::cancel_harness_load(app_handle);
+                    harness_window::hide_splash(app_handle);
                 }
                 if let Some(window) = app_handle.get_webview_window(&label) {
                     let _ = window.hide();

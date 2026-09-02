@@ -4,7 +4,7 @@ use std::{
     fs,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -61,13 +61,32 @@ struct RevokeAllResponse {
 
 pub(crate) struct GatewayProcess {
     child: Child,
+    stopped: bool,
+    registration: process_control::StartingProcessGuard,
     work_dir: PathBuf,
     ready: GatewayReady,
 }
 
 impl GatewayProcess {
+    fn is_alive(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(_)) => {
+                self.stopped = true;
+                false
+            }
+            Ok(None) => true,
+            Err(error) => {
+                eprintln!("Unable to inspect Gateway sidecar process: {error}");
+                false
+            }
+        }
+    }
+
     fn stop(&mut self) {
-        process_control::stop_child_tree(&mut self.child);
+        if !self.stopped {
+            self.stopped = true;
+            process_control::stop_child_tree(&mut self.child);
+        }
         let _ = fs::remove_dir_all(&self.work_dir);
     }
 }
@@ -95,18 +114,96 @@ fn resource_path(app: &AppHandle, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn gateway_ready_snapshot(state: &State<'_, AppState>) -> Result<Option<GatewayReady>, String> {
-    let guard = state
+    let mut guard = state
         .gateway
         .lock()
         .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
+    let dead = guard
+        .as_mut()
+        .map(|process| !process.is_alive())
+        .unwrap_or(false);
+    if dead {
+        let mut process = guard.take().expect("dead Gateway process disappeared");
+        drop(guard);
+        process.stop();
+        return Ok(None);
+    }
     Ok(guard.as_ref().map(|process| process.ready.clone()))
 }
 
+struct GatewayStartGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for GatewayStartGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn claim_gateway_start(state: &State<'_, AppState>) -> Result<GatewayStartGuard<'_>, String> {
+    if state.gateway_starting.swap(true, Ordering::AcqRel) {
+        return Err("Gateway 正在处理另一个启动操作，请稍候再试。".into());
+    }
+    let claim = GatewayStartGuard(&state.gateway_starting);
+    if state.quitting.load(Ordering::Acquire)
+        || state.runtime_restarting.load(Ordering::Acquire)
+        || state.runtime_stopping.load(Ordering::Acquire)
+    {
+        return Err("Runtime 正在处理生命周期操作，暂时无法启动 Gateway。".into());
+    }
+    Ok(claim)
+}
+
+fn begin_gateway_start(state: &State<'_, AppState>) -> Result<Option<GatewayReady>, String> {
+    let mut guard = state
+        .gateway
+        .lock()
+        .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
+    if let Some(process) = guard.as_mut() {
+        if process.is_alive() {
+            let ready = process.ready.clone();
+            return Ok(Some(ready));
+        }
+        let mut process = guard.take().expect("dead Gateway process disappeared");
+        drop(guard);
+        process.stop();
+        // The dead process has been removed; the caller owns the start guard.
+        return Ok(None);
+    }
+    Ok(None)
+}
+
 fn required_gateway_ready(state: &State<'_, AppState>) -> Result<GatewayReady, String> {
+    if crate::runtime::status_snapshot(&*state).app_url.is_none() {
+        // A Gateway without its local authenticated upstream is not a usable
+        // service. Clean the sidecar here as well as in the Runtime observer
+        // so status, pairing and revoke commands cannot operate on orphaned
+        // Gateway state between two lifecycle observations.
+        stop_managed(&state.gateway);
+        return Err("请先启动本地 Runtime，再使用 Mobile Gateway。".into());
+    }
     gateway_ready_snapshot(state)?.ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())
 }
 
+fn stop_managed_if_matches(gateway: &Mutex<Option<GatewayProcess>>, expected: &GatewayReady) {
+    let process = gateway
+        .lock()
+        .ok()
+        .and_then(|mut guard| {
+            let matches = guard.as_ref().is_some_and(|current| {
+                current.ready.pid == expected.pid && current.ready.admin_token == expected.admin_token
+            });
+            if matches { guard.take() } else { None }
+        });
+    if let Some(mut process) = process {
+        process.stop();
+    }
+}
+
 fn runtime_gateway_inputs(state: &State<'_, AppState>) -> Result<(PathBuf, String), String> {
+    let status = crate::runtime::status_snapshot(&*state);
+    if status.app_url.is_none() {
+        return Err("请先启动本地 Runtime，再启动 Mobile Gateway。".into());
+    }
     let guard = state
         .runtime
         .lock()
@@ -124,6 +221,7 @@ fn spawn_sidecar(
     public_url: Option<String>,
     local_port: u16,
     starting_processes: &process_control::StartingProcessRegistry,
+    quitting: &AtomicBool,
 ) -> Result<GatewayProcess, String> {
     if !node.is_file() {
         return Err(format!("Gateway Node Runtime 不存在: {}", node.display()));
@@ -134,10 +232,20 @@ fn spawn_sidecar(
     let dir = work_dir()?;
     let ready_file = dir.join("ready.json");
     let log_file = dir.join("gateway.log");
-    let stdout = fs::File::create(&log_file).map_err(|error| format!("无法创建 Gateway 日志: {error}"))?;
-    let stderr = stdout
-        .try_clone()
-        .map_err(|error| format!("无法复制 Gateway 日志句柄: {error}"))?;
+    let stdout = match fs::File::create(&log_file) {
+        Ok(file) => file,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(format!("无法创建 Gateway 日志: {error}"));
+        }
+    };
+    let stderr = match stdout.try_clone() {
+        Ok(file) => file,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(format!("无法复制 Gateway 日志句柄: {error}"));
+        }
+    };
     let mut command = Command::new(node);
     command
         .arg(sidecar)
@@ -156,54 +264,119 @@ fn spawn_sidecar(
         command.env("HARNESSDOCK_GATEWAY_PUBLIC_URL", value);
     }
     platform::configure_child_command(&mut command);
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("无法启动 Gateway sidecar: {error}"))?;
-    let _registration = process_control::register_starting_process(starting_processes, child.id());
+    let (mut child, registration) = match process_control::spawn_registered(&mut command, starting_processes, quitting) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(format!("无法启动 Gateway sidecar: {error}"));
+        }
+    };
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            let detail = fs::read_to_string(&log_file).unwrap_or_default();
+        if quitting.load(Ordering::Acquire) {
+            process_control::stop_child_tree(&mut child);
+            registration.complete();
             let _ = fs::remove_dir_all(&dir);
-            return Err(format!("Gateway sidecar 在 ready 前退出: {status}\n{}", detail.trim()));
+            return Err("HarnessDock 正在退出，已取消 Gateway 启动。".into());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let detail = fs::read_to_string(&log_file).unwrap_or_default();
+                registration.complete();
+                let _ = fs::remove_dir_all(&dir);
+                return Err(format!("Gateway sidecar 在 ready 前退出: {status}\n{}", detail.trim()));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                process_control::stop_child_tree(&mut child);
+                registration.complete();
+                let _ = fs::remove_dir_all(&dir);
+                return Err(format!("无法检查 Gateway sidecar 状态: {error}"));
+            }
         }
         if let Ok(raw) = fs::read_to_string(&ready_file) {
-            let ready: GatewayReady =
-                serde_json::from_str(&raw).map_err(|error| format!("Gateway ready.json 无效: {error}"))?;
-            if ready.schema_version != 1 || ready.pid == 0 || ready.admin_token.len() < 32 {
+            let ready: GatewayReady = match serde_json::from_str(&raw) {
+                Ok(value) => value,
+                Err(error) => {
+                    process_control::stop_child_tree(&mut child);
+                    registration.complete();
+                    let _ = fs::remove_dir_all(&dir);
+                    return Err(format!("Gateway ready.json 无效: {error}"));
+                }
+            };
+            if ready.schema_version != 1 || ready.pid == 0 || ready.pid != child.id() || ready.admin_token.len() < 32 {
                 process_control::stop_child_tree(&mut child);
+                registration.complete();
                 let _ = fs::remove_dir_all(&dir);
                 return Err("Gateway ready.json 未通过安全校验。".into());
             }
-            if !ready.admin_url.starts_with("http://127.0.0.1:") {
+            if !is_loopback_http_url(&ready.admin_url) {
                 process_control::stop_child_tree(&mut child);
+                registration.complete();
                 let _ = fs::remove_dir_all(&dir);
                 return Err("Gateway admin API 不是 loopback 地址。".into());
             }
-            if !ready.local_url.starts_with("http://127.0.0.1:") {
+            if !is_loopback_http_url(&ready.local_url) {
                 process_control::stop_child_tree(&mut child);
+                registration.complete();
                 let _ = fs::remove_dir_all(&dir);
                 return Err("Gateway local URL 不是 loopback 地址。".into());
             }
-            if ready.public_url.trim().is_empty() {
+            if !is_public_gateway_url(&ready.public_url) {
                 process_control::stop_child_tree(&mut child);
+                registration.complete();
                 let _ = fs::remove_dir_all(&dir);
-                return Err("Gateway ready.json 缺少 public URL。".into());
+                return Err("Gateway ready.json 的 public URL 未通过安全校验。".into());
             }
             return Ok(GatewayProcess {
                 child,
+                stopped: false,
+                registration,
                 work_dir: dir,
                 ready,
             });
         }
         if deadline <= Instant::now() {
             process_control::stop_child_tree(&mut child);
+            registration.complete();
             let detail = fs::read_to_string(&log_file).unwrap_or_default();
             let _ = fs::remove_dir_all(&dir);
             return Err(format!("等待 Gateway sidecar ready 超时。 {}", detail.trim()));
         }
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn is_loopback_http_url(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else {
+        return false;
+    };
+    url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
+        && url.port().is_some_and(|port| port > 0)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none()
+}
+
+fn is_public_gateway_url(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else {
+        return false;
+    };
+    let loopback_http = url.scheme() == "http"
+        && url
+            .host_str()
+            .is_some_and(|host| host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
+        && url.port().is_some_and(|port| port > 0);
+    (url.scheme() == "https" || loopback_http)
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none()
 }
 
 async fn admin_json<T: DeserializeOwned>(
@@ -248,10 +421,20 @@ fn stopped() -> GatewayHostStatus {
 
 #[tauri::command]
 pub async fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStatus, String> {
+    if crate::runtime::status_snapshot(&*state).app_url.is_none() {
+        stop_managed(&state.gateway);
+        return Ok(stopped());
+    }
     let Some(ready) = gateway_ready_snapshot(&state)? else {
         return Ok(stopped());
     };
-    admin_json(&ready, "status", None).await
+    match admin_json(&ready, "status", None).await {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            stop_managed_if_matches(&state.gateway, &ready);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -267,9 +450,27 @@ pub async fn gateway_host_start(
     if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
         return Err("HarnessDock 正在退出，已拒绝新的 Gateway 启动。".into());
     }
+    if state.runtime_restarting.load(Ordering::Acquire)
+        || state.runtime_stopping.load(Ordering::Acquire)
+    {
+        return Err("Runtime 正在处理生命周期操作，暂时无法启动 Gateway。".into());
+    }
+    if crate::runtime::status_snapshot(&*state).app_url.is_none() {
+        stop_managed(&state.gateway);
+        return Err("请先启动本地 Runtime，再启动 Mobile Gateway。".into());
+    }
 
-    if let Some(ready) = gateway_ready_snapshot(&state)? {
-        return admin_json(&ready, "status", None).await;
+    let _starting = claim_gateway_start(&state)?;
+    let existing = begin_gateway_start(&state)?;
+    if let Some(ready) = existing {
+        drop(_starting);
+        return match admin_json(&ready, "status", None).await {
+            Ok(status) => Ok(status),
+            Err(error) => {
+                stop_managed_if_matches(&state.gateway, &ready);
+                Err(error)
+            }
+        };
     }
 
     let (node, upstream_url) = runtime_gateway_inputs(&state)?;
@@ -279,25 +480,56 @@ pub async fn gateway_host_start(
     }
     let sidecar = resource_path(&app, "gateway-sidecar.mjs")?;
     let starting_processes = std::sync::Arc::clone(&state.starting_processes);
+    let quitting = Arc::clone(&state.quitting);
+    let expected_upstream_url = upstream_url.clone();
     let process = tauri::async_runtime::spawn_blocking(move || {
-        spawn_sidecar(node, sidecar, upstream_url, public_url, port, &starting_processes)
+        spawn_sidecar(node, sidecar, upstream_url, public_url, port, &starting_processes, &quitting)
     })
     .await
     .map_err(|error| format!("Gateway 启动任务失败: {error}"))??;
     let ready = process.ready.clone();
+    let runtime_state = app.state::<AppState>();
+    let runtime_status = crate::runtime::status_snapshot(&*runtime_state);
+    if runtime_status.app_url.as_deref() != Some(expected_upstream_url.as_str()) {
+        let mut process = process;
+        process.stop();
+        return Err("本地 Runtime 已在 Gateway 启动期间变化，Gateway 未继续运行。".into());
+    }
     {
         let mut guard = state
             .gateway
             .lock()
             .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
-        if state.quitting.load(std::sync::atomic::Ordering::Acquire) {
+        if state.quitting.load(Ordering::Acquire)
+            || state.runtime_restarting.load(Ordering::Acquire)
+            || state.runtime_stopping.load(Ordering::Acquire)
+        {
             let mut process = process;
             process.stop();
-            return Err("HarnessDock 已进入退出流程，Gateway 未继续运行。".into());
+            return Err(if state.quitting.load(Ordering::Acquire) {
+                "HarnessDock 已进入退出流程，Gateway 未继续运行。".into()
+            } else {
+                "Runtime 已进入生命周期切换，Gateway 未继续运行。".into()
+            });
         }
         *guard = Some(process);
+        if let Some(process) = guard.as_ref() {
+            process.registration.complete();
+        }
     }
-    admin_json(&ready, "status", None).await
+    let status = match admin_json(&ready, "status", None).await {
+        Ok(status) => status,
+        Err(error) => {
+            if let Ok(mut guard) = state.gateway.lock() {
+                if let Some(mut process) = guard.take() {
+                    process.stop();
+                }
+            }
+            return Err(error);
+        }
+    };
+    drop(_starting);
+    Ok(status)
 }
 
 #[tauri::command]
@@ -305,7 +537,13 @@ pub async fn gateway_host_create_pairing(
     state: State<'_, AppState>,
 ) -> Result<GatewayPairingTicket, String> {
     let ready = required_gateway_ready(&state)?;
-    admin_json(&ready, "pair", Some(json!({}))).await
+    match admin_json(&ready, "pair", Some(json!({}))).await {
+        Ok(ticket) => Ok(ticket),
+        Err(error) => {
+            stop_managed_if_matches(&state.gateway, &ready);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -314,17 +552,25 @@ pub async fn gateway_host_revoke(
     device_id: String,
 ) -> Result<bool, String> {
     let ready = required_gateway_ready(&state)?;
-    let response: RevokeResponse =
-        admin_json(&ready, "revoke", Some(json!({ "deviceId": device_id }))).await?;
-    Ok(response.revoked)
+    match admin_json(&ready, "revoke", Some(json!({ "deviceId": device_id }))).await {
+        Ok(response) => Ok(response.revoked),
+        Err(error) => {
+            stop_managed_if_matches(&state.gateway, &ready);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize, String> {
     let ready = required_gateway_ready(&state)?;
-    let response: RevokeAllResponse =
-        admin_json(&ready, "revoke-all", Some(json!({}))).await?;
-    Ok(response.revoked)
+    match admin_json(&ready, "revoke-all", Some(json!({}))).await {
+        Ok(response) => Ok(response.revoked),
+        Err(error) => {
+            stop_managed_if_matches(&state.gateway, &ready);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -333,6 +579,9 @@ pub fn gateway_host_stop(state: State<'_, AppState>) -> Result<GatewayHostStatus
         .gateway
         .lock()
         .map_err(|_| "Gateway 状态锁已损坏。".to_string())?;
+    if state.gateway_starting.load(Ordering::Acquire) {
+        return Err("Gateway 正在启动，请稍候再停止。".into());
+    }
     if let Some(mut process) = guard.take() {
         process.stop();
     }

@@ -11,6 +11,9 @@ export class LocalRuntimeProvider implements RuntimeProvider {
   readonly kind = 'local' as const
   private result: BootstrapResult | undefined
   private webSession: WebUiSession | undefined
+  private connectPromise: Promise<RuntimeSession> | undefined
+  private disconnectPromise: Promise<void> | undefined
+  private disconnectRequested = false
 
   constructor(private readonly options: BootstrapOptions) {}
 
@@ -19,37 +22,65 @@ export class LocalRuntimeProvider implements RuntimeProvider {
   }
 
   async connect(): Promise<RuntimeSession> {
-    if (!this.result) this.result = await bootstrapRuntime(this.options)
-    if (!this.webSession) {
-      const authenticated = await openWebUiSession(this.result.ready.url, { timeoutMs: 5_000 })
-      if (!authenticated) {
-        const failed = this.result
-        this.result = undefined
-        await failed.runtime.stop().catch(() => undefined)
-        throw new Error('Local dsh Web UI did not establish an authenticated browser session.')
+    if (this.connectPromise) return this.connectPromise
+    const operation = (async (): Promise<RuntimeSession> => {
+      if (this.disconnectPromise) await this.disconnectPromise
+      this.disconnectRequested = false
+
+      if (!this.result) {
+        const bootstrapped = await bootstrapRuntime(this.options)
+        if (this.disconnectRequested) {
+          await bootstrapped.runtime.stop().catch(() => undefined)
+          throw new Error('Local runtime connection cancelled by disconnect request.')
+        }
+        this.result = bootstrapped
       }
-      this.webSession = authenticated
-    }
-    const recovery = this.result.runtime.pluginRecoveryState
-    return {
-      provider: 'local',
-      appUrl: this.webSession.url,
-      connectedAt: new Date().toISOString(),
-      dshVersion: this.result.ready.dshVersion,
-      runtimePid: this.result.ready.pid,
-      upstream: {
-        url: this.webSession.url,
-        ...(this.webSession.cookie ? { cookie: this.webSession.cookie } : {}),
-      },
-      metadata: {
-        mode: this.result.mode,
-        bundledAvailable: this.result.bundledAvailable,
-        rolledBack: this.result.rolledBack !== null,
-        pluginRecovery: recovery.active,
-        pluginRecoverySource: recovery.source,
-        isolatedPluginCount: recovery.isolatedPlugins.length,
-        suspectedPluginCount: recovery.suspectedPlugins.length,
-      },
+      if (!this.webSession) {
+        const current = this.result
+        const authenticated = await openWebUiSession(current.ready.url, { timeoutMs: 5_000 })
+        if (!authenticated || this.disconnectRequested) {
+          this.result = undefined
+          this.webSession = undefined
+          await current.runtime.stop().catch(() => undefined)
+          if (this.disconnectRequested) {
+            throw new Error('Local runtime connection cancelled by disconnect request.')
+          }
+          throw new Error('Local dsh Web UI did not establish an authenticated browser session.')
+        }
+        this.webSession = authenticated
+      }
+      const current = this.result
+      const session = this.webSession
+      if (!current || !session || this.disconnectRequested) {
+        throw new Error('Local runtime connection cancelled by disconnect request.')
+      }
+      const recovery = current.runtime.pluginRecoveryState
+      return {
+        provider: 'local',
+        appUrl: session.url,
+        connectedAt: new Date().toISOString(),
+        dshVersion: current.ready.dshVersion,
+        runtimePid: current.ready.pid,
+        upstream: {
+          url: session.url,
+          ...(session.cookie ? { cookie: session.cookie } : {}),
+        },
+        metadata: {
+          mode: current.mode,
+          bundledAvailable: current.bundledAvailable,
+          rolledBack: current.rolledBack !== null,
+          pluginRecovery: recovery.active,
+          pluginRecoverySource: recovery.source,
+          isolatedPluginCount: recovery.isolatedPlugins.length,
+          suspectedPluginCount: recovery.suspectedPlugins.length,
+        },
+      }
+    })()
+    this.connectPromise = operation
+    try {
+      return await operation
+    } finally {
+      if (this.connectPromise === operation) this.connectPromise = undefined
     }
   }
 
@@ -68,9 +99,21 @@ export class LocalRuntimeProvider implements RuntimeProvider {
   }
 
   async disconnect(): Promise<void> {
-    const current = this.result
-    this.result = undefined
-    this.webSession = undefined
-    if (current) await current.runtime.stop()
+    if (this.disconnectPromise) return this.disconnectPromise
+    this.disconnectRequested = true
+    const connecting = this.connectPromise
+    const operation = (async (): Promise<void> => {
+      await connecting?.catch(() => undefined)
+      const current = this.result
+      this.result = undefined
+      this.webSession = undefined
+      if (current) await current.runtime.stop()
+    })()
+    this.disconnectPromise = operation
+    try {
+      await operation
+    } finally {
+      if (this.disconnectPromise === operation) this.disconnectPromise = undefined
+    }
   }
 }

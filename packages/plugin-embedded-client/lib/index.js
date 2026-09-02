@@ -87,6 +87,28 @@ function cookiePair(setCookie) {
   const pair = setCookie.split(";", 1)[0]?.trim();
   return pair ? pair : void 0;
 }
+function isLoopbackHost(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+function safeBrowserUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:" || !isLoopbackHost(url.hostname)) return null;
+    if (url.username || url.password || url.hash) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+function sameOriginLocation(location, base) {
+  try {
+    const resolved = new URL(location, base);
+    return resolved.origin === base.origin ? resolved : null;
+  } catch {
+    return null;
+  }
+}
 async function htmlResponse(response) {
   if (!response.ok) return false;
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -95,16 +117,20 @@ async function htmlResponse(response) {
   return /<!doctype\s+html|<html(?:\s|>)/i.test(html);
 }
 async function probeBrowserUrl(url, timeoutMs = 1e3) {
+  const baseUrl = safeBrowserUrl(url);
+  if (!baseUrl) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const initial = await fetch(url, { signal: controller.signal, redirect: "manual" });
+    const initial = await fetch(baseUrl, { signal: controller.signal, redirect: "manual" });
     if (await htmlResponse(initial)) return true;
     if (initial.status !== 303) return false;
     const location = initial.headers.get("location");
     const cookie = cookiePair(initial.headers.get("set-cookie"));
     if (!location || !cookie) return false;
-    const page = await fetch(new URL(location, url), {
+    const cleanUrl = sameOriginLocation(location, baseUrl);
+    if (!cleanUrl) return false;
+    const page = await fetch(cleanUrl, {
       signal: controller.signal,
       redirect: "manual",
       headers: { cookie }

@@ -1,9 +1,9 @@
 /**
  * Windows .cmd/.bat spawn support.
  *
- * Node >= 20.12 (CVE-2024-27980 mitigation, applies to Electron >= 30 too)
+ * Node >= 20.12 (CVE-2024-27980 mitigation)
  * throws `EINVAL` when child_process.spawn() is called with a `.cmd`/`.bat`
- * file unless `shell: true` is used. The packaged app resolves the runtime to
+ * file unless `shell: true` is used. The packaged client resolves the runtime to
  * `npx.cmd` in download mode, so we route such commands through `cmd.exe`
  * explicitly with cmd-safe quoting instead of relying on `shell: true`
  * (which does not quote arguments for us).

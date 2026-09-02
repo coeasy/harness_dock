@@ -58,6 +58,12 @@ async function rawTcpRequest(baseUrl: string, request: string): Promise<string> 
 }
 
 describe('HarnessGateway', () => {
+  it('rejects a non-loopback Harness Web upstream before binding', async () => {
+    await expect(
+      startHarnessGateway({ upstreamUrl: 'https://harness.example/' }),
+    ).rejects.toThrow(/loopback/)
+  })
+
   it('uses single-use pairing and an HttpOnly session before proxying Harness', async () => {
     const upstream = http.createServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain' })
@@ -135,6 +141,50 @@ describe('HarnessGateway', () => {
     }
   })
 
+  it('rewrites same-origin browser headers and does not leak the host-owned dsh cookie', async () => {
+    let seenOrigin: string | undefined
+    let seenReferer: string | undefined
+    const upstream = http.createServer((req, res) => {
+      seenOrigin = req.headers.origin
+      seenReferer = req.headers.referer
+      res.writeHead(302, {
+        location: '/next',
+        'set-cookie': [
+          'dsh-auth-test=should-stay-private; HttpOnly; Path=/',
+          'harness-pref=mobile; Path=/',
+        ],
+      })
+      res.end('redirected')
+    })
+    const upstreamPort = await listen(upstream)
+    const gateway = await startHarnessGateway({
+      upstreamUrl: `http://127.0.0.1:${upstreamPort}/`,
+      upstreamCookie: 'dsh-auth-test=server-secret',
+    })
+
+    try {
+      const { cookie } = await pairDevice(gateway, 'header-phone')
+      const publicOrigin = new URL(gateway.localUrl).origin
+      const response = await fetch(`${gateway.localUrl}source?from=mobile`, {
+        headers: {
+          cookie,
+          origin: publicOrigin,
+          referer: `${publicOrigin}/previous?from=mobile`,
+        },
+        redirect: 'manual',
+      })
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe(`${publicOrigin}/next`)
+      expect(response.headers.get('set-cookie')).toContain('harness-pref=mobile')
+      expect(response.headers.get('set-cookie')).not.toContain('dsh-auth-test')
+      expect(seenOrigin).toBe(new URL(`http://127.0.0.1:${upstreamPort}/`).origin)
+      expect(seenReferer).toBe(`http://127.0.0.1:${upstreamPort}/previous?from=mobile`)
+    } finally {
+      await gateway.stop()
+      await close(upstream)
+    }
+  })
+
   it('lists active devices and immediately revokes their sessions', async () => {
     const upstream = http.createServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain' })
@@ -169,12 +219,16 @@ describe('HarnessGateway', () => {
 
   it('requires a gateway session for WebSocket upgrades and forwards only authoritative dsh auth', async () => {
     let upstreamCookie: string | undefined
+    let upstreamOrigin: string | undefined
+    let upstreamReferer: string | undefined
     const upstream = http.createServer((_req, res) => {
       res.writeHead(404)
       res.end()
     })
     upstream.on('upgrade', (req, socket) => {
       upstreamCookie = req.headers.cookie
+      upstreamOrigin = req.headers.origin
+      upstreamReferer = req.headers.referer
       socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
       socket.end('upstream-upgraded')
     })
@@ -194,11 +248,13 @@ describe('HarnessGateway', () => {
       const { cookie } = await pairDevice(gateway, 'streaming-phone')
       const authenticated = await rawTcpRequest(
         gateway.localUrl,
-        `GET /stream HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nCookie: ${cookie}; dsh-auth-test=forged\r\n\r\n`,
+        `GET /stream HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nOrigin: ${new URL(gateway.localUrl).origin}\r\nReferer: ${gateway.localUrl}previous\r\nCookie: ${cookie}; dsh-auth-test=forged\r\n\r\n`,
       )
       expect(authenticated).toContain('101 Switching Protocols')
       expect(authenticated).toContain('upstream-upgraded')
       expect(upstreamCookie).toBe('dsh-auth-test=server-secret')
+      expect(upstreamOrigin).toBe(new URL(`http://127.0.0.1:${upstreamPort}/`).origin)
+      expect(upstreamReferer).toBe(`http://127.0.0.1:${upstreamPort}/previous`)
     } finally {
       await gateway.stop()
       await close(upstream)
@@ -221,5 +277,49 @@ describe('HarnessGateway', () => {
         publicBaseUrl: 'https://gateway.example/harnessdock/',
       }),
     ).rejects.toThrow(/origin-root/)
+  })
+
+  it('refuses a public gateway URL with a non-HTTP protocol', async () => {
+    await expect(
+      startHarnessGateway({
+        upstreamUrl: 'http://127.0.0.1:65534/',
+        publicBaseUrl: 'ftp://gateway.example/',
+        allowInsecurePublicUrl: true,
+      }),
+    ).rejects.toThrow(/protocol/)
+  })
+
+  it('rejects invalid gateway lifetime and rate-limit settings before binding a port', async () => {
+    const base = { upstreamUrl: 'http://127.0.0.1:65534/' }
+    await expect(startHarnessGateway({ ...base, pairingTtlMs: 0 })).rejects.toThrow(/pairingTtlMs/)
+    await expect(startHarnessGateway({ ...base, sessionTtlMs: Number.NaN })).rejects.toThrow(/sessionTtlMs/)
+    await expect(startHarnessGateway({ ...base, maxPairingAttemptsPerMinute: -1 })).rejects.toThrow(/maxPairingAttemptsPerMinute/)
+  })
+
+  it('stops promptly and idempotently while a client connection is still open', async () => {
+    const upstream = http.createServer((_req, res) => {
+      res.writeHead(200)
+      res.write('held-open')
+    })
+    const upstreamPort = await listen(upstream)
+    const gateway = await startHarnessGateway({ upstreamUrl: `http://127.0.0.1:${upstreamPort}/` })
+    const socket = net.connect(new URL(gateway.localUrl).port, '127.0.0.1')
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve)
+      socket.once('error', reject)
+    })
+
+    try {
+      await expect(gateway.stop()).resolves.toBeUndefined()
+      await expect(gateway.stop()).resolves.toBeUndefined()
+      await new Promise<void>((resolve) => {
+        if (socket.destroyed) resolve()
+        else socket.once('close', () => resolve())
+      })
+      expect(socket.destroyed).toBe(true)
+    } finally {
+      socket.destroy()
+      await close(upstream)
+    }
   })
 })

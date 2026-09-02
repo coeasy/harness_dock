@@ -9,9 +9,11 @@ const PAIR_PATH: &str = "/api/harnessdock/pair";
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayHealth {
+    pub schema_version: u8,
     pub ok: bool,
     pub provider: Option<String>,
     pub app_url: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,7 +74,20 @@ pub async fn gateway_health(base_url: String) -> Result<GatewayHealth, String> {
     if !response.status().is_success() {
         return Err(format!("Gateway health 返回 HTTP {}。", response.status()));
     }
-    response.json::<GatewayHealth>().await.map_err(|error| format!("Gateway health 响应无效: {error}"))
+    let health = response
+        .json::<GatewayHealth>()
+        .await
+        .map_err(|error| format!("Gateway health 响应无效: {error}"))?;
+    if health.schema_version != 1 || health.provider.as_deref() != Some("remote") {
+        return Err("Gateway health 响应不符合 HarnessDock v0.2.0 协议。".into());
+    }
+    if let Some(app_url) = health.app_url.as_deref() {
+        let app_origin = normalize_gateway_origin(app_url)?;
+        if app_origin.origin() != base.origin() {
+            return Err("Gateway health 返回了跨 origin 的 appUrl，已拒绝。".into());
+        }
+    }
+    Ok(health)
 }
 
 #[tauri::command]
@@ -112,6 +127,18 @@ pub async fn pair_gateway(base_url: String, code: String, device_name: String) -
     }
     if connect.scheme() != "https" && !(connect.scheme() == "http" && connect.host_str().is_some_and(is_loopback)) {
         return Err("Gateway 返回了不安全的连接 URL，已拒绝。".into());
+    }
+    if connect.path() != "/api/harnessdock/connect"
+        || !connect.username().is_empty()
+        || connect.password().is_some()
+        || connect.fragment().is_some()
+        || connect.query_pairs().count() != 1
+        || connect
+            .query_pairs()
+            .find(|(key, value)| key == "token" && !value.is_empty())
+            .is_none()
+    {
+        return Err("Gateway 返回了无效的一次性连接 URL，已拒绝。".into());
     }
     Ok(paired)
 }

@@ -21,7 +21,7 @@ commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_cre
 [[permission]]
 identifier = "harness-window"
 description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
-commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart"]
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart"]
 
 [[permission]]
 identifier = "runtime-status"
@@ -67,3 +67,8 @@ commands.allow = ["shell_settings_close", "runtime_status", "app_quit"]
 identifier = "splash-status"
 description = "Allows the bundled launcher to update its desktop startup animation."
 commands.allow = ["splash_status"]
+
+[[permission]]
+identifier = "startup-recovery-status"
+description = "Allows the bundled launcher to read a native startup recovery error that may have occurred before its page finished loading."
+commands.allow = ["startup_recovery_status"]

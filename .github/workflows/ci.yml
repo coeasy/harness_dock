@@ -60,8 +60,8 @@ jobs:
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm --filter @dsh/plugin-embedded-client build
       - run: pnpm --filter @dsh/plugin-harness-shell build
-      - name: Validate Gateway sidecar bundle
-        run: pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
+      - name: Bundle and validate Gateway sidecar
+        run: pnpm --filter @dsh/tauri bundle:sidecar
       - name: Check Tauri Rust host
         run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
       - name: Test Tauri runtime recovery logic
@@ -75,7 +75,7 @@ jobs:
           cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/tauri/src-tauri/Cargo.toml | head -1)"
           test "$tauri_version" = "$root_version"
           test "$cargo_version" = "$root_version"
-          test -s /tmp/harnessdock-gateway-sidecar.mjs
+          test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
 
   sync:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

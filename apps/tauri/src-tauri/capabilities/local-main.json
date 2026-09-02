@@ -14,6 +14,7 @@
     "runtime-status",
     "runtime-start",
     "runtime-stop",
-    "runtime-maintenance"
+    "runtime-maintenance",
+    "startup-recovery-status"
   ]
 }

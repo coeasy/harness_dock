@@ -77,7 +77,20 @@ async function listenLoopback(server: http.Server): Promise<string> {
 
 async function stopServer(server: http.Server): Promise<void> {
   if (!server.listening) return
-  await new Promise<void>((resolve) => server.close(() => resolve()))
+  await new Promise<void>((resolve) => {
+    let finished = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (): void => {
+      if (finished) return
+      finished = true
+      if (timer) clearTimeout(timer)
+      resolve()
+    }
+    timer = setTimeout(finish, 2_000)
+    timer.unref?.()
+    server.close(() => finish())
+    server.closeAllConnections?.()
+  })
 }
 
 export async function runGatewaySidecar(): Promise<void> {

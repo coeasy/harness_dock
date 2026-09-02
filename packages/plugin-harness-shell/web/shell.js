@@ -16,7 +16,7 @@
   const state = { busy: false, maximized: false, mounted: false }
 
   const can = (command) => compatibleBridge
-    ? bridge.capabilities?.[command] !== false
+    ? bridge.capabilities?.[command] === true
     : command === 'web.reload'
   const invoke = (command, payload) => {
     if (compatibleBridge && bridge.invoke && can(command)) return bridge.invoke(command, payload)
@@ -101,7 +101,18 @@
           state.maximized = Boolean(result.maximized)
           updateMaximizeIcon()
         }
-        showToast(`${label}已执行`)
+        if (command === 'app.update.check' && result) {
+          if (result.available) {
+            const version = result.latestVersion ? ` v${result.latestVersion}` : ''
+            showToast(`发现 HarnessDock${version} 更新，请选择安装`)
+          } else {
+            showToast(`已是最新版本${result.currentVersion ? ` v${result.currentVersion}` : ''}`)
+          }
+        } else if (command === 'app.update.install' && result?.status === 'latest') {
+          showToast(`已是最新版本${result.version ? ` v${result.version}` : ''}`)
+        } else {
+          showToast(`${label}已执行`)
+        }
         if (command !== 'web.reload') setStatus('Harness Web')
       } catch (error) {
         const message = error?.message || String(error)
@@ -148,8 +159,6 @@
       }).catch(() => {})
     }
     if (compatibleBridge && bridge.subscribe) bridge.subscribe((event) => {
-      if (event?.message) setStatus(event.message)
-      if (event?.state === 'ready') setStatus(event.isolated ? 'Harness Web · 隔离插件' : 'Harness Web')
       if (event?.state === 'error') showToast(event.message || '外壳状态异常')
     })
   }

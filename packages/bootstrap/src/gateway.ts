@@ -9,6 +9,18 @@ const DEFAULT_PAIRING_TTL_MS = 5 * 60_000
 const DEFAULT_LAUNCH_TTL_MS = 60_000
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60_000
 const MAX_BODY_BYTES = 8 * 1024
+const SERVER_CLOSE_TIMEOUT_MS = 2_000
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'proxy-connection',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+])
 
 export interface HarnessGatewayOptions {
   /** Authenticated local dsh Web URL, normally http://127.0.0.1:<port>/. */
@@ -78,9 +90,10 @@ function isLoopbackHost(host: string): boolean {
 
 function normalizeBaseUrl(value: string): URL {
   const url = new URL(value)
+  if (url.username || url.password) throw new Error('Gateway base URLs must not contain credentials.')
+  if (url.search || url.hash) throw new Error('Gateway base URLs must not contain query or fragment.')
   url.username = ''
   url.password = ''
-  url.hash = ''
   if (!url.pathname.endsWith('/')) url.pathname = `${url.pathname}/`
   return url
 }
@@ -145,6 +158,54 @@ function stripSessionCookie(cookie: string | undefined): string | undefined {
   return kept.length ? kept.join('; ') : undefined
 }
 
+function positiveSafeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive safe integer.`)
+  }
+  return value
+}
+
+function positiveSafeDuration(value: number, name: string): number {
+  positiveSafeInteger(value, name)
+  if (value > Number.MAX_SAFE_INTEGER - Date.now()) {
+    throw new Error(`${name} is too large.`)
+  }
+  return value
+}
+
+function rewriteSameOriginHeader(
+  value: string | undefined,
+  publicBase: URL,
+  upstream: URL,
+  referer: boolean,
+): string | undefined {
+  if (!value) return value
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    return value
+  }
+  if (parsed.origin !== publicBase.origin) return value
+  if (!referer) return upstream.origin
+  return new URL(combineUpstreamPath(upstream, `${parsed.pathname}${parsed.search}`), `${upstream.origin}/`).toString()
+}
+
+function filterUpstreamSetCookie(
+  value: string | string[],
+  upstreamCookie: string | undefined,
+): string | string[] | undefined {
+  const protectedNames = new Set(cookiePairs(upstreamCookie).map(cookieName))
+  if (protectedNames.size === 0) return value
+  const values = Array.isArray(value) ? value : [value]
+  const kept = values.filter((entry) => {
+    const firstPart = entry.split(';', 1)[0] || ''
+    return !protectedNames.has(cookieName(firstPart))
+  })
+  if (kept.length === 0) return undefined
+  return Array.isArray(value) ? kept : kept[0]
+}
+
 /**
  * Merge client cookies with the host-owned dsh cookie. The authoritative dsh
  * cookie always wins and the HarnessDock Gateway session is never forwarded.
@@ -188,8 +249,17 @@ function validSession(
 
 export async function startHarnessGateway(options: HarnessGatewayOptions): Promise<HarnessGatewayHandle> {
   const upstream = normalizeBaseUrl(options.upstreamUrl)
+  const configuredPublicBase = options.publicBaseUrl
+    ? normalizeBaseUrl(options.publicBaseUrl)
+    : undefined
   if (upstream.protocol !== 'http:' && upstream.protocol !== 'https:') {
     throw new Error(`Unsupported gateway upstream protocol: ${upstream.protocol}`)
+  }
+  if (!isLoopbackHost(upstream.hostname.replace(/^\[|\]$/g, ''))) {
+    throw new Error('HarnessDock gateway upstream must be a loopback HTTP(S) URL.')
+  }
+  if (configuredPublicBase && configuredPublicBase.protocol !== 'http:' && configuredPublicBase.protocol !== 'https:') {
+    throw new Error(`Unsupported gateway publicBaseUrl protocol: ${configuredPublicBase.protocol}`)
   }
 
   const bindHost = options.bindHost?.trim() || '127.0.0.1'
@@ -199,6 +269,9 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
   const pairingTtlMs = options.pairingTtlMs ?? DEFAULT_PAIRING_TTL_MS
   const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS
   const maxAttempts = options.maxPairingAttemptsPerMinute ?? 20
+  positiveSafeDuration(pairingTtlMs, 'pairingTtlMs')
+  positiveSafeDuration(sessionTtlMs, 'sessionTtlMs')
+  positiveSafeInteger(maxAttempts, 'maxPairingAttemptsPerMinute')
   const pepper = randomBytes(32)
   const pairing = new Map<string, PairingEntry>()
   const launches = new Map<string, LaunchEntry>()
@@ -242,6 +315,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
   }
 
   let publicBase: URL | undefined
+  let stopped = false
 
   const server = http.createServer((req, res) => {
     void routeRequest(req, res).catch((error) => {
@@ -250,9 +324,60 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       else res.destroy()
     })
   })
+  const connections = new Set<net.Socket>()
+  const trackConnection = (socket: net.Socket): void => {
+    connections.add(socket)
+    socket.once('close', () => connections.delete(socket))
+  }
+  server.on('connection', (socket) => {
+    trackConnection(socket)
+  })
+
+  const destroyConnections = (): void => {
+    for (const socket of connections) socket.destroy()
+  }
+
+  const closeServer = async (): Promise<void> => {
+    // Destroy the snapshot before stopping the listener. A connection can be
+    // accepted while the event loop is between this operation and
+    // `server.close()`, so the finalizer below repeats the sweep instead of
+    // leaving a late idle/WebSocket socket behind.
+    destroyConnections()
+    await new Promise<void>((resolve) => {
+      let finished = false
+      let timer: NodeJS.Timeout | undefined
+      const finish = (): void => {
+        if (finished) return
+        finished = true
+        if (timer) clearTimeout(timer)
+        destroyConnections()
+        resolve()
+      }
+      if (!server.listening) {
+        finish()
+        return
+      }
+      timer = setTimeout(finish, SERVER_CLOSE_TIMEOUT_MS)
+      timer.unref()
+      try {
+        server.close(() => finish())
+        server.closeAllConnections?.()
+      } catch {
+        finish()
+      }
+    })
+    // `closeAllConnections()` does not include upgraded WebSocket sockets.
+    // Sweep once more after the listener has stopped to cover both classes.
+    destroyConnections()
+  }
 
   async function routeRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     prune()
+    if (stopped || !publicBase) {
+      json(res, 503, { error: 'gateway_stopped' })
+      return
+    }
+    const gatewayBase = publicBase
     const incoming = new URL(req.url || '/', 'http://harnessdock.local')
 
     if (incoming.pathname === '/api/harnessdock/health') {
@@ -282,8 +407,13 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
         json(res, 400, { error: 'invalid_json', message: error instanceof Error ? error.message : String(error) })
         return
       }
+      if (stopped) {
+        json(res, 503, { error: 'gateway_stopped' })
+        return
+      }
       const code = typeof body.code === 'string' ? normalizePairingCode(body.code) : ''
-      const deviceName = typeof body.deviceName === 'string' ? body.deviceName.trim().slice(0, 80) : 'HarnessDock Mobile'
+      const requestedDeviceName = typeof body.deviceName === 'string' ? body.deviceName.trim() : ''
+      const deviceName = (requestedDeviceName || 'HarnessDock Mobile').slice(0, 80)
       const key = code ? digestCode(code) : ''
       const ticket = key ? pairing.get(key) : undefined
       if (!ticket || ticket.expiresAt <= Date.now()) {
@@ -295,7 +425,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       const launchToken = randomBytes(32).toString('base64url')
       const launchExpiresAt = Date.now() + DEFAULT_LAUNCH_TTL_MS
       launches.set(launchToken, { expiresAt: launchExpiresAt, deviceName })
-      const connectUrl = new URL('/api/harnessdock/connect', publicBase)
+      const connectUrl = new URL('/api/harnessdock/connect', gatewayBase)
       connectUrl.searchParams.set('token', launchToken)
       json(res, 200, {
         connectUrl: connectUrl.toString(),
@@ -322,10 +452,10 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
         lastSeenAt: now,
       })
       sessions.set(sessionToken, { expiresAt: now + sessionTtlMs, deviceId })
-      const secure = publicBase?.protocol === 'https:' ? '; Secure' : ''
+      const secure = gatewayBase.protocol === 'https:' ? '; Secure' : ''
       res.writeHead(302, {
         location: '/',
-        'set-cookie': `${SESSION_COOKIE}=${sessionToken}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.floor(sessionTtlMs / 1000)}${secure}`,
+        'set-cookie': `${SESSION_COOKIE}=${sessionToken}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.max(1, Math.floor(sessionTtlMs / 1000))}${secure}`,
         'cache-control': 'no-store',
         'referrer-policy': 'no-referrer',
       })
@@ -338,16 +468,27 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       return
     }
 
+    if (stopped) {
+      json(res, 503, { error: 'gateway_stopped' })
+      return
+    }
     await proxyHttp(req, res)
   }
 
   async function proxyHttp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const gatewayBase = publicBase
+    if (!gatewayBase) {
+      json(res, 503, { error: 'gateway_starting' })
+      return
+    }
     const headers: http.OutgoingHttpHeaders = { ...req.headers, host: upstream.host }
-    delete headers.connection
-    delete headers['proxy-connection']
-    delete headers['keep-alive']
-    delete headers['transfer-encoding']
-    delete headers.upgrade
+    for (const name of HOP_BY_HOP_HEADERS) delete headers[name]
+    const origin = rewriteSameOriginHeader(req.headers.origin, gatewayBase, upstream, false)
+    const referer = rewriteSameOriginHeader(req.headers.referer, gatewayBase, upstream, true)
+    if (origin) headers.origin = origin
+    else delete headers.origin
+    if (referer) headers.referer = referer
+    else delete headers.referer
     const cookie = upstreamCookieHeader(req.headers.cookie, options.upstreamCookie)
     if (cookie) headers.cookie = cookie
     else delete headers.cookie
@@ -367,6 +508,12 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
         res.statusCode = upstreamRes.statusCode ?? 502
         for (const [name, value] of Object.entries(upstreamRes.headers)) {
           if (value === undefined) continue
+          const lowerName = name.toLowerCase()
+          if (HOP_BY_HOP_HEADERS.has(lowerName)) continue
+          const filteredCookie = lowerName === 'set-cookie'
+            ? filterUpstreamSetCookie(value, options.upstreamCookie)
+            : value
+          if (filteredCookie === undefined) continue
           if (name.toLowerCase() === 'location' && typeof value === 'string') {
             try {
               const location = new URL(value, upstream)
@@ -379,7 +526,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
               // pass through malformed/relative values below
             }
           }
-          res.setHeader(name, value)
+          res.setHeader(name, filteredCookie)
         }
         upstreamRes.on('error', reject)
         upstreamRes.on('end', resolve)
@@ -387,12 +534,20 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       })
       upstreamReq.on('error', reject)
       req.on('error', reject)
+      req.on('aborted', () => upstreamReq.destroy())
+      res.on('close', () => upstreamReq.destroy())
       req.pipe(upstreamReq)
     })
   }
 
   server.on('upgrade', (req, socket, head) => {
     prune()
+    if (stopped || !publicBase) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    const gatewayBase = publicBase
     if (!validSession(req, sessions, devices)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
       socket.destroy()
@@ -400,14 +555,26 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     }
 
     const portNumber = Number(upstream.port || (upstream.protocol === 'https:' ? 443 : 80))
+    let connected = false
     const onConnected = (upstreamSocket: net.Socket): void => {
-      const headerLines: string[] = []
+      if (connected || stopped || socket.destroyed || upstreamSocket.destroyed) {
+        upstreamSocket.destroy()
+        return
+      }
+      connected = true
+      const headerLines: string[] = ['Connection: Upgrade', 'Upgrade: websocket']
       for (const [name, value] of Object.entries(req.headers)) {
-        if (name.toLowerCase() === 'host' || name.toLowerCase() === 'cookie' || value === undefined) continue
+        const lowerName = name.toLowerCase()
+        if (lowerName === 'host' || lowerName === 'cookie' || HOP_BY_HOP_HEADERS.has(lowerName) || value === undefined) continue
+        const rewritten = lowerName === 'origin' && typeof value === 'string'
+          ? rewriteSameOriginHeader(value, gatewayBase, upstream, false)
+          : lowerName === 'referer' && typeof value === 'string'
+            ? rewriteSameOriginHeader(value, gatewayBase, upstream, true)
+            : value
         if (Array.isArray(value)) {
-          for (const item of value) headerLines.push(`${name}: ${item}`)
+          for (const item of rewritten as string[]) headerLines.push(`${name}: ${item}`)
         } else {
-          headerLines.push(`${name}: ${value}`)
+          headerLines.push(`${name}: ${rewritten}`)
         }
       }
       const cookie = upstreamCookieHeader(req.headers.cookie, options.upstreamCookie)
@@ -427,11 +594,14 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       upstreamSocket = net.connect({ host: upstream.hostname, port: portNumber })
       upstreamSocket.once('connect', () => onConnected(upstreamSocket))
     }
+    trackConnection(upstreamSocket)
     upstreamSocket.on('error', (error) => {
       options.log?.(`websocket upstream failed: ${error.message}`)
       socket.destroy()
     })
     socket.on('error', () => upstreamSocket.destroy())
+    socket.on('close', () => upstreamSocket.destroy())
+    upstreamSocket.on('close', () => socket.destroy())
   })
 
   server.on('clientError', (_error, socket) => {
@@ -449,39 +619,61 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
 
   const address = server.address()
   if (!address || typeof address === 'string') {
-    server.close()
+    await closeServer()
     throw new Error('HarnessDock gateway did not expose a TCP address.')
   }
   const hostForUrl = address.address.includes(':') ? `[${address.address}]` : address.address
   const localUrl = `http://${hostForUrl}:${address.port}/`
-  publicBase = options.publicBaseUrl ? normalizeBaseUrl(options.publicBaseUrl) : normalizeBaseUrl(localUrl)
+  publicBase = configuredPublicBase ?? normalizeBaseUrl(localUrl)
   const publicLoopback = isLoopbackHost(publicBase.hostname.replace(/^\[|\]$/g, ''))
   if (publicBase.protocol !== 'https:' && !publicLoopback && !options.allowInsecurePublicUrl) {
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await closeServer()
     throw new Error('Remote HarnessDock gateways require an HTTPS publicBaseUrl.')
   }
   if (!isLoopbackHost(bindHost) && !options.publicBaseUrl && !options.allowInsecurePublicUrl) {
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await closeServer()
     throw new Error('Non-loopback gateway binding requires an explicit HTTPS publicBaseUrl.')
   }
-  if (publicBase.pathname !== '/') {
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+  if (publicBase.pathname !== '/' || publicBase.search || publicBase.hash || publicBase.username || publicBase.password) {
+    await closeServer()
     throw new Error('HarnessDock gateway publicBaseUrl must be an origin-root URL (no path prefix).')
   }
 
   options.log?.(`listening on ${localUrl}; public=${publicBase.toString()}`)
+
+  let stopPromise: Promise<void> | undefined
+  const stopGateway = (): Promise<void> => {
+    if (stopPromise) return stopPromise
+    stopPromise = (async () => {
+      if (stopped) return
+      stopped = true
+      pairing.clear()
+      launches.clear()
+      sessions.clear()
+      devices.clear()
+      // Closing the listener alone waits for upgraded WebSocket connections.
+      // Destroy every accepted socket first so Runtime shutdown cannot hang
+      // forever on a mobile client that kept a tunnel open.
+      await closeServer()
+    })()
+    return stopPromise
+  }
 
   return {
     localUrl,
     publicUrl: publicBase.toString(),
     createPairingTicket() {
       prune()
-      let raw = ''
-      let key = ''
-      do {
+      let raw: string | undefined
+      let key: string | undefined
+      for (let attempt = 0; attempt < 8; attempt += 1) {
         raw = randomInt(0, 100_000_000).toString().padStart(8, '0')
         key = digestCode(raw)
-      } while (pairing.has(key))
+        if (!pairing.has(key)) break
+        raw = undefined
+        key = undefined
+      }
+      if (!raw || !key) throw new Error('Unable to allocate a unique pairing ticket.')
       const expiresAt = Date.now() + pairingTtlMs
       pairing.set(key, { expiresAt })
       return { code: pairingCodeDisplay(raw), expiresAt: new Date(expiresAt).toISOString() }
@@ -520,14 +712,6 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       if (count) options.log?.(`revoked all mobile devices (${count})`)
       return count
     },
-    async stop() {
-      pairing.clear()
-      launches.clear()
-      sessions.clear()
-      devices.clear()
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()))
-      })
-    },
+    stop: stopGateway,
   }
 }

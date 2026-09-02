@@ -1,5 +1,5 @@
 /**
- * 只启动一个 dsh 主进程（不拉起 Electron 客户端），用于日常开发验证。
+ * 只启动一个 dsh 主进程（不拉起桌面客户端），用于日常开发验证。
  *
  * 用法：
  *   pnpm dev:dsh            # 默认优先 bundled 运行时（runtimes/pack）

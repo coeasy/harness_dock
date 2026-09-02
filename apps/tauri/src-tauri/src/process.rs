@@ -16,6 +16,17 @@ pub(crate) struct StartingProcessGuard {
     pid: u32,
 }
 
+impl StartingProcessGuard {
+    /// Remove the PID at the exact point where the caller publishes the child
+    /// into its managed Runtime/Gateway state. Until then shutdown treats it
+    /// as an in-flight child and cannot miss the short publication window.
+    pub(crate) fn complete(&self) {
+        if let Ok(mut pids) = self.registry.lock() {
+            pids.remove(&self.pid);
+        }
+    }
+}
+
 impl Drop for StartingProcessGuard {
     fn drop(&mut self) {
         if let Ok(mut pids) = self.registry.lock() {
@@ -24,17 +35,36 @@ impl Drop for StartingProcessGuard {
     }
 }
 
-pub(crate) fn register_starting_process(
+/// Spawn a child while holding the registry lock across the OS spawn call.
+///
+/// Registering a PID in a second step leaves a small but real shutdown race:
+/// an exit request could observe an empty registry after `spawn()` returned and
+/// before the PID was inserted. Holding the lock makes shutdown wait for the
+/// PID publication, after which the cleanup pass can terminate it reliably.
+pub(crate) fn spawn_registered(
+    command: &mut Command,
     registry: &StartingProcessRegistry,
-    pid: u32,
-) -> StartingProcessGuard {
-    if let Ok(mut pids) = registry.lock() {
-        pids.insert(pid);
+    quitting: &std::sync::atomic::AtomicBool,
+) -> Result<(Child, StartingProcessGuard), String> {
+    let mut pids = registry
+        .lock()
+        .map_err(|_| "启动进程注册表已损坏。".to_string())?;
+    if quitting.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("HarnessDock 正在退出，已拒绝启动后台进程。".into());
     }
-    StartingProcessGuard {
-        registry: Arc::clone(registry),
-        pid,
-    }
+    let child = command
+        .spawn()
+        .map_err(|error| format!("无法启动受管后台进程: {error}"))?;
+    let pid = child.id();
+    pids.insert(pid);
+    drop(pids);
+    Ok((
+        child,
+        StartingProcessGuard {
+            registry: Arc::clone(registry),
+            pid,
+        },
+    ))
 }
 
 pub(crate) fn stop_starting_processes(registry: &StartingProcessRegistry) {

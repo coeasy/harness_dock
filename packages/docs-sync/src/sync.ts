@@ -16,7 +16,7 @@ import {
   versionToGitTag,
 } from './versions.ts'
 
-const DEFAULT_CLIENT_VERSION = '0.1.0'
+const DEFAULT_CLIENT_VERSION = '0.2.0'
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const ORIGIN_PATH = path.resolve(here, '..', 'origin.json')
 export const MATRIX_PATH = path.resolve(here, '..', 'capability-matrix.yaml')

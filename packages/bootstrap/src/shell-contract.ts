@@ -2,8 +2,8 @@
  * Versioned contract between a host shell and the Harness Web surface.
  *
  * The web app only knows this small bridge. Native hosts are free to map the
- * commands to Tauri, Electron, or another dsh host without leaking their
- * implementation details into the Harness Web page.
+ * commands to Tauri or another dsh host without leaking native implementation
+ * details into the Harness Web page.
  */
 export const SHELL_API_VERSION = 1 as const
 

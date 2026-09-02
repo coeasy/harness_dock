@@ -30,6 +30,9 @@ const BRIDGE_SCRIPT: &str = r#"
     Object.keys(commandMap).map((command) => [command, typeof tauriInvoke === 'function'])
   ));
   const invoke = (command, payload) => {
+    if (typeof command !== 'string' || !Object.prototype.hasOwnProperty.call(commandMap, command)) {
+      return Promise.reject(new Error('外壳命令无效'));
+    }
     const nativeCommand = commandMap[command];
     if (!nativeCommand || typeof tauriInvoke !== 'function') {
       return Promise.reject(new Error('外壳桥接不可用'));
@@ -37,16 +40,31 @@ const BRIDGE_SCRIPT: &str = r#"
     return tauriInvoke(nativeCommand, payload);
   };
   const subscribe = (listener) => {
-    if (typeof tauriListen !== 'function') return () => {};
+    if (typeof tauriListen !== 'function' || typeof listener !== 'function') return () => {};
+    let active = true;
     let unsubscribers = [];
-    const register = (eventName, map) => Promise.resolve(tauriListen(eventName, (event) => listener(map(event?.payload))))
-      .then((stop) => { if (typeof stop === 'function') unsubscribers.push(stop); })
+    const stop = (unsubscribe) => {
+      try {
+        const result = unsubscribe();
+        if (result && typeof result.catch === 'function') void result.catch(() => {});
+      } catch (_) {}
+    };
+    const register = (eventName, map) => Promise.resolve()
+      .then(() => tauriListen(eventName, (event) => listener(map(event?.payload))))
+      .then((unsubscribe) => {
+        if (typeof unsubscribe !== 'function') return;
+        if (!active) {
+          stop(unsubscribe);
+          return;
+        }
+        unsubscribers.push(unsubscribe);
+      })
       .catch(() => {});
-    void Promise.all([
-      register('harnessdock-shell-status', (payload) => payload),
-      register('harnessdock-shell-error', (payload) => ({ state: 'error', message: String(payload || '外壳操作失败') }))
-    ]);
-    return () => { unsubscribers.splice(0).forEach((stop) => stop()); };
+    void register('harnessdock-shell-error', (payload) => ({ state: 'error', message: String(payload || '外壳操作失败') }));
+    return () => {
+      active = false;
+      unsubscribers.splice(0).forEach(stop);
+    };
   };
   window.__DSH_SHELL_BRIDGE__ = Object.freeze({
     apiVersion: 1,

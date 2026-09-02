@@ -14,7 +14,6 @@ export type {
   RuntimeSession,
 } from './runtime-provider.ts'
 export {
-  ELECTRON_HOST_PROFILE,
   HOST_PROFILES,
   TAURI_ANDROID_HOST_PROFILE,
   TAURI_HOST_PROFILE,
@@ -41,6 +40,7 @@ export {
   HARNESS_GATEWAY_PAIR_PATH,
   HARNESS_GATEWAY_PROTOCOL_VERSION,
   assertGatewayConnectUrl,
+  assertGatewayHealthPayload,
   normalizeHarnessGatewayOrigin,
 } from './mobile-gateway-contract.ts'
 export type {
@@ -69,7 +69,6 @@ export type {
 } from './runtime-update.ts'
 export { backupOrigin, defaultPreviousOriginPath, readPreviousOrigin } from './rollback.ts'
 export {
-  ELECTRON_HOST,
   TAURI_HOST,
   defaultHostUserDataDir,
   defaultSharedStateDir,
@@ -82,6 +81,7 @@ export type {
 } from './host.ts'
 export {
   RuntimeLeaseConflictError,
+  type LegacyRuntimeLeaseHost,
   acquireRuntimeLease,
   defaultRuntimeLeaseRoot,
   inspectRuntimeLease,

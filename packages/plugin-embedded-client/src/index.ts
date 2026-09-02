@@ -27,7 +27,7 @@ export function apply(ctx: PluginCtx): void {
     const addr = findListenAddress(ctx)
     if (!addr) return
 
-    // dsh 0.1.2+ protects index.html with a process launch token. Resolve the
+    // dsh 0.1.2+ index.html with its process launch token. Resolve the
     // official browser URL through Connection when available, then perform the
     // same token -> cookie -> clean-page handshake a real browser performs.
     // Older runtimes have no authenticatedUrl() and keep using the bare URL.

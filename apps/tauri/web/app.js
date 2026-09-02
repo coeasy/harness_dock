@@ -178,6 +178,9 @@
         window.__harnessDockShowRecovery?.(error)
         await showControl()
       } finally {
+        // The promise only deduplicates one in-flight boot. Keep the button
+        // usable after an explicit Runtime stop or a later crash recovery.
+        desktopStartup = undefined
         $('runtime-start').disabled = false
       }
     })()
@@ -189,6 +192,15 @@
       void splashStatus('正在初始化客户端…')
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
+      const desktop = platform.surface === 'desktop' && platform.runtimeMode === 'local'
+      $('shell-settings-entry')?.classList.toggle('hidden', !desktop)
+      $('shell-open-harness')?.classList.toggle('hidden', !desktop)
+      const startupRecovery = await call('startup_recovery_status').catch(() => undefined)
+      if (startupRecovery) {
+        window.__harnessDockShowRecovery?.(startupRecovery)
+        await showControl()
+        return
+      }
       if (platform.runtimeMode === 'local') {
         // Native startup owns the normal desktop path. This page stays passive
         // while hidden and is revealed only if native startup needs recovery.
@@ -292,12 +304,29 @@
 
   $('gateway-host-stop').addEventListener('click', async () => {
     $('gateway-host-stop').disabled = true
+    let refreshed = false
     try {
       await call('gateway_host_stop')
       $('host-pairing').textContent = ''
       await refreshGatewayHost()
+      refreshed = true
     } catch (error) {
       status(hostDetail, String(error), true)
+      // Re-read the native state after a failed stop. The command can fail
+      // after the sidecar has already exited; leaving the button disabled
+      // would strand the recovery control until the page is reopened.
+      try {
+        const current = await refreshGatewayHost()
+        refreshed = true
+        // A transient admin/IPC failure may leave a live sidecar in place.
+        // Keep Stop retryable in that state instead of making the user rely
+        // on a page reload or an unrelated refresh click.
+        if (current.running) $('gateway-host-stop').disabled = false
+      } catch {
+        // The IPC bridge is unavailable; keep the recovery control usable.
+      }
+    } finally {
+      if (!refreshed) $('gateway-host-stop').disabled = false
     }
   })
 
@@ -322,6 +351,8 @@
       await refreshGatewayHost()
     } catch (error) {
       status(hostDetail, String(error), true)
+    } finally {
+      $('gateway-revoke-all').disabled = false
     }
   })
 

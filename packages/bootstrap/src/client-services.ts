@@ -274,8 +274,8 @@ export interface PolicyService {
 }
 
 /**
- * Compatibility aggregate used by the Electron v0.1 -> v0.2 migration.
- * New hosts should implement ClientServiceContract instead.
+ * Compatibility aggregate for older integrations. New Tauri surfaces should
+ * implement ClientServiceContract instead.
  */
 export interface ClientServices {
   lifecycle: AppLifecycleService

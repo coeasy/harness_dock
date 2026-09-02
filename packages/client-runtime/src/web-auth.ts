@@ -14,6 +14,31 @@ function cookiePair(setCookie: string | null): string | undefined {
   return pair ? pair : undefined
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1'
+}
+
+function safeWebUrl(value: string): URL | null {
+  try {
+    const url = new URL(value)
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !isLoopbackHost(url.hostname)) return null
+    if (url.username || url.password || url.hash) return null
+    return url
+  } catch {
+    return null
+  }
+}
+
+function sameOriginLocation(location: string, base: URL): URL | null {
+  try {
+    const resolved = new URL(location, base)
+    return resolved.origin === base.origin ? resolved : null
+  } catch {
+    return null
+  }
+}
+
 async function responseLooksReady(response: Response, requireHtml: boolean): Promise<boolean> {
   if (!response.ok) return false
   const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
@@ -27,20 +52,22 @@ async function responseLooksReady(response: Response, requireHtml: boolean): Pro
  * Open the dsh Web URL the same way a browser does.
  *
  * dsh <= 0.1.1 serves the loopback index directly. dsh 0.1.2+ protects the
- * index with a process launch token: GET /?token=... returns 303 + Set-Cookie,
+ * index with a reusable process launch token: GET /?token=... returns 303 + Set-Cookie,
  * then the browser follows the clean / URL with that cookie. Supporting both
  * flows keeps old runtimes compatible while preserving the authenticated URL
- * that Electron must navigate for newer runtimes.
+ * that the native host must navigate for newer runtimes.
  */
 export async function openWebUiSession(
   url: string,
   options: WebUiProbeOptions = {},
 ): Promise<WebUiSession | null> {
+  const baseUrl = safeWebUrl(url)
+  if (!baseUrl) return null
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 1_000)
   const requireHtml = options.requireHtml ?? false
   try {
-    const initial = await fetch(url, {
+    const initial = await fetch(baseUrl, {
       signal: controller.signal,
       redirect: 'manual',
     })
@@ -51,14 +78,15 @@ export async function openWebUiSession(
     const cookie = cookiePair(initial.headers.get('set-cookie'))
     if (!location || !cookie) return null
 
-    const cleanUrl = new URL(location, url).href
+    const cleanUrl = sameOriginLocation(location, baseUrl)
+    if (!cleanUrl) return null
     const page = await fetch(cleanUrl, {
       signal: controller.signal,
       redirect: 'manual',
       headers: { cookie },
     })
     if (!(await responseLooksReady(page, requireHtml))) return null
-    return { url: cleanUrl, cookie }
+    return { url: cleanUrl.href, cookie }
   } catch {
     return null
   } finally {
@@ -71,10 +99,12 @@ export async function probeWebUiSession(
   session: WebUiSession,
   options: WebUiProbeOptions = {},
 ): Promise<boolean> {
+  const sessionUrl = safeWebUrl(session.url)
+  if (!sessionUrl) return false
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 1_000)
   try {
-    const response = await fetch(session.url, {
+    const response = await fetch(sessionUrl, {
       signal: controller.signal,
       redirect: 'manual',
       headers: session.cookie ? { cookie: session.cookie } : undefined,

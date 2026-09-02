@@ -6,11 +6,9 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $PSScriptRoot
-$build = Join-Path $root 'apps\desktop\build'
+$build = Join-Path $root 'apps\tauri\src-tauri\icons'
 $sources = @(
-  (Join-Path $build 'icon-256.png'),
-  (Join-Path $build 'icon-512.png'),
-  (Join-Path $build 'icons\1024x1024.png')
+  (Join-Path $build 'app-icon.png')
 )
 
 # Brand teal gradient (matches the splash logo) + a slightly lifted navy base.
@@ -73,7 +71,7 @@ foreach ($src in $sources) {
 }
 
 # ---- rebuild a multi-size .ico from the processed 256px source ----
-$src256 = Join-Path $build 'icon-256.png'
+$src256 = Join-Path $build 'app-icon.png'
 $icoPath = Join-Path $build 'icon.ico'
 $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $pngData = @{}

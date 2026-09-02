@@ -60,12 +60,17 @@ fn normalized_version(value: &str) -> String {
 
 fn version_tuple(value: &str) -> Option<(u64, u64, u64)> {
     let normalized = normalized_version(value);
-    let mut parts = normalized.split('.');
-    Some((
+    let core = normalized.split('-').next()?;
+    let mut parts = core.split('.');
+    let tuple = (
         parts.next()?.parse().ok()?,
         parts.next()?.parse().ok()?,
-        parts.next()?.split('-').next()?.parse().ok()?,
-    ))
+        parts.next()?.parse().ok()?,
+    );
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(tuple)
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
@@ -112,7 +117,10 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         });
     }
 
-    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    let latest_version = release.tag_name.trim_start_matches('v').trim().to_string();
+    if version_tuple(&latest_version).is_none() {
+        return Err("更新服务返回了无效的 HarnessDock 版本号，已拒绝。".into());
+    }
     Ok(UpdateInfo {
         available: is_newer(&latest_version, &current_version),
         current_version,
@@ -189,6 +197,9 @@ pub async fn update_install(
                 format!("无法配置安全更新服务: {error}")
             })?
             .timeout(Duration::from_secs(30))
+            // The host owns Runtime/Gateway teardown and must not be restarted
+            // by the updater before the explicit cleanup below has completed.
+            .restart_after_install(false)
             .on_before_exit({
                 let shutdown_app = app.clone();
                 move || crate::stop_managed_processes(&shutdown_app)
@@ -255,6 +266,7 @@ pub async fn update_install(
         // Tauri's restart implementation.
         state.quitting.store(true, Ordering::SeqCst);
         crate::stop_managed_processes(&app);
+        crate::wait_for_managed_processes(app.clone()).await;
         app.restart();
     }
 }
