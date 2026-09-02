@@ -51,6 +51,8 @@ describe('Tauri v0.2 host contract', () => {
     expect(release).toContain('expected 20 non-empty assets')
     expect(release).toContain('latest.json')
     expect(release).toContain('.app.tar.gz.sig')
+    expect(release).toContain('release asset must match exactly once')
+    expect(release).toContain('missing runtime root manifest')
     expect(candidate).toContain('Require signed Tauri updater material')
     expect(candidate).not.toContain('@dsh/desktop')
   })
@@ -104,10 +106,15 @@ describe('Tauri v0.2 host contract', () => {
     expect(sizeGate).toContain('.so')
   })
 
-  it('never grants remote Harness/Gateway documents local Tauri IPC permissions', () => {
+  it('keeps local control permissions isolated from remote documents', () => {
     const capability = readJson('apps/tauri/src-tauri/capabilities/local-main.json')
+    const remoteHarness = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
     expect(capability.remote).toBeUndefined()
     expect(capability.windows).toEqual(['main'])
+    expect(capability.permissions).not.toContain('harness-shell')
+    expect(remoteHarness.local).toBe(false)
+    expect(remoteHarness.windows).toEqual(['harness'])
+    expect(remoteHarness.permissions).not.toContain('core:default')
   })
 
   it('boots directly into the isolated Harness WebView on desktop', () => {
@@ -176,12 +183,21 @@ describe('Tauri v0.2 host contract', () => {
       'http://127.0.0.1:*',
       'http://localhost:*/*',
       'http://localhost:*',
+      'http://[::1]:*/*',
+      'http://[::1]:*',
       'https://127.0.0.1:*/*',
       'https://127.0.0.1:*',
       'https://localhost:*/*',
       'https://localhost:*',
+      'https://[::1]:*/*',
+      'https://[::1]:*',
     ])
-    expect(capability.permissions).toContain('harness-shell')
+    expect(capability.permissions).toEqual([
+      'core:event:allow-listen',
+      'core:event:allow-unlisten',
+      'core:window:allow-start-dragging',
+      'harness-shell',
+    ])
     expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).not.toContain('harness-shell')
     expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "update_check", "update_install", "app_quit"]')
     expect(shell).toContain('SHELL_WEB_SCRIPT')
