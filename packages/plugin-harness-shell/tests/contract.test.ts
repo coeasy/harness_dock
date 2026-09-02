@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { apply, service } from '../src/index.ts'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -29,5 +30,32 @@ describe('independent Harness Shell dsh plugin', () => {
     expect(web).toContain('app.update.install')
     expect(bundledEntry).toContain('harness-shell')
     expect(bundledWeb).toContain('window.__DSH_SHELL_BRIDGE__')
+  })
+
+  it('registers the shell service when the host accepts it', () => {
+    let registeredKey = ''
+    let registeredValue
+    apply({
+      provide(key, value) {
+        registeredKey = key
+        registeredValue = value
+      },
+    })
+    expect(registeredKey).toBe('harnessShell')
+    expect(registeredValue).toBe(service)
+  })
+
+  it('fails open when an optional host registration hook throws', () => {
+    expect(() => apply({
+      provide() {
+        throw new Error('host registry unavailable')
+      },
+    })).not.toThrow()
+
+    expect(() => apply({
+      set() {
+        throw new Error('legacy host registry unavailable')
+      },
+    })).not.toThrow()
   })
 })
