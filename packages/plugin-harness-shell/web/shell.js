@@ -8,6 +8,7 @@
     ['web.restart', '重启 Harness Web'],
     ['runtime.safe-mode', '隔离插件启动'],
     ['runtime.clear-quarantine', '清除隔离并重启'],
+    ['gateway.manage', '移动设备 / Gateway'],
     ['diagnostics.open', '打开诊断与恢复'],
     ['app.update.check', '检查 GitHub 更新'],
     ['app.update.install', '安装 GitHub 更新'],
@@ -18,6 +19,7 @@
   const can = (command) => compatibleBridge
     ? bridge.capabilities?.[command] === true
     : command === 'web.reload'
+  const isWindowCommand = (command) => typeof command === 'string' && command.startsWith('window.')
   const invoke = (command, payload) => {
     if (compatibleBridge && bridge.invoke && can(command)) return bridge.invoke(command, payload)
     if (command === 'web.reload') {
@@ -60,10 +62,10 @@
       <div class="bar" data-tauri-drag-region role="toolbar" aria-label="HarnessDock 外壳">
         <div class="brand"><span class="mark" aria-hidden="true"></span><span class="title">HarnessDock</span><span class="status" data-status>Harness Web</span></div>
         <button data-action="web.reload" title="刷新 Harness Web" aria-label="刷新 Harness Web"><span class="icon">↻</span></button>
+        <button data-menu-toggle title="菜单" aria-label="菜单"><span class="icon">☰</span></button>
         <button data-action="window.minimize" title="最小化" aria-label="最小化"><span class="icon">−</span></button>
         <button data-action="window.toggleMaximize" title="最大化" aria-label="最大化"><span class="icon" data-maximize-icon>□</span></button>
         <button data-action="window.close" title="关闭窗口" aria-label="关闭窗口"><span class="icon">×</span></button>
-        <button data-menu-toggle title="菜单" aria-label="菜单"><span class="icon">☰</span></button>
       </div>
       <div class="menu" data-menu role="menu"></div>
       <div class="toast" data-toast role="status"></div>`
@@ -90,17 +92,26 @@
       toast.classList.add('show')
       window.setTimeout(() => toast.classList.remove('show'), 2600)
     }
+    const setBusinessActionsDisabled = (disabled) => {
+      shadow.querySelectorAll('button[data-action]').forEach((button) => {
+        if (!isWindowCommand(button.dataset.action)) button.disabled = disabled
+      })
+    }
     const run = async (command, label) => {
-      if (state.busy || !can(command)) return
-      state.busy = true
-      setStatus(`${label}…`)
-      shadow.querySelectorAll('button').forEach((button) => { button.disabled = true })
+      const windowCommand = isWindowCommand(command)
+      if ((!windowCommand && state.busy) || !can(command)) return
+      if (!windowCommand) {
+        state.busy = true
+        setStatus(`${label}…`)
+        setBusinessActionsDisabled(true)
+      }
       try {
         const result = await invoke(command)
         if (command === 'window.toggleMaximize' && result) {
           state.maximized = Boolean(result.maximized)
           updateMaximizeIcon()
         }
+        if (windowCommand) return
         if (command === 'app.update.check' && result) {
           if (result.available) {
             const version = result.latestVersion ? ` v${result.latestVersion}` : ''
@@ -116,16 +127,19 @@
         if (command !== 'web.reload') setStatus('Harness Web')
       } catch (error) {
         const message = error?.message || String(error)
-        setStatus('外壳操作失败')
+        if (!windowCommand) setStatus('外壳操作失败')
         showToast(`${label}失败：${message}`)
       } finally {
-        state.busy = false
-        shadow.querySelectorAll('button').forEach((button) => { button.disabled = false })
+        if (!windowCommand) {
+          state.busy = false
+          setBusinessActionsDisabled(false)
+        }
       }
     }
 
-    commands.forEach(([command, label], index) => {
-      if (index === 2 || index === 5) {
+    const sectionStarts = new Set(['runtime.safe-mode', 'gateway.manage', 'app.update.check'])
+    commands.forEach(([command, label]) => {
+      if (sectionStarts.has(command)) {
         const separator = document.createElement('div')
         separator.className = 'separator'
         menu.appendChild(separator)
