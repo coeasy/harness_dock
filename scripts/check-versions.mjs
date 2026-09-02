@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Check that every workspace package.json version matches the repo root
- * package.json version (single source of truth).
+ * Check that every version-bearing product artifact matches the repo root
+ * package.json version (single source of truth for the v0.2.0 release train).
  * Exit 0 and print "all versions match: <version>" on success, exit 1 and
  * print each mismatch otherwise.
  */
@@ -12,6 +12,12 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
 const rootVersion = rootPkg.version
+const versionedFiles = [
+  ['apps/tauri/src-tauri/tauri.conf.json', (value) => value.version],
+  ['release-manifest.json', (value) => value.version],
+  ['packages/docs-sync/origin.json', (value) => value.clientVersion],
+  ['packages/plugin-harness-shell/manifest.json', (value) => value.version],
+]
 
 const workspaceYaml = readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8')
 const globs = workspaceYaml
@@ -33,6 +39,28 @@ for (const glob of globs) {
     if (pkg.version && pkg.version !== rootVersion) {
       mismatches.push(`${path.relative(repoRoot, pkgPath)}: ${pkg.version} (root: ${rootVersion})`)
     }
+  }
+}
+
+for (const [relativePath, readVersion] of versionedFiles) {
+  const filePath = path.join(repoRoot, relativePath)
+  if (!existsSync(filePath)) {
+    mismatches.push(`${relativePath}: file is missing`)
+    continue
+  }
+  const value = JSON.parse(readFileSync(filePath, 'utf8'))
+  const version = readVersion(value)
+  if (version !== rootVersion) {
+    mismatches.push(`${relativePath}: ${version} (root: ${rootVersion})`)
+  }
+}
+
+const cargoPath = path.join(repoRoot, 'apps', 'tauri', 'src-tauri', 'Cargo.toml')
+if (existsSync(cargoPath)) {
+  const cargo = readFileSync(cargoPath, 'utf8')
+  const packageVersion = cargo.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1]
+  if (packageVersion !== rootVersion) {
+    mismatches.push(`apps/tauri/src-tauri/Cargo.toml: ${packageVersion} (root: ${rootVersion})`)
   }
 }
 

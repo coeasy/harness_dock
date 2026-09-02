@@ -10,6 +10,7 @@ import { registerMobileIpc } from './mobile/mobile-ipc.ts'
 import { fmt, t } from './i18n.ts'
 import { bundledRoot, originPath, pluginPath } from './paths.ts'
 import { createElectronClientAdapter } from './electron-client-adapter.ts'
+import { registerShellIpc } from './shell-ipc.ts'
 
 const clientAdapter = createElectronClientAdapter()
 
@@ -62,6 +63,7 @@ if (process.platform === 'win32') {
 registerSplashIpc()
 registerDiagnosticsIpc()
 registerMobileIpc()
+registerShellIpc()
 
 /** Restart the whole app (used by boot-failure retry). */
 function relaunchApp(): void {

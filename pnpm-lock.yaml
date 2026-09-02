@@ -94,6 +94,12 @@ importers:
         specifier: ^0.25.9
         version: 0.25.12
 
+  packages/plugin-harness-shell:
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.9
+        version: 0.25.12
+
   tests/e2e:
     devDependencies:
       '@playwright/test':

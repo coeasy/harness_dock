@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "harness-shell",
-  "description": "Minimal capability for the loopback Harness WebView shell. It can open the separate local Plugin Diagnostics window and operate only the owning Harness window.",
+  "description": "v0.2.0 Harness Shell plugin capability for the loopback Harness WebView. It can operate only the owning Harness window and its host-managed Runtime/update actions.",
   "local": false,
   "platforms": ["linux", "macOS", "windows"],
   "remote": {

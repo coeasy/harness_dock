@@ -1,0 +1,28 @@
+{
+  "name": "@dsh/plugin-harness-shell",
+  "version": "0.2.0",
+  "description": "Portable Harness Web shell and versioned dsh host bridge contract",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./manifest.json": "./manifest.json",
+    "./web/shell.js": "./web/shell.js"
+  },
+  "files": ["lib", "manifest.json", "src", "web"],
+  "dsh": {
+    "kind": "shell",
+    "manifest": "./manifest.json",
+    "webEntry": "./web/shell.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "pnpm bundle",
+    "bundle": "esbuild src/index.ts --bundle --format=esm --platform=node --outfile=lib/index.js && node scripts/copy-web.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  }
+}

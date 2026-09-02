@@ -7,6 +7,8 @@ directories:
 extraResources:
   - from: ../../packages/plugin-embedded-client/lib
     to: plugin-embedded-client
+  - from: ../../packages/plugin-harness-shell/lib
+    to: plugin-harness-shell
   - from: ../../apps/tauri/src-tauri/resources/dsh-client-runtime-compat
     to: dsh-client-runtime-compat
   - from: ../../packages/docs-sync/origin.json

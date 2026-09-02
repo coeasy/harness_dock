@@ -25,11 +25,34 @@ const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'ut
 const origin = JSON.parse(
   readFileSync(path.join(repoRoot, 'packages', 'docs-sync', 'origin.json'), 'utf8'),
 )
+const manifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
 const releasedPath = path.join(repoRoot, 'packages', 'docs-sync', 'released-origin.json')
 
 const errors = []
 const clientVersion = rootPkg.version
 const { dshVersion } = origin
+
+if (manifest.version !== clientVersion) {
+  errors.push(
+    `release-manifest.json.version (${manifest.version}) != package.json version (${clientVersion})`,
+  )
+}
+if (manifest.shell?.version !== clientVersion) {
+  errors.push(
+    `release-manifest.json.shell.version (${manifest.shell?.version}) != package.json version (${clientVersion})`,
+  )
+}
+if (manifest.shell?.apiVersion !== 1) {
+  errors.push('release-manifest.json.shell.apiVersion must be 1')
+}
+if (manifest.runtime?.version !== origin.dshVersion) {
+  errors.push(
+    `release-manifest.json.runtime.version (${manifest.runtime?.version}) != origin.json.dshVersion (${origin.dshVersion})`,
+  )
+}
+if (manifest.runtime?.gitCommit !== origin.gitCommit) {
+  errors.push('release-manifest.json.runtime.gitCommit != origin.json.gitCommit')
+}
 
 if (!dshVersion || typeof dshVersion !== 'string') {
   errors.push('origin.json is missing dshVersion')

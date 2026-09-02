@@ -1,6 +1,6 @@
 {
   "name": "@dsh/bootstrap",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -10,7 +10,8 @@
     "./runtime-provider": "./src/runtime-provider.ts",
     "./runtime-update": "./src/runtime-update.ts",
     "./host-capabilities": "./src/host-capabilities.ts",
-    "./client-core": "./src/client-core.ts"
+    "./client-core": "./src/client-core.ts",
+    "./shell-contract": "./src/shell-contract.ts"
   },
   "scripts": { "build": "tsc -p tsconfig.json" },
   "dependencies": {

@@ -1,6 +1,6 @@
 {
   "name": "harnessdock",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "private": true,
   "description": "DeepSeek Harness full-capability client: embed official Web UI, pin docs+runtime to the same exact version.",
   "type": "module",

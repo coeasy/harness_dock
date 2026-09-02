@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Exact release tag to publish (for example v0.2.1)'
+        description: 'Exact release tag to publish (for example v0.2.0)'
         type: string
         required: true
       candidate_run_id:

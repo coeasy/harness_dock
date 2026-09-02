@@ -6,8 +6,8 @@
  *   node scripts/pack.mjs --os <current|win|mac|linux> --scenario <thin|full>
  *
  * Steps (matching the previous pack:* chains exactly):
- *   1. Bundle the embedded client so its lib is always current
- *      (pnpm --filter @dsh/plugin-embedded-client bundle, at repo root).
+ *   1. Bundle the embedded client and independent shell plugin so their lib
+ *      files are always current.
  *   2. Bundle the Electron main/preload (pnpm bundle, at apps/desktop).
  *   3. Run electron-builder with the scenario config and OS targets.
  */
@@ -171,6 +171,14 @@ function verifyPackagedResources() {
       `[pack] packaged embedded-client plugin missing under ${outputRoot}; refusing to publish a broken client`,
     )
   }
+  const shellDirs = resourceDirs.filter((dir) =>
+    existsSync(path.join(dir, 'plugin-harness-shell', 'index.js')),
+  )
+  if (shellDirs.length === 0) {
+    throw new Error(
+      `[pack] packaged Harness Shell plugin missing under ${outputRoot}; refusing to publish a client without the v0.2.0 shell`,
+    )
+  }
   const compatibilityDirs = resourceDirs.filter((dir) =>
     existsSync(path.join(dir, 'dsh-client-runtime-compat', 'index.js')) &&
     existsSync(path.join(dir, 'dsh-client-runtime-compat', 'client.js')),
@@ -191,9 +199,9 @@ function verifyPackagedResources() {
         `[pack] packaged full runtime missing under ${outputRoot}; refusing to publish a package that downloads ~300 MB on first launch`,
       )
     }
-    console.log(`[pack] verified full runtime + embedded plugin in ${runtimeDirs.length} unpacked app(s)`)
+    console.log(`[pack] verified full runtime + embedded/shell plugins in ${runtimeDirs.length} unpacked app(s)`)
   } else {
-    console.log(`[pack] verified embedded plugin in ${pluginDirs.length} unpacked app(s)`)
+    console.log(`[pack] verified embedded/shell plugins in ${pluginDirs.length} unpacked app(s)`)
   }
 }
 
@@ -221,6 +229,7 @@ async function prepareFullRuntimes() {
 try {
   // 1. keep the embedded client bundle current
   await run('pnpm', ['--filter', '@dsh/plugin-embedded-client', 'bundle'], repoRoot)
+  await run('pnpm', ['--filter', '@dsh/plugin-harness-shell', 'bundle'], repoRoot)
   // 2. bundle the Electron main/preload
   await run('pnpm', ['bundle'], desktopRoot)
   // Full builds need a matching bundled runtime for every target architecture.

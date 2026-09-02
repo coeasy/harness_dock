@@ -16,7 +16,7 @@ import { bootLogEvent } from './boot-log.ts'
 import { captureCurrentSessionSnapshot } from './session-snapshot.ts'
 import { recordRuntimeCrash, clearRuntimeCrashHistory } from './runtime-recovery.ts'
 import { resolveManagedRuntimeSelection } from './runtime-update-service.ts'
-import { bundledRoot, compatibilityPath, originPath, pluginPath } from './paths.ts'
+import { bundledRoot, compatibilityPath, originPath, pluginPath, shellPluginPath } from './paths.ts'
 import { createWindow } from './window/main-window.ts'
 import { appState } from './state.ts'
 import { refreshTray } from './tray.ts'
@@ -85,6 +85,7 @@ async function createRuntimeProvider(preferredVersion?: string): Promise<LocalRu
     originPath: originPath(),
     pluginPath: pluginPath(),
     compatibilityPath: compatibilityPath(),
+    shellPluginPath: shellPluginPath(),
     packaged: app.isPackaged,
     bundledRoot: managed?.directory ?? bundledRoot(),
     userDataDir,

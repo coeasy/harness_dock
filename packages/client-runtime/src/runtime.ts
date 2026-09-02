@@ -50,6 +50,8 @@ export interface DshRuntimeOptions {
   pluginPath: string
   /** optional host-provided bridge for legacy browser client module imports */
   compatibilityPath?: string
+  /** optional independent dsh shell plugin; absent in older compatibility hosts */
+  shellPluginPath?: string
   packaged?: boolean
   env?: NodeJS.ProcessEnv
   cwd?: string
@@ -146,6 +148,9 @@ export class DshRuntime {
     const env = { ...process.env, ...this.options.env }
     if (this.options.packaged) {
       await verifyPackagedPlugin(this.options.pluginPath, this.options.log)
+      if (this.options.shellPluginPath) {
+        await verifyPackagedPlugin(this.options.shellPluginPath, this.options.log, 'harness shell plugin')
+      }
     }
     const bundledAvailable = this.options.bundledRoot
       ? inspectBundledRuntime(this.options.bundledRoot, process.platform) !== null
@@ -238,7 +243,11 @@ export class DshRuntime {
     const readyFile = path.join(this.workDir, 'ready.json')
     await writeFile(
       patchFile,
-      renderEmbeddedPatch(this.options.pluginPath, this.options.compatibilityPath),
+      renderEmbeddedPatch(
+        this.options.pluginPath,
+        this.options.compatibilityPath,
+        this.options.shellPluginPath,
+      ),
       'utf8',
     )
 
@@ -660,6 +669,7 @@ async function probeHttpReady(url: string): Promise<boolean> {
 async function verifyPackagedPlugin(
   pluginPath: string,
   log?: (message: string) => void,
+  label = 'embedded-client plugin',
 ): Promise<void> {
   try {
     const details = await stat(pluginPath)
@@ -667,10 +677,10 @@ async function verifyPackagedPlugin(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `packaged embedded-client plugin is unavailable: ${pluginPath} (${detail}). Reinstall HarnessDock or use the thin package to redownload the runtime.`,
+      `packaged ${label} is unavailable: ${pluginPath} (${detail}). Reinstall HarnessDock or use the thin package to redownload the runtime.`,
     )
   }
-  log?.(`runtime: embedded plugin verified at ${pluginPath}`)
+  log?.(`runtime: ${label} verified at ${pluginPath}`)
 }
 
 export async function ensureDir(dir: string): Promise<void> {

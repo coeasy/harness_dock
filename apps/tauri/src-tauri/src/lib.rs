@@ -101,6 +101,7 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     let shell = SubmenuBuilder::new(app, "HarnessDock")
         .text("shell-refresh-web", "刷新 Harness Web")
         .text("shell-restart-web", "重启并刷新 Harness Web")
+        .text("shell-safe-mode", "隔离插件启动")
         .text("shell-clear-quarantine", "清除插件隔离并重启")
         .text("shell-update", "自动更新")
         .text("shell-settings", "插件诊断")
@@ -127,6 +128,15 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
                 let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = harness_window::harness_restart_web(handle).await {
+                        report_shell_error(&report_handle, &error);
+                    }
+                });
+            }
+            "shell-safe-mode" => {
+                let handle = app_handle.clone();
+                let report_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = harness_window::harness_safe_mode_restart(handle).await {
                         report_shell_error(&report_handle, &error);
                     }
                 });
@@ -202,6 +212,7 @@ pub fn run() {
             harness_window::control_hide,
             harness_window::harness_reload_web,
             harness_window::harness_restart_web,
+            harness_window::harness_safe_mode_restart,
             harness_window::harness_clear_quarantine_restart,
             harness_window::shell_settings_show,
             harness_window::shell_settings_close,

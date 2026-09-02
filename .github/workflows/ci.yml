@@ -59,6 +59,7 @@ jobs:
           workspaces: apps/tauri/src-tauri
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm --filter @dsh/plugin-embedded-client build
+      - run: pnpm --filter @dsh/plugin-harness-shell build
       - name: Validate Gateway sidecar bundle
         run: pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
       - name: Check Tauri Rust host

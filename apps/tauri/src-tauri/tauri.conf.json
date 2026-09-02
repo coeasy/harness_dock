@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "HarnessDock",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "identifier": "com.harnessdock.client",
   "build": { "frontendDist": "../web" },
   "app": {
@@ -50,6 +50,7 @@
     "resources": {
       "../../../packages/docs-sync/origin.json": "origin.json",
       "../../../packages/plugin-embedded-client/lib/index.js": "plugin-embedded-client/index.js",
+      "../../../packages/plugin-harness-shell/lib/index.js": "plugin-harness-shell/index.js",
       "resources/": ""
     },
     "windows": {

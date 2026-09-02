@@ -35,6 +35,8 @@ export interface BootstrapOptions {
   pluginPath: string
   /** optional host-provided bridge for legacy browser client module imports */
   compatibilityPath?: string
+  /** optional independent dsh shell plugin path for compatible hosts */
+  shellPluginPath?: string
   /** whether we are running inside a packaged app */
   packaged: boolean
   /** bundled runtime root (resources/dsh-runtime) when present */
@@ -104,6 +106,7 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
           origin: o,
           pluginPath: options.pluginPath,
           compatibilityPath: options.compatibilityPath,
+          shellPluginPath: options.shellPluginPath,
           packaged: options.packaged,
           bundledRoot: options.bundledRoot,
           downloadCacheDir,

@@ -11,6 +11,8 @@ directories:
 extraResources:
   - from: ../../packages/docs-sync/origin.json
     to: origin.json
+  - from: ../../packages/plugin-harness-shell/lib
+    to: plugin-harness-shell
 afterPack: ./scripts/copy-runtime.cjs
 nsis:
   artifactName: ${productName}-Setup-${version}-${os}-${arch}-full.${ext}

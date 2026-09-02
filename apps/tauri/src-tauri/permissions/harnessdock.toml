@@ -21,7 +21,7 @@ commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_cre
 [[permission]]
 identifier = "harness-window"
 description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
-commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart"]
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart"]
 
 [[permission]]
 identifier = "runtime-status"
@@ -55,8 +55,8 @@ commands.allow = ["update_install"]
 
 [[permission]]
 identifier = "harness-shell"
-description = "Allows the loopback Harness WebView to open the separate on-demand Plugin Diagnostics window, run signed updates, and control only its own window."
-commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart", "update_install"]
+description = "Allows the independent v0.2.0 Harness Shell plugin to open on-demand diagnostics, run signed updates, and control only its own window."
+commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "update_check", "update_install", "app_quit"]
 
 [[permission]]
 identifier = "shell-settings"

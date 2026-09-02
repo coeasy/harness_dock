@@ -35,6 +35,13 @@ export function compatibilityPath(): string {
   )
 }
 
+export function shellPluginPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'plugin-harness-shell', 'index.js')
+  }
+  return path.join(repoRoot, 'packages', 'plugin-harness-shell', 'lib', 'index.js')
+}
+
 export function bundledRoot(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'dsh-runtime')

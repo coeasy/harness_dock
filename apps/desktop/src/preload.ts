@@ -96,6 +96,16 @@ const TITLEBAR_HTML = `
     display: flex !important; align-items: center; height: 100%;
     padding-right: 8px; gap: 2px; -webkit-app-region: no-drag;
   }
+  #dsh-caption .cap-menu { position: relative; display: inline-flex; align-items: center; height: 100%; }
+  #dsh-caption .cap-menu-btn { width: 42px; height: 26px; border: none; margin: 0; padding: 0; cursor: default; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; background: transparent; color: var(--cap-btn-fg); font-size: 15px; }
+  #dsh-caption .cap-menu-btn:hover { background: var(--cap-btn-hover); color: var(--cap-title); }
+  #dsh-caption .cap-menu-panel { position: absolute; top: 34px; right: 0; z-index: 2; display: none; width: 224px; padding: 6px; border: 1px solid var(--cap-border); border-radius: 10px; background: rgba(12,18,32,.98); box-shadow: 0 14px 30px rgba(0,0,0,.38); }
+  #dsh-caption .cap-menu-panel.is-open { display: flex; flex-direction: column; gap: 3px; }
+  #dsh-caption .cap-menu-panel button { width: 100%; min-height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--cap-title); text-align: left; font: 12px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif; cursor: default; }
+  #dsh-caption .cap-menu-panel button:hover { background: var(--cap-btn-hover); }
+  #dsh-caption .cap-menu-panel button[hidden] { display: none; }
+  #dsh-shell-toast { position: fixed; top: 52px; right: 12px; z-index: 2147483647; max-width: 360px; padding: 8px 11px; border: 1px solid rgba(45,212,191,.42); border-radius: 9px; background: rgba(7,47,38,.96); color: #b8fff2; font: 12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity .16s ease, transform .16s ease; }
+  #dsh-shell-toast.is-visible { opacity: 1; transform: translateY(0); }
   #dsh-caption .cap-btn {
     width: 42px; height: 26px; border: none; margin: 0; padding: 0; cursor: default;
     display: inline-flex !important; align-items: center; justify-content: center;
@@ -117,6 +127,19 @@ const TITLEBAR_HTML = `
   </div>
   <div class="cap-spacer" style="flex:1 1 auto;height:100%;min-width:8px"></div>
   <div class="cap-controls" style="display:flex;align-items:center;height:100%;padding-right:8px;gap:2px">
+    <div class="cap-menu">
+      <button class="cap-menu-btn" data-action="menu" title="菜单" aria-label="菜单" aria-expanded="false">☰</button>
+      <div class="cap-menu-panel" role="menu" aria-label="HarnessDock 菜单">
+        <button data-command="web.reload" role="menuitem">刷新 Harness Web</button>
+        <button data-command="web.restart" role="menuitem">重启 Harness Web</button>
+        <button data-command="runtime.safe-mode" role="menuitem">隔离插件启动</button>
+        <button data-command="runtime.clear-quarantine" role="menuitem">清除插件隔离并重启</button>
+        <button data-command="diagnostics.open" role="menuitem">打开插件诊断</button>
+        <button data-command="app.update.check" role="menuitem">检查 GitHub 更新</button>
+        <button data-command="app.update.install" role="menuitem">安装 GitHub 更新</button>
+        <button data-command="app.quit" role="menuitem">退出 HarnessDock</button>
+      </div>
+    </div>
     <button class="cap-btn" data-action="minimize" title="最小化" aria-label="最小化" style="width:42px;height:26px;border:none;background:transparent;color:var(--cap-btn-fg)">
       <svg viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg>
     </button>
@@ -128,6 +151,7 @@ const TITLEBAR_HTML = `
       <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
     </button>
   </div>
+  <div id="dsh-shell-toast" role="status" aria-live="polite"></div>
 </div>
 `
 
@@ -143,6 +167,9 @@ function installCaption(): void {
   const maxIcon = caption.querySelector('.ic-max') as HTMLElement
   const restoreIcon = caption.querySelector('.ic-restore') as HTMLElement
   const maxBtn = caption.querySelector('[data-action="toggle-maximize"]') as HTMLElement
+  const menuButton = caption.querySelector('[data-action="menu"]') as HTMLElement
+  const menuPanel = caption.querySelector('.cap-menu-panel') as HTMLElement
+  const toast = caption.querySelector('#dsh-shell-toast') as HTMLElement
 
   controls = {
     // The buttons run in the preload's ISOLATED world, where the main-world
@@ -171,10 +198,62 @@ function installCaption(): void {
     })
   })
 
+  const notify = (message: string, error = false): void => {
+    if (!toast) return
+    toast.textContent = message
+    toast.style.borderColor = error ? 'rgba(248,113,113,.45)' : ''
+    toast.style.background = error ? 'rgba(49,19,28,.96)' : ''
+    toast.style.color = error ? '#fecaca' : ''
+    toast.classList.add('is-visible')
+    window.setTimeout(() => toast.classList.remove('is-visible'), 3200)
+  }
+
+  const configureShellMenu = async (): Promise<void> => {
+    let capabilities: Record<string, boolean> = {}
+    try {
+      capabilities = await ipcRenderer.invoke('dsh:shell-capabilities') as Record<string, boolean>
+    } catch {
+      notify('外壳菜单尚未就绪，请稍后重试。', true)
+    }
+    menuPanel?.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) => {
+      const command = button.dataset.command
+      if (!command || capabilities[command] === false) {
+        button.hidden = true
+        return
+      }
+      button.addEventListener('click', async (event) => {
+        event.stopPropagation()
+        menuPanel.classList.remove('is-open')
+        menuButton?.setAttribute('aria-expanded', 'false')
+        button.disabled = true
+        try {
+          await ipcRenderer.invoke('dsh:shell', command)
+          notify(`${button.textContent || '操作'}已执行`)
+        } catch (error) {
+          notify(`${button.textContent || '操作'}失败：${error instanceof Error ? error.message : String(error)}`, true)
+        } finally {
+          button.disabled = false
+        }
+      })
+    })
+  }
+
+  menuButton?.addEventListener('click', (event) => {
+    event.stopPropagation()
+    const open = !menuPanel?.classList.contains('is-open')
+    menuPanel?.classList.toggle('is-open', open)
+    menuButton.setAttribute('aria-expanded', open ? 'true' : 'false')
+  })
+  document.addEventListener('click', () => {
+    menuPanel?.classList.remove('is-open')
+    menuButton?.setAttribute('aria-expanded', 'false')
+  })
+  void configureShellMenu()
+
   // macOS: keep the native traffic lights, hide our buttons.
   if (IS_MAC) {
-    const controlsEl = caption.querySelector('.cap-controls') as HTMLElement
-    if (controlsEl) controlsEl.style.display = 'none'
+    caption.querySelectorAll<HTMLElement>('[data-action="minimize"], [data-action="toggle-maximize"], [data-action="close"]')
+      .forEach((element) => { element.style.display = 'none' })
   }
 
   // Maximize state is pushed from the main process.

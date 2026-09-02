@@ -82,6 +82,18 @@ exports.default = async function afterPack(context) {
     throw new Error('[afterPack] client-runtime compatibility copy failed: ' + compatibilityDst)
   }
 
+  const shellSrc = path.resolve(projectDir, '..', '..', 'packages', 'plugin-harness-shell', 'lib')
+  const shellEntrySrc = path.join(shellSrc, 'index.js')
+  if (!fs.existsSync(shellEntrySrc)) {
+    throw new Error('[afterPack] Harness Shell plugin source bundle missing: ' + shellEntrySrc)
+  }
+  const shellDst = path.join(resourceDir, 'plugin-harness-shell')
+  fs.rmSync(shellDst, { recursive: true, force: true })
+  fs.cpSync(shellSrc, shellDst, { recursive: true })
+  if (!fs.existsSync(path.join(shellDst, 'index.js'))) {
+    throw new Error('[afterPack] Harness Shell plugin copy failed: ' + shellDst)
+  }
+
   // This hook is attached only to electron-builder.full.yml. Do not depend on
   // extraResources having created dsh-runtime first: that staging step may
   // omit node_modules and leave no destination directory at all. An earlier

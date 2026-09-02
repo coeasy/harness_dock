@@ -18,6 +18,7 @@ fn main() {
         "control_hide",
         "harness_reload_web",
         "harness_restart_web",
+        "harness_safe_mode_restart",
         "harness_clear_quarantine_restart",
         "shell_settings_show",
         "shell_settings_close",
@@ -28,6 +29,7 @@ fn main() {
         "runtime_stop",
         "update_check",
         "update_install",
+        "app_quit",
     ];
 
     tauri_build::try_build(

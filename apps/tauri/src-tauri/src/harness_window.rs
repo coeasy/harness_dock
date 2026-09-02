@@ -1,5 +1,5 @@
 #[cfg(not(mobile))]
-use crate::harness_shell::INIT_SCRIPT;
+use crate::harness_shell::init_script;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use url::Url;
@@ -67,7 +67,7 @@ fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>) {
         .state::<crate::AppState>()
         .harness_loading
         .store(false, std::sync::atomic::Ordering::Release);
-    let _ = window.eval(INIT_SCRIPT);
+    let _ = window.eval(init_script());
     let _ = window.show();
     let _ = window.set_focus();
     if let Some(control) = window.app_handle().get_webview_window("main") {
@@ -203,7 +203,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
 
         let _window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
             .title("HarnessDock · DeepSeek Harness")
-            .initialization_script(INIT_SCRIPT)
+            .initialization_script(init_script())
             // Navigation replaces the document and therefore does not rerun
             // initialization_script. Reinstall the local toolbar after every
             // completed loopback navigation so refresh/restart cannot leave a
@@ -310,8 +310,8 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
 }
 
 /// Replace the local Runtime/Gateway and reopen the Harness WebView at the new
-/// loopback URL. A failed restart returns the user to the control page instead
-/// of leaving an apparently ready but disconnected WebView on screen.
+/// loopback URL. A failed restart returns the user to the recovery surface
+/// instead of leaving an apparently ready but disconnected WebView on screen.
 #[tauri::command]
 pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
     #[cfg(mobile)]
@@ -358,6 +358,58 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
                 "Runtime 重启成功，但没有返回 Harness Web 地址。",
             );
             return Err("Runtime 重启成功，但没有返回 Harness Web 地址。".into());
+        };
+        if let Err(error) = harness_open(app.clone(), url).await {
+            show_startup_recovery(&app, &error);
+            return Err(error);
+        }
+        Ok(status)
+    }
+}
+
+/// Explicitly start a clean temporary DSH_HOME and reopen Harness Web. The
+/// user's plugin configuration is not changed and the normal Web surface stays
+/// the only visible application page when this succeeds.
+#[tauri::command]
+pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Err("Android/iOS 使用 Remote Gateway，不支持桌面隔离插件启动。".into());
+    }
+
+    #[cfg(not(mobile))]
+    {
+        if app
+            .state::<crate::AppState>()
+            .quitting
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("HarnessDock 正在退出，已拒绝隔离插件启动。".into());
+        }
+        let state = app.state::<crate::AppState>();
+        if state.web_action.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return Err("Harness Web 正在重启，请稍候再试。".into());
+        }
+        let _restarting = WebActionGuard(&state.web_action);
+        show_splash(&app, "正在以隔离插件模式启动…");
+        if let Some(window) = app.get_webview_window("harness") {
+            if let Err(error) = window.hide() {
+                hide_splash(&app);
+                return Err(format!("无法暂时隐藏 Harness Web 界面: {error}"));
+            }
+        }
+
+        let status = match crate::runtime::restart_managed_safe(app.clone()).await {
+            Ok(status) => status,
+            Err(error) => {
+                show_startup_recovery(&app, &error);
+                return Err(error);
+            }
+        };
+        let Some(url) = status.app_url.clone() else {
+            show_startup_recovery(&app, "隔离插件启动成功，但没有返回 Harness Web 地址。");
+            return Err("隔离插件启动成功，但没有返回 Harness Web 地址。".into());
         };
         if let Err(error) = harness_open(app.clone(), url).await {
             show_startup_recovery(&app, &error);

@@ -170,17 +170,21 @@ fn work_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn embedded_patch(plugin: &Path, compatibility: &Path) -> Result<String, String> {
+fn embedded_patch(plugin: &Path, compatibility: &Path, shell: &Path) -> Result<String, String> {
     let plugin_path = platform::node_cli_path(plugin);
     let compatibility_path = platform::node_cli_path(compatibility);
+    let shell_path = platform::node_cli_path(shell);
     let plugin_url = Url::from_file_path(plugin_path)
         .map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
     let compatibility_url = Url::from_file_path(compatibility_path)
         .map_err(|_| "无法把客户端兼容层路径转换为 file URL。".to_string())?;
+    let shell_url = Url::from_file_path(shell_path)
+        .map_err(|_| "无法把 Harness Shell 插件路径转换为 file URL。".to_string())?;
     let plugin_url = plugin_url.as_str().replace('\'', "''");
     let compatibility_url = compatibility_url.as_str().replace('\'', "''");
+    let shell_url = shell_url.as_str().replace('\'', "''");
     Ok(format!(
-        "- insert:\n    - id: embedded-client\n      name: '{plugin_url}'\n    - id: harnessdock-client-runtime-compat\n      name: '{compatibility_url}'\n"
+        "- insert:\n    - id: embedded-client\n      name: '{plugin_url}'\n    - id: harnessdock-client-runtime-compat\n      name: '{compatibility_url}'\n    - id: harness-shell\n      name: '{shell_url}'\n"
     ))
 }
 
@@ -588,8 +592,10 @@ fn start_with_node_fallback(
     runtime_root: PathBuf,
     plugin_path: PathBuf,
     compatibility_path: PathBuf,
+    shell_plugin_path: PathBuf,
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
+    force_safe_mode: bool,
     starting_processes: process_control::StartingProcessRegistry,
 ) -> Result<RuntimeProcess, String> {
     let normalized_root = platform::node_cli_path(&runtime_root);
@@ -601,8 +607,10 @@ fn start_with_node_fallback(
             runtime_root,
             plugin_path,
             compatibility_path,
+            shell_plugin_path,
             origin_path,
             quarantine_state_path,
+            force_safe_mode,
             Some((preferred_node, preferred_source)),
             starting_processes,
         );
@@ -612,8 +620,10 @@ fn start_with_node_fallback(
         runtime_root.clone(),
         plugin_path.clone(),
         compatibility_path.clone(),
+        shell_plugin_path.clone(),
         origin_path.clone(),
         quarantine_state_path.clone(),
+        force_safe_mode,
         Some((preferred_node, "system")),
         starting_processes.clone(),
     ) {
@@ -625,8 +635,10 @@ fn start_with_node_fallback(
         runtime_root,
         plugin_path,
         compatibility_path,
+        shell_plugin_path,
         origin_path,
         quarantine_state_path,
+        force_safe_mode,
         Some((bundled_node, "bundled")),
         starting_processes,
     ) {
@@ -641,8 +653,10 @@ fn start_blocking(
     runtime_root: PathBuf,
     plugin_path: PathBuf,
     compatibility_path: PathBuf,
+    shell_plugin_path: PathBuf,
     origin_path: PathBuf,
     quarantine_state_path: PathBuf,
+    force_safe_mode: bool,
     forced_node: Option<(PathBuf, &'static str)>,
     starting_processes: process_control::StartingProcessRegistry,
 ) -> Result<RuntimeProcess, String> {
@@ -651,6 +665,7 @@ fn start_blocking(
     let runtime_root = platform::node_cli_path(&runtime_root);
     let plugin_path = platform::node_cli_path(&plugin_path);
     let compatibility_path = platform::node_cli_path(&compatibility_path);
+    let shell_plugin_path = platform::node_cli_path(&shell_plugin_path);
     let origin_path = platform::node_cli_path(&origin_path);
     let quarantine_state_path = platform::node_cli_path(&quarantine_state_path);
     let bundled_node = node_path(&runtime_root);
@@ -659,17 +674,35 @@ fn start_blocking(
     if !dsh.is_file() || (node_source == "bundled" && !bundled_node.is_file()) {
         return Err(format!("Tauri Full Runtime 不完整: node={} dsh={}", bundled_node.display(), dsh.display()));
     }
-    if !plugin_path.is_file() || !compatibility_path.is_file() || !origin_path.is_file() {
-        return Err("Tauri Runtime 缺少 origin.json、embedded-client 插件或客户端兼容层。".into());
+    if !plugin_path.is_file()
+        || !compatibility_path.is_file()
+        || !shell_plugin_path.is_file()
+        || !origin_path.is_file()
+    {
+        return Err("Tauri Runtime 缺少 origin.json、embedded-client 插件、Harness Shell 插件或客户端兼容层。".into());
     }
     let origin: OriginInfo = serde_json::from_str(&fs::read_to_string(&origin_path).map_err(|error| error.to_string())?)
         .map_err(|error| format!("origin.json 无效: {error}"))?;
     let dir = work_dir()?;
     let patch_file = dir.join("embedded.patch.yml");
     let ready_file = dir.join("ready.json");
-    fs::write(&patch_file, embedded_patch(&plugin_path, &compatibility_path)?)
+    fs::write(&patch_file, embedded_patch(&plugin_path, &compatibility_path, &shell_plugin_path)?)
         .map_err(|error| format!("无法写入 embedded patch: {error}"))?;
     let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+
+    if force_safe_mode {
+        return start_safe_profile(
+            &node,
+            node_source,
+            &dsh,
+            &patch_file,
+            &ready_file,
+            &origin,
+            &dir,
+            "用户请求以隔离插件模式启动",
+            &starting_processes,
+        );
+    }
 
     if recovery_enabled {
         if let Some(quarantine) = plugin_quarantine::read(&quarantine_state_path, &origin.dsh_version) {
@@ -885,10 +918,14 @@ pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result
     if state.runtime_restarting.load(Ordering::Acquire) {
         return Err("Runtime 正在重启，请稍候再试。".into());
     }
-    runtime_start_impl(app, state).await
+    runtime_start_impl(app, state, false).await
 }
 
-async fn runtime_start_impl(app: AppHandle, state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
+async fn runtime_start_impl(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    force_safe_mode: bool,
+) -> Result<RuntimeStatus, String> {
     if cfg!(mobile) {
         return Err("Android/iOS 使用 Remote Gateway，不允许在移动设备内启动桌面 dsh Runtime。".into());
     }
@@ -911,6 +948,7 @@ async fn runtime_start_impl(app: AppHandle, state: State<'_, AppState>) -> Resul
     let runtime_root = resource_path(&app, "dsh-runtime")?;
     let plugin_path = resource_path(&app, "plugin-embedded-client/index.js")?;
     let compatibility_path = resource_path(&app, "dsh-client-runtime-compat/index.js")?;
+    let shell_plugin_path = resource_path(&app, "plugin-harness-shell/index.js")?;
     let origin_path = resource_path(&app, "origin.json")?;
     let quarantine_state_path = quarantine_path(&app)?;
     let starting_processes = std::sync::Arc::clone(&state.starting_processes);
@@ -919,8 +957,10 @@ async fn runtime_start_impl(app: AppHandle, state: State<'_, AppState>) -> Resul
             runtime_root,
             plugin_path,
             compatibility_path,
+            shell_plugin_path,
             origin_path,
             quarantine_state_path,
+            force_safe_mode,
             starting_processes,
         )
     })
@@ -942,10 +982,18 @@ async fn runtime_start_impl(app: AppHandle, state: State<'_, AppState>) -> Resul
 /// longer depends on that hidden renderer running JavaScript first.
 pub(crate) async fn start_for_boot(app: AppHandle) -> Result<RuntimeStatus, String> {
     let state = app.state::<AppState>();
-    runtime_start_impl(app.clone(), state).await
+    runtime_start_impl(app.clone(), state, false).await
 }
 
 pub(crate) async fn restart_managed(app: AppHandle) -> Result<RuntimeStatus, String> {
+    restart_managed_with_mode(app, false).await
+}
+
+pub(crate) async fn restart_managed_safe(app: AppHandle) -> Result<RuntimeStatus, String> {
+    restart_managed_with_mode(app, true).await
+}
+
+async fn restart_managed_with_mode(app: AppHandle, force_safe_mode: bool) -> Result<RuntimeStatus, String> {
     let state = app.state::<AppState>();
     if state.quitting.load(Ordering::Acquire) {
         return Err("HarnessDock 正在退出，已拒绝 Runtime 重启。".into());
@@ -959,7 +1007,7 @@ pub(crate) async fn restart_managed(app: AppHandle) -> Result<RuntimeStatus, Str
         runtime_stop(app.state::<AppState>())?;
     }
     let state = app.state::<AppState>();
-    runtime_start_impl(app.clone(), state).await
+    runtime_start_impl(app.clone(), state, force_safe_mode).await
 }
 
 #[tauri::command]
@@ -1013,10 +1061,17 @@ mod tests {
 
     #[test]
     fn embedded_patch_includes_the_legacy_client_runtime_compatibility_row() {
-        let patch = embedded_patch(Path::new("/tmp/embedded.js"), Path::new("/tmp/compat/index.js")).unwrap();
+        let patch = embedded_patch(
+            Path::new("/tmp/embedded.js"),
+            Path::new("/tmp/compat/index.js"),
+            Path::new("/tmp/shell/index.js"),
+        )
+        .unwrap();
         assert!(patch.contains("id: embedded-client"));
         assert!(patch.contains("id: harnessdock-client-runtime-compat"));
         assert!(patch.contains("file:///tmp/compat/index.js"));
+        assert!(patch.contains("id: harness-shell"));
+        assert!(patch.contains("file:///tmp/shell/index.js"));
     }
 
     #[test]
