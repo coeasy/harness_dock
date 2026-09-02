@@ -1,7 +1,7 @@
 {
   "id": "harness-shell",
   "name": "Harness Shell",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "kind": "shell",
   "apiVersion": 1,
   "entry": "lib/index.js",
