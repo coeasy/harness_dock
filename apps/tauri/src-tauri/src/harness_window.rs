@@ -240,6 +240,14 @@ fn validated_runtime_url(value: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+/// dsh 0.1.2+ uses a reusable `?token=...` process-launch credential. Ordinary
+/// same-origin application queries are not launch credentials and must survive
+/// reload/recovery instead of forcing navigation back to Runtime's start URL.
+fn has_launch_token(url: &Url) -> bool {
+    url.query_pairs()
+        .any(|(key, value)| key == "token" && !value.is_empty())
+}
+
 struct WebActionGuard<'a>(&'a std::sync::atomic::AtomicBool);
 
 impl Drop for WebActionGuard<'_> {
@@ -338,10 +346,7 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
                 .as_ref()
                 .is_some_and(|current| current.origin() == expected.origin());
             if current_matches {
-                let current_has_launch_token = current_url
-                    .as_ref()
-                    .and_then(|current| current.query())
-                    .is_some_and(|query| !query.is_empty());
+                let current_has_launch_token = current_url.as_ref().is_some_and(has_launch_token);
                 if loading {
                     // A second open request must not create a new generation
                     // while the first WebView navigation is still exchanging
@@ -541,7 +546,11 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
         state
             .harness_loading
             .store(true, std::sync::atomic::Ordering::Release);
-        let result = if same_runtime_origin && current_url.as_ref().is_some_and(|current| current.query().is_none()) {
+        let result = if same_runtime_origin
+            && current_url
+                .as_ref()
+                .is_some_and(|current| !has_launch_token(current))
+        {
             window.reload()
         } else {
             window.navigate(url)
@@ -927,5 +936,25 @@ pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
             window.hide().map_err(|error| format!("无法隐藏插件诊断窗口: {error}"))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_launch_token, validated_runtime_url};
+
+    #[test]
+    fn only_explicit_nonempty_token_query_is_a_launch_credential() {
+        let clean = validated_runtime_url("http://127.0.0.1:4321/").unwrap();
+        let ordinary = validated_runtime_url("http://127.0.0.1:4321/?tab=plugins&view=compact").unwrap();
+        let launch = validated_runtime_url("http://127.0.0.1:4321/?token=abc123").unwrap();
+        let mixed = validated_runtime_url("http://127.0.0.1:4321/?view=compact&token=abc123").unwrap();
+        let empty = validated_runtime_url("http://127.0.0.1:4321/?token=&view=compact").unwrap();
+
+        assert!(!has_launch_token(&clean));
+        assert!(!has_launch_token(&ordinary));
+        assert!(has_launch_token(&launch));
+        assert!(has_launch_token(&mixed));
+        assert!(!has_launch_token(&empty));
     }
 }
