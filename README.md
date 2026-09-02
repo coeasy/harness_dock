@@ -40,9 +40,10 @@
 - 启动只显示本地 splash，后台控制页和插件诊断均不抢占首屏；自动更新统一从主界面菜单、托盘或应用菜单进入，失败会留在界面内并给出明确降级路径。
 - Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
 - 顶部入口明确命名为“菜单”，并统一承载 Web 刷新、Runtime 重启、插件隔离恢复、插件诊断和自动更新；插件诊断保持只读、按需打开。
-- `@dsh/plugin-harness-shell` 是独立可发布的 dsh 外壳插件；Tauri 通过 v1 Host Bridge 接入，能力由原生 Tauri 命令统一提供，未实现的菜单项会隐藏。
+- `@dsh/plugin-harness-shell` 是独立可发布的 dsh 外壳插件；Tauri 通过 v1 Host Bridge 接入，能力由原生 Tauri 命令统一提供，未实现的菜单项会隐藏；插件入口自身采用 fail-open，宿主 service 注册失败不会阻断 Runtime/Harness Web。
 - 桌面启动由原生协调器直接启动 Runtime，Harness Web 完成绘制后才显示；白板、启动超时和窗口切换期间自动退出均进入可操作恢复路径。
 - loopback 根路径和子路径统一纳入外壳 ACL，避免 Harness Web 首屏或菜单调用出现 `Command ... not allowed by ACL`。
+- 桌面受管 loopback Harness WebView 只获得事件订阅、标题栏拖拽和显式 `harness-shell` Host Bridge 命令；不再授予整组 `core:default` 能力。
 
 完整的 v0.2.0 外壳重构与发布前验收方案见 [`docs/plan/v0.2.0-shell-first-implementation.md`](docs/plan/v0.2.0-shell-first-implementation.md)。
 
@@ -62,7 +63,7 @@ Mobile (Android/iOS)
     +-- HTTPS/WSS --> HarnessDock Gateway --> desktop/server dsh
 ```
 
-移动端不会内嵌桌面 Node Runtime；远程 Harness/Gateway 页面也不会获得本地 Tauri IPC 权限。
+移动端不会内嵌桌面 Node Runtime；Gateway/移动端远程页面不会获得本地 Tauri IPC 权限。桌面受管 loopback Harness WebView 仅获得最小化的 `harness-shell` capability，用于标题栏、事件订阅和明确列出的 Host Bridge 命令。
 
 ## 开发与验证
 
@@ -74,7 +75,7 @@ pnpm test
 cd apps/tauri && cargo check
 ```
 
-正式发布以 `.github/workflows/tauri-candidate.yml` 为唯一候选构建：它固定上游 commit、生成四个平台 Runtime、执行真实 smoke、构建五个桌面资产和移动端 developer preview，并验证品牌图标。`release.yml` 只接受当前 main 同一 SHA 的 candidate + CI 全绿结果，发布 20 个非空资产（含四个 Tauri updater 签名目标、四个平台 Runtime、移动包、`latest.json` 与 `SHA256SUMS`）。
+正式发布以 `.github/workflows/tauri-candidate.yml` 为唯一候选构建：它固定上游 commit、生成四个平台 Runtime、执行真实 smoke、构建五个桌面资产和移动端 developer preview，并验证品牌图标。`release.yml` 只接受当前 main 同一 SHA 的 candidate + CI 全绿结果，发布 20 个非空资产（含四个 Tauri updater 签名目标、四个平台 Runtime、移动包、`latest.json` 与 `SHA256SUMS`），并要求每类候选资产唯一匹配；Runtime 发布包只能从候选 artifact 根 `manifest.json` 对应目录生成。
 
 Android 候选使用 release profile（`opt-level=z`、Thin LTO、去符号、单 codegen unit、`panic=abort`），并在上传前检查 APK/AAB 包体和最大 native `.so`。旧版 debug APK 的主要体积来自未剥离符号的 `libharnessdock_tauri.so`，不是移动端业务资源。
 
