@@ -25,11 +25,15 @@ describe('independent Harness Shell dsh plugin', () => {
     })
     expect(entry).toContain("export const name = 'harness-shell'")
     expect(entry).toContain(`export const version = '${packageJson.version}'`)
+    expect(entry).toContain("register?.('harnessShell', service)")
     expect(web).toContain('window.__DSH_SHELL_BRIDGE__')
     expect(web).toContain('runtime.safe-mode')
     expect(web).toContain('app.update.install')
+    expect(web).toContain("window.addEventListener('pagehide'")
     expect(bundledEntry).toContain('harness-shell')
+    expect(bundledEntry).toContain('register?.("harnessShell", service)')
     expect(bundledWeb).toContain('window.__DSH_SHELL_BRIDGE__')
+    expect(bundledWeb).toContain("window.addEventListener('pagehide'")
   })
 
   it('registers the shell service when the host accepts it', () => {
