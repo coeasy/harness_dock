@@ -201,6 +201,21 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     Ok(())
 }
 
+fn visible_webview(app: &tauri::AppHandle, label: &str) -> bool {
+    app.get_webview_window(label)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
+}
+
+fn has_primary_surface(app: &tauri::AppHandle) -> bool {
+    if visible_webview(app, "harness") || visible_webview(app, "splash") {
+        return true;
+    }
+    app.state::<AppState>()
+        .harness_loading
+        .load(Ordering::Acquire)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut app = tauri::Builder::default()
@@ -218,7 +233,7 @@ pub fn run() {
                         .tray_available
                         .store(true, Ordering::Release),
                     Err(error) => eprintln!(
-                        "HarnessDock tray unavailable; closing the last client window will exit cleanly: {error}"
+                        "HarnessDock tray unavailable; closing the primary client window will exit cleanly: {error}"
                     ),
                 }
                 if let Err(error) = app
@@ -292,12 +307,32 @@ pub fn run() {
                     .state::<AppState>()
                     .tray_available
                     .load(Ordering::Acquire);
+
                 if !tray_available {
-                    // Without a tray, hiding the last window would strand an
-                    // invisible process because ExitRequested is intentionally
-                    // guarded during normal shell navigation. Fall back to the
-                    // same managed shutdown path as the explicit Quit action.
-                    request_exit(app_handle);
+                    if label == "harness" {
+                        // Without a tray the primary window is the only durable
+                        // way back into the application. Closing it means quit.
+                        harness_window::cancel_harness_load(app_handle);
+                        harness_window::hide_splash(app_handle);
+                        request_exit(app_handle);
+                        return;
+                    }
+
+                    if label == "main" && !has_primary_surface(app_handle) {
+                        // Startup recovery can make `main` the only visible
+                        // surface. Closing that sole recovery window must not
+                        // strand a hidden Runtime process with no tray.
+                        request_exit(app_handle);
+                        return;
+                    }
+
+                    // Diagnostics and the healthy Gateway control window are
+                    // auxiliary surfaces. Closing them must never terminate a
+                    // still-visible/loading Harness Web session just because
+                    // this desktop environment lacks a tray implementation.
+                    if let Some(window) = app_handle.get_webview_window(&label) {
+                        let _ = window.hide();
+                    }
                     return;
                 }
 
