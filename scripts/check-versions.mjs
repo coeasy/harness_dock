@@ -98,6 +98,32 @@ for (const [relativePath, pattern] of textVersionFiles) {
   }
 }
 
+// The shell package intentionally checks in its publishable web asset and
+// compiled Node entry. Refuse source-only fixes that would leave a direct
+// repository/npm consumer on stale behavior until a later candidate build.
+const shellWebSourcePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'src', 'web', 'shell.js')
+const shellWebBundlePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'web', 'shell.js')
+if (existsSync(shellWebSourcePath) && existsSync(shellWebBundlePath)) {
+  const source = readFileSync(shellWebSourcePath, 'utf8')
+  const bundle = readFileSync(shellWebBundlePath, 'utf8')
+  if (source !== bundle) {
+    mismatches.push('packages/plugin-harness-shell/web/shell.js: stale generated web bundle; run the shell bundle step')
+  }
+}
+
+const shellEntrySourcePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'src', 'index.ts')
+const shellEntryBundlePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'lib', 'index.js')
+if (existsSync(shellEntrySourcePath) && existsSync(shellEntryBundlePath)) {
+  const source = readFileSync(shellEntrySourcePath, 'utf8')
+  const bundle = readFileSync(shellEntryBundlePath, 'utf8')
+  if (source.includes("register?.('harnessShell', service)") && !bundle.includes('register?.("harnessShell", service)')) {
+    mismatches.push('packages/plugin-harness-shell/lib/index.js: missing current harnessShell registration contract')
+  }
+  if (source.includes('registration error must fail open') && !bundle.includes('try {')) {
+    mismatches.push('packages/plugin-harness-shell/lib/index.js: missing fail-open registration guard')
+  }
+}
+
 const activeDisplayFiles = [
   ['README.md', `HarnessDock v${rootVersion}`],
   ['apps/tauri/README.md', `HarnessDock Tauri v${rootVersion}`],
