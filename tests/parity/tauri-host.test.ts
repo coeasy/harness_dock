@@ -199,8 +199,10 @@ describe('Tauri v0.2 host contract', () => {
       'harness-shell',
     ])
     expect(readJson('apps/tauri/src-tauri/capabilities/local-main.json').permissions).not.toContain('harness-shell')
-    expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "update_check", "update_install", "app_quit"]')
+    expect(permission).toContain('commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_shell_close", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "update_check", "update_install", "app_quit"]')
     expect(shell).toContain('SHELL_WEB_SCRIPT')
+    expect(shell).toContain("'window.close': 'harness_shell_close'")
+    expect(shell).toContain('pub async fn harness_shell_close')
     expect(shell).toContain("'runtime.safe-mode': 'harness_safe_mode_restart'")
     expect(shellAsset).toContain('id = \'dsh-harness-shell\'')
     expect(shellAsset).toContain("['web.reload', '刷新 Harness Web']")
