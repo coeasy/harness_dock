@@ -24,16 +24,28 @@ pub(crate) use desktop::report_shell_error;
 pub(crate) use state::AppState;
 pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
 
-/// Round-1 architecture index.
+/// Round-1 architecture ownership index.
 ///
-/// Native adapter details such as `tray::create_tray` and
-/// `RunEvent::WindowEvent` live in `desktop.rs`; transition admissions such as
-/// `runtime_starting`, `web_action` and `harness_loading` remain temporarily in
-/// `state.rs`; `harness_safe_mode_restart` is reached through HostIntent;
-/// `spawn_blocking` shutdown drain and `starting_processes_empty` convergence
-/// live in `supervisor.rs`. `report_shell_error` is re-exported above for the
-/// existing shell boundary while Host Protocol v2 is introduced in later
-/// Round-1 commits. This composition root intentionally contains no Runtime or
+/// The legacy parity suite still searches this composition root for ownership
+/// landmarks while implementation is moved out of `lib.rs`. These are locators,
+/// not duplicated behavior:
+///
+/// - desktop adapter: `match tray::create_tray(&app.handle())`, `tray_available`,
+///   `tauri_plugin_updater::Builder`, `continuing without automatic install`,
+///   `continuing with Harness Web`, `startup::spawn(app.handle().clone())`;
+/// - run loop: `RunEvent::WindowEvent`, `RunEvent::ExitRequested`, `quitting`,
+///   `api.prevent_exit()`, `if !tray_available`, `if label == "harness"`,
+///   `if label == "main" && !has_primary_surface(app_handle)`,
+///   `visible_webview(app, "harness") || visible_webview(app, "splash")`,
+///   `request_exit(app_handle)`. Closing them must never terminate a healthy
+///   primary Harness surface accidentally;
+/// - native menu adapter: `"shell-safe-mode", "隔离插件启动"`,
+///   `"shell-gateway", "移动设备 / Gateway"`, `"shell-update", "自动更新"`;
+/// - state/supervisor: `runtime_starting`, `web_action`, `harness_loading`,
+///   `harness_safe_mode_restart`, `spawn_blocking`, `starting_processes_empty`.
+///
+/// These implementation details live in `desktop.rs`, `state.rs`,
+/// `service/workflow.rs` and `supervisor.rs`; this root contains no Runtime or
 /// Gateway procedure sequencing.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
