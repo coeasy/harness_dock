@@ -5,6 +5,15 @@ pub use crate::runtime_actor::RuntimePhase;
 
 include!("host_protocol_generated.rs");
 
+pub const HOST_PROTOCOL_MIN_COMPATIBLE_VERSION: u16 = 2;
+pub const HOST_PROTOCOL_SCHEMA_HASH: &str = "host-protocol-v2";
+pub const HOST_PROTOCOL_FEATURE_FLAGS: [&str; 4] = [
+    "kernel-queue",
+    "ordered-events",
+    "snapshot-resync",
+    "request-dedupe",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandEnvelope {
@@ -16,13 +25,17 @@ pub struct CommandEnvelope {
 
 impl CommandEnvelope {
     pub fn validate(&self) -> Result<(), HostError> {
-        if self.protocol_version != HOST_PROTOCOL_VERSION {
+        if self.protocol_version < HOST_PROTOCOL_MIN_COMPATIBLE_VERSION
+            || self.protocol_version > HOST_PROTOCOL_VERSION
+        {
             return Err(HostError::new(
                 "PROTOCOL_VERSION_UNSUPPORTED",
                 ErrorScope::Protocol,
                 format!(
-                    "Host Protocol v{} is required; received v{}",
-                    HOST_PROTOCOL_VERSION, self.protocol_version
+                    "Host Protocol v{}-v{} is supported; received v{}",
+                    HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
+                    HOST_PROTOCOL_VERSION,
+                    self.protocol_version
                 ),
                 false,
             ));
@@ -102,12 +115,39 @@ pub struct ResponseEnvelope {
     pub result: Result<HostResponse, HostError>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostEventKind {
+    CommandSucceeded,
+    CommandFailed,
+    SnapshotInvalidated,
+    RuntimeHealthChanged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostEvent {
+    pub protocol_version: u16,
+    pub sequence: u64,
+    pub revision: u64,
+    pub operation_id: String,
+    pub request_id: String,
+    pub kind: HostEventKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostSnapshot {
     pub protocol_version: u16,
+    pub min_compatible_version: u16,
+    pub schema_hash: String,
+    pub feature_flags: Vec<String>,
+    pub revision: u64,
+    pub event_sequence: u64,
     pub runtime_phase: RuntimePhase,
     pub runtime_generation: Option<u64>,
+    pub runtime_dsh_version: Option<String>,
+    pub runtime_image_identity: Option<String>,
     pub harness_visible: bool,
     pub gateway_enabled: bool,
     pub capabilities: Vec<Capability>,
@@ -152,8 +192,15 @@ mod tests {
     fn protocol_uses_runtime_actor_phase_including_cancellation() {
         let snapshot = HostSnapshot {
             protocol_version: HOST_PROTOCOL_VERSION,
+            min_compatible_version: HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
+            schema_hash: HOST_PROTOCOL_SCHEMA_HASH.into(),
+            feature_flags: HOST_PROTOCOL_FEATURE_FLAGS.iter().map(|value| (*value).into()).collect(),
+            revision: 3,
+            event_sequence: 5,
             runtime_phase: RuntimePhase::Cancelling,
             runtime_generation: Some(7),
+            runtime_dsh_version: None,
+            runtime_image_identity: None,
             harness_visible: false,
             gateway_enabled: false,
             capabilities: vec![Capability::RuntimeRestart],
@@ -161,5 +208,6 @@ mod tests {
         let json = serde_json::to_value(snapshot).unwrap();
         assert_eq!(json["runtimePhase"], "cancelling");
         assert_eq!(json["runtimeGeneration"], 7);
+        assert_eq!(json["eventSequence"], 5);
     }
 }

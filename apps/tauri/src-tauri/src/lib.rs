@@ -6,6 +6,7 @@ mod gateway;
 mod gateway_host;
 mod harness_shell;
 mod harness_window;
+mod host_kernel;
 mod host_protocol;
 mod lifecycle;
 mod platform;
@@ -29,8 +30,8 @@ pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_manag
 
 /// HarnessDock v0.2.0 Native Host ownership map:
 ///
-/// Tauri Adapter -> Host Protocol v2 -> Capability Broker -> Reconciler
-/// -> RuntimeActor / SurfaceActor / GatewayActor / UpdateActor -> RuntimeLease.
+/// Tauri Adapter -> Host Protocol -> HostKernelTask -> Capability Broker
+/// -> Desired State / Reconciler -> Resource Actors -> RuntimeLease.
 ///
 /// Long-lived native resources are owned by their actor state. Renderers submit
 /// typed intent only; normal startup has no permanent hidden control renderer.
@@ -39,7 +40,10 @@ pub fn run() {
     startup_trace::mark(startup_trace::StartupPhase::ProcessStarted);
     tauri::Builder::default()
         .manage(AppState::default())
-        .setup(desktop::setup)
+        .setup(|app| {
+            host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
+            desktop::setup(app)
+        })
         .invoke_handler(bridge::handler!())
         .build(tauri::generate_context!())
         .expect("error while building HarnessDock")

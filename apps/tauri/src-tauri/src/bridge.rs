@@ -1,17 +1,15 @@
-//! Tauri IPC adapter registry.
+//! Tauri transport adapter for the HarnessDock Host Kernel.
 //!
-//! Legacy command names remain as compatibility adapters for bundled local
-//! pages, while `host_execute` is the typed Host Protocol v2 entry point. Native
-//! menu/tray code never calls IPC; it submits HostCommand directly to the
-//! Reconciler. Remote Harness Web never receives legacy business-command
-//! permissions: its authority is derived here from the real WebView label,
-//! current URL origin and current RuntimeLease.
+//! `host_execute` and `host_snapshot` are the typed control-plane boundary.
+//! The adapter derives the real subject from the WebView label/origin before a
+//! request is accepted; renderers never get to promote their own authority.
 
 use tauri::{AppHandle, Manager};
 
 use crate::host_protocol::{
-    CommandEnvelope, HostError, HostResponse, HostSnapshot, ResponseEnvelope, SubjectKind,
-    HOST_PROTOCOL_VERSION,
+    CommandEnvelope, HostError, HostSnapshot, ResponseEnvelope, SubjectKind,
+    HOST_PROTOCOL_FEATURE_FLAGS, HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
+    HOST_PROTOCOL_SCHEMA_HASH, HOST_PROTOCOL_VERSION,
 };
 use crate::surface_actor::SurfaceKind;
 
@@ -19,23 +17,28 @@ use crate::surface_actor::SurfaceKind;
 pub async fn host_execute(
     app: AppHandle,
     window: tauri::WebviewWindow,
-    envelope: CommandEnvelope,
+    mut envelope: CommandEnvelope,
 ) -> ResponseEnvelope {
     let request_id = envelope.request_id.clone();
-    let result = match envelope.validate() {
-        Err(error) => Err(error),
-        Ok(()) => match trusted_subject(&app, &window, envelope.subject) {
-            Err(error) => Err(error),
-            Ok(subject) => crate::reconciler::execute(app, subject, envelope.command)
-                .await
-                .map(|_| HostResponse::Ack),
-        },
-    };
-    ResponseEnvelope {
-        protocol_version: HOST_PROTOCOL_VERSION,
-        request_id,
-        result,
+    if let Err(error) = envelope.validate() {
+        return ResponseEnvelope {
+            protocol_version: HOST_PROTOCOL_VERSION,
+            request_id,
+            result: Err(error),
+        };
     }
+    let subject = match trusted_subject(&app, &window, envelope.subject) {
+        Ok(subject) => subject,
+        Err(error) => {
+            return ResponseEnvelope {
+                protocol_version: HOST_PROTOCOL_VERSION,
+                request_id,
+                result: Err(error),
+            }
+        }
+    };
+    envelope.subject = subject;
+    crate::host_kernel::execute_envelope(&app, envelope).await
 }
 
 fn trusted_subject(
@@ -44,8 +47,7 @@ fn trusted_subject(
     claimed: SubjectKind,
 ) -> Result<SubjectKind, HostError> {
     use crate::host_protocol::ErrorScope;
-    let label = window.label();
-    match label {
+    match window.label() {
         "harness" => {
             if claimed != SubjectKind::HarnessWeb {
                 return Err(HostError::new(
@@ -181,20 +183,31 @@ pub fn host_snapshot(
         runtime_generation,
         lease.as_ref(),
     );
+    let kernel = crate::host_kernel::public_state(&app);
     Ok(HostSnapshot {
         protocol_version: HOST_PROTOCOL_VERSION,
+        min_compatible_version: HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
+        schema_hash: HOST_PROTOCOL_SCHEMA_HASH.into(),
+        feature_flags: HOST_PROTOCOL_FEATURE_FLAGS.iter().map(|value| (*value).into()).collect(),
+        revision: kernel.revision,
+        event_sequence: kernel.event_sequence,
         runtime_phase,
         runtime_generation: current_generation,
+        runtime_dsh_version: lease.as_ref().map(|value| value.dsh_version.clone()),
+        runtime_image_identity: lease
+            .as_ref()
+            .map(|value| value.generation.image_identity.clone()),
         harness_visible,
         gateway_enabled,
         capabilities,
     })
 }
 
-/// Public diagnostics status never exposes the private launch credential URL.
-/// Internal startup/restart flows continue to consume RuntimeLease.launch_url.
+/// Transitional public diagnostics status. This function deliberately has a
+/// distinct Rust command name so it cannot collide with the legacy runtime
+/// module macro. It never returns the private launch credential URL.
 #[tauri::command]
-pub fn runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
+pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
     let mut status = crate::runtime::status_snapshot(&*app.state::<crate::AppState>());
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
@@ -208,10 +221,10 @@ pub fn runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
     status
 }
 
-/// Diagnostics is an on-demand Surface. Closing it destroys the WebView instead
-/// of leaving a permanent hidden renderer behind.
+/// Diagnostics is on-demand. Closing destroys the WebView instead of keeping a
+/// hidden renderer alive for the lifetime of the desktop process.
 #[tauri::command]
-pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
+pub fn diagnostics_close(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
         window
             .close()
@@ -225,8 +238,8 @@ macro_rules! handler {
         tauri::generate_handler![
             $crate::bridge::host_execute,
             $crate::bridge::host_snapshot,
-            $crate::bridge::runtime_status,
-            $crate::bridge::shell_settings_close,
+            $crate::bridge::public_runtime_status,
+            $crate::bridge::diagnostics_close,
             $crate::platform::platform_info,
             $crate::gateway::gateway_health,
             $crate::gateway::pair_gateway,
