@@ -1,6 +1,45 @@
 (() => {
   'use strict'
   const $ = (id) => document.getElementById(id)
+
+  // Native Runtime/Gateway state may legitimately contain one-time launch
+  // credentials. Keep the real URL in memory for navigation, but strip all
+  // credentials, query/fragment data and common secret key/value forms before
+  // anything reaches a user-visible status surface.
+  function publicText(value) {
+    const raw = value && typeof value === 'object' && 'message' in value
+      ? String(value.message || '')
+      : String(value ?? '')
+    const withoutUrls = raw.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (candidate) => {
+      try {
+        const url = new URL(candidate)
+        url.username = ''
+        url.password = ''
+        url.search = ''
+        url.hash = ''
+        return url.toString()
+      } catch {
+        return candidate.replace(/[?#].*$/, '')
+      }
+    })
+    return withoutUrls
+      .replace(/\b(token|authorization|password|secret|api[-_]?key)\b\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+      .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+  }
+
+  function safeDisplayUrl(value) {
+    if (!value) return ''
+    try {
+      const url = new URL(String(value))
+      url.username = ''
+      url.password = ''
+      url.search = ''
+      url.hash = ''
+      return url.toString()
+    } catch {
+      return publicText(value)
+    }
+  }
   const runtimeState = $('runtime-state')
   const runtimeDetail = $('runtime-detail')
   const hostState = $('gateway-host-state')
@@ -56,7 +95,7 @@
 
   function status(element, value, bad = false) {
     if (!element) return
-    element.textContent = value || ''
+    element.textContent = bad ? publicText(value) : (value || '')
     element.classList.toggle('error', bad)
   }
 
@@ -87,7 +126,7 @@
   function runtimeDetailText(current) {
     if (!current?.appUrl) return 'Runtime 尚未启动。HarnessDock 主程序仍可用，可检查配置后重试。'
     const node = current.nodeSource ? `Node=${current.nodeSource}` : ''
-    const base = [current.dshVersion || '', node, current.appUrl].filter(Boolean).join(' · ')
+    const base = [current.dshVersion || '', node, safeDisplayUrl(current.appUrl)].filter(Boolean).join(' · ')
     if (!current.recoveryMode) return base
     if (current.recoverySource === 'safe-profile') {
       return `${base}\n安全启动：已绕过用户插件配置，确保 Harness Web 界面可用。用户配置未修改；可在修复插件后停止并重新启动 Runtime。`
@@ -159,7 +198,7 @@
   async function refreshGatewayHost() {
     const current = await call('gateway_host_status')
     hostState.textContent = current.running ? 'ready' : 'stopped'
-    status(hostDetail, current.running ? `Local ${current.localUrl || '-'}\nPublic ${current.publicUrl || '-'}` : 'Gateway 尚未启动。')
+    status(hostDetail, current.running ? `Local ${safeDisplayUrl(current.localUrl) || '-'}\nPublic ${safeDisplayUrl(current.publicUrl) || '-'}` : 'Gateway 尚未启动。')
     $('gateway-create-pairing').disabled = !current.running
     $('gateway-revoke-all').disabled = !current.running || !current.devices?.length
     $('gateway-host-stop').disabled = !current.running

@@ -16,6 +16,30 @@
   ]
   const state = { busy: false, maximized: false, mounted: false }
 
+  // Shell errors can originate in native IPC or third-party hosts. Never put a
+  // reusable launch token, Authorization value, password or query string into
+  // the Harness document even though textContent already prevents HTML injection.
+  const publicText = (value) => {
+    const raw = value && typeof value === 'object' && 'message' in value
+      ? String(value.message || '')
+      : String(value ?? '')
+    const withoutUrls = raw.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (candidate) => {
+      try {
+        const url = new URL(candidate)
+        url.username = ''
+        url.password = ''
+        url.search = ''
+        url.hash = ''
+        return url.toString()
+      } catch {
+        return candidate.replace(/[?#].*$/, '')
+      }
+    })
+    return withoutUrls
+      .replace(/\b(token|authorization|password|secret|api[-_]?key)\b\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+      .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+  }
+
   const can = (command) => compatibleBridge
     ? bridge.capabilities?.[command] === true
     : command === 'web.reload'
@@ -88,7 +112,7 @@
     }
     const showToast = (message) => {
       if (!toast) return
-      toast.textContent = message
+      toast.textContent = publicText(message)
       toast.classList.add('show')
       window.setTimeout(() => toast.classList.remove('show'), 2600)
     }

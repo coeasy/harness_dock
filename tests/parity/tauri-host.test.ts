@@ -73,10 +73,11 @@ describe('Tauri v0.2 host contract', () => {
     expect(source.readUInt32BE(20)).toBe(1024)
 
     const candidate = readFileSync(path.join(repoRoot, '.github/workflows/tauri-candidate.yml'), 'utf8')
-    expect(candidate).toContain('cargo tauri icon src-tauri/icons/app-icon.png')
+    expect(candidate).toContain('run: pnpm prepare:icons')
+    expect(candidate).not.toContain('cargo tauri icon src-tauri/icons/app-icon.png')
     expect(candidate).toContain('Verify Windows installer uses HarnessDock icon')
-    expect(candidate).toContain('Replace default Android launcher icons with HarnessDock')
-    expect(candidate).toContain('Replace default iOS app icons with HarnessDock')
+    expect(candidate).toContain('Prepare canonical HarnessDock launcher icons')
+    expect(candidate).toContain('Prepare canonical HarnessDock app icons')
   })
 
   it('publishes only after exact successful main candidate and same-SHA CI', () => {
