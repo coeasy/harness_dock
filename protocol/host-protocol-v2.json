@@ -27,6 +27,7 @@
     { "rust": "AppQuit", "wire": "app-quit" }
   ],
   "commands": [
+    { "rust": "ActivatePrimary", "wire": "activate-primary", "capability": "WindowControl" },
     { "rust": "RefreshHarness", "wire": "refresh-harness", "capability": "WebReload" },
     { "rust": "RestartRuntime", "wire": "restart-runtime", "capability": "RuntimeRestart" },
     { "rust": "StartSafeMode", "wire": "start-safe-mode", "capability": "RuntimeSafeMode" },
