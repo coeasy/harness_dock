@@ -5,7 +5,7 @@ use std::{
     io::{self, Read, Write},
     net::{IpAddr, SocketAddr, TcpListener, TcpStream},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -15,6 +15,9 @@ use tauri::{AppHandle, Manager, State};
 use url::Url;
 
 use crate::{runtime_actor::RuntimeLease, AppState};
+
+const MAX_GATEWAY_BODY_BYTES: usize = 2 * 1024 * 1024;
+const MAX_GATEWAY_CONNECTIONS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -114,6 +117,7 @@ struct GatewayShared {
     runtime_lease: RuntimeLease,
     public_url: String,
     secure_cookie: bool,
+    active_connections: AtomicUsize,
 }
 
 pub(crate) struct NativeGateway {
@@ -296,6 +300,7 @@ fn spawn_native_gateway(lease: RuntimeLease, port: u16, public_url: Option<Strin
         runtime_lease: lease.clone(),
         public_url: public_url.clone(),
         secure_cookie,
+        active_connections: AtomicUsize::new(0),
     });
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -318,18 +323,29 @@ fn spawn_native_gateway(lease: RuntimeLease, port: u16, public_url: Option<Strin
 fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc<GatewayShared>) {
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((stream, peer)) => {
+            Ok((mut stream, peer)) => {
                 if stop.load(Ordering::Acquire) {
                     break;
                 }
-                let shared = Arc::clone(&shared);
-                let _ = thread::Builder::new()
+                let active = shared.active_connections.fetch_add(1, Ordering::AcqRel);
+                if active >= MAX_GATEWAY_CONNECTIONS {
+                    shared.active_connections.fetch_sub(1, Ordering::AcqRel);
+                    let _ = write_status(&mut stream, 503, "Service Unavailable", b"gateway connection limit reached");
+                    continue;
+                }
+                let connection_shared = Arc::clone(&shared);
+                let spawned = thread::Builder::new()
                     .name("harnessdock-gateway-connection".into())
                     .spawn(move || {
-                        if let Err(error) = handle_connection(stream, peer, shared) {
+                        if let Err(error) = handle_connection(stream, peer, Arc::clone(&connection_shared)) {
                             eprintln!("Native Gateway connection failed: {error}");
                         }
+                        connection_shared.active_connections.fetch_sub(1, Ordering::AcqRel);
                     });
+                if let Err(error) = spawned {
+                    shared.active_connections.fetch_sub(1, Ordering::AcqRel);
+                    eprintln!("Native Gateway connection thread failed: {error}");
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(40));
@@ -347,6 +363,16 @@ struct ParsedRequest {
     target: String,
     headers: Vec<(String, String)>,
     raw_body: Vec<u8>,
+}
+
+fn validated_content_length(value: &str) -> Result<usize, String> {
+    let length = value
+        .parse::<usize>()
+        .map_err(|_| "Gateway Content-Length invalid".to_string())?;
+    if length > MAX_GATEWAY_BODY_BYTES {
+        return Err("Gateway request body too large".into());
+    }
+    Ok(length)
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
@@ -375,30 +401,48 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
     let mut request_parts = request_line.split_whitespace();
     let method = request_parts.next().unwrap_or_default().to_string();
     let target = request_parts.next().unwrap_or_default().to_string();
-    if method.is_empty() || target.is_empty() {
+    let version = request_parts.next().unwrap_or_default();
+    if method.is_empty()
+        || target.is_empty()
+        || version != "HTTP/1.1"
+        || request_parts.next().is_some()
+        || !target.starts_with('/')
+        || target.starts_with("//")
+    {
         return Err("invalid Gateway request line".into());
     }
     let mut headers = Vec::new();
     let mut content_length = 0_usize;
+    let mut saw_content_length = false;
     for line in lines {
         if line.is_empty() {
             continue;
         }
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| "malformed Gateway request header".to_string())?;
         let value = value.trim().to_string();
         if name.eq_ignore_ascii_case("content-length") {
-            content_length = value.parse::<usize>().unwrap_or(0).min(2 * 1024 * 1024);
+            if saw_content_length {
+                return Err("duplicate Gateway Content-Length".into());
+            }
+            saw_content_length = true;
+            content_length = validated_content_length(&value)?;
+        }
+        if name.eq_ignore_ascii_case("transfer-encoding") {
+            return Err("Gateway Transfer-Encoding is not supported".into());
         }
         headers.push((name.to_string(), value));
     }
     let mut body = data[header_end..].to_vec();
+    if body.len() > content_length {
+        body.truncate(content_length);
+    }
     while body.len() < content_length {
         let mut buf = vec![0_u8; (content_length - body.len()).min(8192)];
         let read = stream.read(&mut buf).map_err(|error| error.to_string())?;
         if read == 0 {
-            break;
+            return Err("Gateway client closed before request body completed".into());
         }
         body.extend_from_slice(&buf[..read]);
     }
@@ -415,6 +459,9 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn request_path(target: &str) -> Result<Url, String> {
+    if !target.starts_with('/') || target.starts_with("//") {
+        return Err("Gateway request target must use origin-form".into());
+    }
     Url::parse(&format!("http://gateway.local{target}"))
         .map_err(|_| "Gateway request target invalid".to_string())
 }
@@ -428,7 +475,15 @@ fn header<'a>(request: &'a ParsedRequest, name: &str) -> Option<&'a str> {
 }
 
 fn handle_connection(mut stream: TcpStream, peer: SocketAddr, shared: Arc<GatewayShared>) -> Result<(), String> {
-    let request = read_request(&mut stream)?;
+    let request = match read_request(&mut stream) {
+        Ok(request) => request,
+        Err(error) => {
+            let status = if error.contains("too large") { 413 } else { 400 };
+            let reason = if status == 413 { "Payload Too Large" } else { "Bad Request" };
+            let _ = write_status(&mut stream, status, reason, b"invalid gateway request");
+            return Err(error);
+        }
+    };
     let url = request_path(&request.target)?;
     match url.path() {
         "/api/harnessdock/health" => {
@@ -459,6 +514,11 @@ fn handle_pair(
 ) -> Result<(), String> {
     if request.method != "POST" {
         return write_status(stream, 405, "Method Not Allowed", b"");
+    }
+    if !header(request, "content-type")
+        .is_some_and(|value| value.split(';').next().is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json")))
+    {
+        return write_status(stream, 415, "Unsupported Media Type", b"application/json required");
     }
     let pair: PairRequest = match serde_json::from_slice(&request.raw_body) {
         Ok(value) => value,
@@ -661,7 +721,7 @@ fn device_info(session: &SessionState) -> GatewayDeviceInfo {
 
 fn write_json(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8]) -> Result<(), String> {
     let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(body)).map_err(|error| error.to_string())
@@ -669,7 +729,7 @@ fn write_json(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8]) ->
 
 fn write_status(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8]) -> Result<(), String> {
     let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(body)).map_err(|error| error.to_string())
@@ -900,6 +960,21 @@ mod tests {
         assert_eq!(validated_gateway_port(None).unwrap(), 43137);
         assert_eq!(validated_gateway_port(Some(1024)).unwrap(), 1024);
         assert!(validated_gateway_port(Some(443)).is_err());
+    }
+
+    #[test]
+    fn gateway_request_body_limit_is_fail_closed() {
+        assert_eq!(validated_content_length("0").unwrap(), 0);
+        assert_eq!(validated_content_length(&MAX_GATEWAY_BODY_BYTES.to_string()).unwrap(), MAX_GATEWAY_BODY_BYTES);
+        assert!(validated_content_length(&(MAX_GATEWAY_BODY_BYTES + 1).to_string()).is_err());
+        assert!(validated_content_length("not-a-number").is_err());
+    }
+
+    #[test]
+    fn gateway_request_target_must_be_origin_form() {
+        assert!(request_path("/api/harnessdock/health").is_ok());
+        assert!(request_path("https://evil.example/path").is_err());
+        assert!(request_path("//evil.example/path").is_err());
     }
 
     #[test]
