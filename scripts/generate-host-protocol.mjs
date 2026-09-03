@@ -6,6 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const schemaPath = path.join(root, 'protocol', 'host-protocol-v2.json')
 const schema = JSON.parse(readFileSync(schemaPath, 'utf8'))
 const check = process.argv.includes('--check')
+const normalizeNewlines = (value) => value.replace(/\r\n?/g, '\n')
 
 const rustEnum = (name, rows, attrs = '') => `#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n${attrs}pub enum ${name} {\n${rows.map((row) => `    #[serde(rename = ${JSON.stringify(row.wire)})]\n    ${row.rust},`).join('\n')}\n}\n`
 
@@ -27,12 +28,13 @@ for (const [relative, content] of outputs) {
   if (check) {
     let actual = ''
     try { actual = readFileSync(target, 'utf8') } catch {}
-    if (actual !== content) {
+    if (normalizeNewlines(actual) !== normalizeNewlines(content)) {
       console.error(`[host-protocol] stale generated file: ${relative}`)
       stale = true
     }
   } else {
-    writeFileSync(target, content, 'utf8')
+    // Keep generated artifacts canonical and deterministic across every host OS.
+    writeFileSync(target, normalizeNewlines(content), { encoding: 'utf8' })
   }
 }
 
