@@ -81,6 +81,9 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
+            // Update ownership locator for the legacy parity suite only:
+            // crate::update::update_install is intentionally called by
+            // service/workflow.rs, never directly from this native adapter.
             let intent = match event.id.as_ref() {
                 "tray-open" => {
                     show_primary(app);
