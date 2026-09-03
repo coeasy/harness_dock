@@ -53,26 +53,34 @@ fn ensure_trace_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 fn prune_old_traces(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     let mut traces = entries
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let path = entry.path();
             let name = path.file_name()?.to_str()?;
-            if !name.starts_with("startup-") || !name.ends_with(".log") { return None; }
+            if !name.starts_with("startup-") || !name.ends_with(".log") {
+                return None;
+            }
             let modified = entry.metadata().ok()?.modified().ok()?;
             Some((modified, path))
         })
         .collect::<Vec<_>>();
     traces.sort_by(|a, b| b.0.cmp(&a.0));
-    for (_, path) in traces.into_iter().skip(20) { let _ = fs::remove_file(path); }
+    for (_, path) in traces.into_iter().skip(20) {
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn resolved_trace_path() -> Option<&'static PathBuf> {
     TRACE_PATH
         .get_or_init(|| {
             let dir = trace_dir();
-            if ensure_trace_dir(&dir).is_err() { return None; }
+            if ensure_trace_dir(&dir).is_err() {
+                return None;
+            }
             prune_old_traces(&dir);
             Some(dir.join(format!("startup-{}.log", std::process::id())))
         })
@@ -83,10 +91,14 @@ fn resolved_trace_path() -> Option<&'static PathBuf> {
 /// This is also the executable Round-5 startup SLO contract.
 pub(crate) fn mark(phase: StartupPhase) {
     let bit = 1_u64 << phase as u64;
-    if WRITTEN_PHASES.fetch_or(bit, Ordering::AcqRel) & bit != 0 { return; }
+    if WRITTEN_PHASES.fetch_or(bit, Ordering::AcqRel) & bit != 0 {
+        return;
+    }
     let started = STARTED_AT.get_or_init(Instant::now);
     let elapsed_ms = started.elapsed().as_millis();
-    let Some(path) = resolved_trace_path() else { return };
+    let Some(path) = resolved_trace_path() else {
+        return;
+    };
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]

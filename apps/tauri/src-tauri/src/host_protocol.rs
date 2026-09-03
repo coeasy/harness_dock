@@ -179,13 +179,22 @@ mod tests {
             command: HostCommand::RestartRuntime,
         };
         assert!(envelope.validate().is_ok());
-        assert_eq!(serde_json::to_value(envelope.subject).unwrap(), "harness-web");
+        assert_eq!(
+            serde_json::to_value(envelope.subject).unwrap(),
+            "harness-web"
+        );
     }
 
     #[test]
     fn protocol_command_capability_mapping_is_generated() {
-        assert_eq!(HostCommand::RestartRuntime.capability(), Capability::RuntimeRestart);
-        assert_eq!(HostCommand::InstallUpdate.capability(), Capability::UpdateInstall);
+        assert_eq!(
+            HostCommand::RestartRuntime.capability(),
+            Capability::RuntimeRestart
+        );
+        assert_eq!(
+            HostCommand::InstallUpdate.capability(),
+            Capability::UpdateInstall
+        );
     }
 
     #[test]
@@ -194,7 +203,10 @@ mod tests {
             protocol_version: HOST_PROTOCOL_VERSION,
             min_compatible_version: HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
             schema_hash: HOST_PROTOCOL_SCHEMA_HASH.into(),
-            feature_flags: HOST_PROTOCOL_FEATURE_FLAGS.iter().map(|value| (*value).into()).collect(),
+            feature_flags: HOST_PROTOCOL_FEATURE_FLAGS
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
             revision: 3,
             event_sequence: 5,
             runtime_phase: RuntimePhase::Cancelling,

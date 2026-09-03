@@ -274,7 +274,10 @@ fn is_loopback(host: &str) -> bool {
             .unwrap_or(false)
 }
 
-fn validated_public_gateway_url(public_url: Option<String>, local_url: &str) -> Result<String, String> {
+fn validated_public_gateway_url(
+    public_url: Option<String>,
+    local_url: &str,
+) -> Result<String, String> {
     let Some(value) = public_url else {
         return Ok(local_url.to_string());
     };
@@ -283,7 +286,9 @@ fn validated_public_gateway_url(public_url: Option<String>, local_url: &str) -> 
         return Ok(local_url.to_string());
     }
     let mut url = Url::parse(value).map_err(|error| format!("Gateway 公网地址无效: {error}"))?;
-    let host = url.host_str().ok_or_else(|| "Gateway 公网地址缺少主机名。".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Gateway 公网地址缺少主机名。".to_string())?;
     let local_debug = url.scheme() == "http" && is_loopback(host) && url.port().is_some();
     if url.scheme() != "https" && !local_debug {
         return Err("Gateway 公网地址必须使用 HTTPS；HTTP 仅允许 loopback 调试。".into());
@@ -294,13 +299,19 @@ fn validated_public_gateway_url(public_url: Option<String>, local_url: &str) -> 
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err("Gateway 公网地址必须是无凭据、无路径/query/fragment 的 origin 根地址。".into());
+        return Err(
+            "Gateway 公网地址必须是无凭据、无路径/query/fragment 的 origin 根地址。".into(),
+        );
     }
     url.set_path("/");
     Ok(url.to_string())
 }
 
-fn spawn_native_gateway(lease: RuntimeLease, port: u16, public_url: Option<String>) -> Result<NativeGateway, String> {
+fn spawn_native_gateway(
+    lease: RuntimeLease,
+    port: u16,
+    public_url: Option<String>,
+) -> Result<NativeGateway, String> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .map_err(|error| format!("无法绑定 Native Gateway 127.0.0.1:{port}: {error}"))?;
     listener
@@ -349,11 +360,17 @@ impl Drop for ActiveConnectionGuard {
         if let Ok(mut streams) = self.shared.connection_streams.lock() {
             streams.remove(&self.id);
         }
-        self.shared.active_connections.fetch_sub(1, Ordering::AcqRel);
+        self.shared
+            .active_connections
+            .fetch_sub(1, Ordering::AcqRel);
     }
 }
 
-fn register_connection_stream(shared: &GatewayShared, id: usize, stream: &TcpStream) -> Result<(), String> {
+fn register_connection_stream(
+    shared: &GatewayShared,
+    id: usize,
+    stream: &TcpStream,
+) -> Result<(), String> {
     let shutdown_stream = stream.try_clone().map_err(|error| error.to_string())?;
     let mut streams = shared
         .connection_streams
@@ -433,7 +450,12 @@ fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc
                 let active = shared.active_connections.fetch_add(1, Ordering::AcqRel);
                 if active >= MAX_GATEWAY_CONNECTIONS {
                     shared.active_connections.fetch_sub(1, Ordering::AcqRel);
-                    let _ = write_status(&mut stream, 503, "Service Unavailable", b"gateway connection limit reached");
+                    let _ = write_status(
+                        &mut stream,
+                        503,
+                        "Service Unavailable",
+                        b"gateway connection limit reached",
+                    );
                     continue;
                 }
                 let connection_id = shared.next_connection_id.fetch_add(1, Ordering::AcqRel);
@@ -569,7 +591,9 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
     let header_text = std::str::from_utf8(&data[..header_end])
         .map_err(|_| "Gateway request headers are not UTF-8".to_string())?;
     let mut lines = header_text.split("\r\n");
-    let request_line = lines.next().ok_or_else(|| "missing request line".to_string())?;
+    let request_line = lines
+        .next()
+        .ok_or_else(|| "missing request line".to_string())?;
     let mut request_parts = request_line.split_whitespace();
     let method = request_parts.next().unwrap_or_default().to_string();
     let target = request_parts.next().unwrap_or_default().to_string();
@@ -632,7 +656,9 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 fn request_path(target: &str) -> Result<Url, String> {
@@ -660,8 +686,16 @@ fn handle_connection(
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(error) => {
-            let status = if error.contains("too large") { 413 } else { 400 };
-            let reason = if status == 413 { "Payload Too Large" } else { "Bad Request" };
+            let status = if error.contains("too large") {
+                413
+            } else {
+                400
+            };
+            let reason = if status == 413 {
+                "Payload Too Large"
+            } else {
+                "Bad Request"
+            };
             let _ = write_status(&mut stream, status, reason, b"invalid gateway request");
             return Err(error);
         }
@@ -669,7 +703,12 @@ fn handle_connection(
     let url = match request_path(&request.target) {
         Ok(url) => url,
         Err(error) => {
-            let _ = write_status(&mut stream, 400, "Bad Request", b"invalid gateway request target");
+            let _ = write_status(
+                &mut stream,
+                400,
+                "Bad Request",
+                b"invalid gateway request target",
+            );
             return Err(error);
         }
     };
@@ -703,10 +742,18 @@ fn handle_pair(
     if request.method != "POST" {
         return write_status(stream, 405, "Method Not Allowed", b"");
     }
-    if !header(request, "content-type")
-        .is_some_and(|value| value.split(';').next().is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json")))
-    {
-        return write_status(stream, 415, "Unsupported Media Type", b"application/json required");
+    if !header(request, "content-type").is_some_and(|value| {
+        value
+            .split(';')
+            .next()
+            .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
+    }) {
+        return write_status(
+            stream,
+            415,
+            "Unsupported Media Type",
+            b"application/json required",
+        );
     }
     let pair: PairRequest = match serde_json::from_slice(&request.raw_body) {
         Ok(value) => value,
@@ -820,7 +867,9 @@ fn handle_connect(stream: &mut TcpStream, url: &Url, shared: &GatewayShared) -> 
         "HTTP/1.1 303 See Other\r\nLocation: /\r\nSet-Cookie: hd_session={}; Path=/; HttpOnly; SameSite=Strict{}\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         session_token, secure
     );
-    stream.write_all(response.as_bytes()).map_err(|error| error.to_string())
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
 fn connect_token(url: &Url) -> Result<String, &'static str> {
@@ -869,7 +918,10 @@ fn proxy_authenticated(
         return Ok(());
     };
     let bootstrap = {
-        let mut registry = shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
+        let mut registry = shared
+            .registry
+            .lock()
+            .map_err(|_| "Gateway registry poisoned".to_string())?;
         prune_registry(&mut registry);
         let Some(session) = registry.sessions.get_mut(&session_token) else {
             write_status(&mut client, 401, "Unauthorized", b"session expired")?;
@@ -880,8 +932,12 @@ fn proxy_authenticated(
     };
     let upstream = Url::parse(&shared.runtime_lease.origin)
         .map_err(|_| "RuntimeLease origin invalid".to_string())?;
-    let host = upstream.host_str().ok_or_else(|| "RuntimeLease origin host missing".to_string())?;
-    let port = upstream.port().ok_or_else(|| "RuntimeLease origin port missing".to_string())?;
+    let host = upstream
+        .host_str()
+        .ok_or_else(|| "RuntimeLease origin host missing".to_string())?;
+    let port = upstream
+        .port()
+        .ok_or_else(|| "RuntimeLease origin port missing".to_string())?;
     let mut upstream_stream = connect_upstream(host, port)?;
     register_connection_stream(&shared, connection_id, &upstream_stream)?;
     upstream_stream
@@ -937,7 +993,9 @@ fn proxy_authenticated(
     }
 
     let mut client_read = client.try_clone().map_err(|error| error.to_string())?;
-    let mut upstream_write = upstream_stream.try_clone().map_err(|error| error.to_string())?;
+    let mut upstream_write = upstream_stream
+        .try_clone()
+        .map_err(|error| error.to_string())?;
     let forward = thread::spawn(move || {
         let _ = io::copy(&mut client_read, &mut upstream_write);
     });
@@ -958,7 +1016,10 @@ fn cookie_value(header: &str, name: &str) -> Option<String> {
 fn rate_limited(registry: &mut GatewayRegistry, peer: IpAddr) -> bool {
     let now = Instant::now();
     let attempts = registry.attempts.entry(peer).or_default();
-    while attempts.front().is_some_and(|at| now.duration_since(*at) > Duration::from_secs(60)) {
+    while attempts
+        .front()
+        .is_some_and(|at| now.duration_since(*at) > Duration::from_secs(60))
+    {
         attempts.pop_front();
     }
     if attempts.len() >= 8 {
@@ -970,11 +1031,19 @@ fn rate_limited(registry: &mut GatewayRegistry, peer: IpAddr) -> bool {
 
 fn prune_registry(registry: &mut GatewayRegistry) {
     let now = SystemTime::now();
-    if registry.pairing.as_ref().is_some_and(|value| value.expires_at <= now) {
+    if registry
+        .pairing
+        .as_ref()
+        .is_some_and(|value| value.expires_at <= now)
+    {
         registry.pairing = None;
     }
-    registry.connect_tickets.retain(|_, ticket| ticket.expires_at > now);
-    registry.sessions.retain(|_, session| session.expires_at > now);
+    registry
+        .connect_tickets
+        .retain(|_, ticket| ticket.expires_at > now);
+    registry
+        .sessions
+        .retain(|_, session| session.expires_at > now);
     let instant_now = Instant::now();
     registry.attempts.retain(|_, attempts| {
         while attempts
@@ -997,20 +1066,36 @@ fn device_info(session: &SessionState) -> GatewayDeviceInfo {
     }
 }
 
-fn write_json(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8]) -> Result<(), String> {
+fn write_json(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    body: &[u8],
+) -> Result<(), String> {
     let head = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(body)).map_err(|error| error.to_string())
+    stream
+        .write_all(head.as_bytes())
+        .and_then(|_| stream.write_all(body))
+        .map_err(|error| error.to_string())
 }
 
-fn write_status(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8]) -> Result<(), String> {
+fn write_status(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    body: &[u8],
+) -> Result<(), String> {
     let head = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(body)).map_err(|error| error.to_string())
+    stream
+        .write_all(head.as_bytes())
+        .and_then(|_| stream.write_all(body))
+        .map_err(|error| error.to_string())
 }
 
 fn random_hex(bytes: usize) -> Result<String, String> {
@@ -1049,7 +1134,10 @@ fn secure_random(buffer: &mut [u8]) -> Result<(), String> {
 }
 
 fn rfc3339(time: SystemTime) -> String {
-    let seconds = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let seconds = time
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
     let days = seconds.div_euclid(86_400);
     let seconds_of_day = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
@@ -1082,25 +1170,32 @@ fn runtime_lease(state: &AppState) -> Result<RuntimeLease, String> {
 }
 
 fn ensure_current_runtime(state: &AppState, generation: u64) -> bool {
-    crate::runtime::live_lease(state)
-        .is_some_and(|lease| lease.generation.id == generation)
+    crate::runtime::live_lease(state).is_some_and(|lease| lease.generation.id == generation)
 }
 
 #[tauri::command]
 pub fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStatus, String> {
-    let generation = state
-        .gateway
-        .lock()
-        .ok()
-        .and_then(|actor| actor.server.as_ref().map(|server| server.runtime_generation));
+    let generation = state.gateway.lock().ok().and_then(|actor| {
+        actor
+            .server
+            .as_ref()
+            .map(|server| server.runtime_generation)
+    });
     if let Some(generation) = generation {
         if !ensure_current_runtime(&*state, generation) {
             stop_managed(&state.gateway);
             return Ok(stopped());
         }
     }
-    let actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
-    Ok(actor.server.as_ref().map(NativeGateway::status).unwrap_or_else(stopped))
+    let actor = state
+        .gateway
+        .lock()
+        .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
+    Ok(actor
+        .server
+        .as_ref()
+        .map(NativeGateway::status)
+        .unwrap_or_else(stopped))
 }
 
 #[tauri::command]
@@ -1154,7 +1249,9 @@ pub fn gateway_host_start(
             return Err(error);
         }
     };
-    if !ensure_current_runtime(&*state, lease.generation.id) || state.quitting.load(Ordering::Acquire) {
+    if !ensure_current_runtime(&*state, lease.generation.id)
+        || state.quitting.load(Ordering::Acquire)
+    {
         let mut server = server;
         server.stop();
         if let Ok(mut actor) = state.gateway.lock() {
@@ -1187,16 +1284,28 @@ pub fn gateway_host_start(
 }
 
 #[tauri::command]
-pub fn gateway_host_create_pairing(state: State<'_, AppState>) -> Result<GatewayPairingTicket, String> {
+pub fn gateway_host_create_pairing(
+    state: State<'_, AppState>,
+) -> Result<GatewayPairingTicket, String> {
     let current = runtime_lease(&*state)?;
-    let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
-    let server = actor.server.as_mut().ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
+    let mut actor = state
+        .gateway
+        .lock()
+        .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
+    let server = actor
+        .server
+        .as_mut()
+        .ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
     if server.runtime_generation != current.generation.id {
         return Err("Gateway RuntimeLease 已失效，请重新启动 Gateway。".into());
     }
     let code = pairing_code()?;
     let expires_at = SystemTime::now() + Duration::from_secs(5 * 60);
-    let mut registry = server.shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
+    let mut registry = server
+        .shared
+        .registry
+        .lock()
+        .map_err(|_| "Gateway registry poisoned".to_string())?;
     prune_registry(&mut registry);
     registry.pairing = Some(PairingState {
         code: code.clone(),
@@ -1211,12 +1320,22 @@ pub fn gateway_host_create_pairing(state: State<'_, AppState>) -> Result<Gateway
 #[tauri::command]
 pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Result<bool, String> {
     let current = runtime_lease(&*state)?;
-    let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
-    let server = actor.server.as_mut().ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
+    let mut actor = state
+        .gateway
+        .lock()
+        .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
+    let server = actor
+        .server
+        .as_mut()
+        .ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
     if server.runtime_generation != current.generation.id {
         return Err("Gateway RuntimeLease 已失效，请重新启动 Gateway。".into());
     }
-    let mut registry = server.shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
+    let mut registry = server
+        .shared
+        .registry
+        .lock()
+        .map_err(|_| "Gateway registry poisoned".to_string())?;
     prune_registry(&mut registry);
     let token = registry
         .sessions
@@ -1224,7 +1343,9 @@ pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Res
         .find_map(|(token, session)| (session.id == device_id).then(|| token.clone()));
     if let Some(token) = token {
         registry.sessions.remove(&token);
-        registry.connect_tickets.retain(|_, ticket| ticket.session_token != token);
+        registry
+            .connect_tickets
+            .retain(|_, ticket| ticket.session_token != token);
         Ok(true)
     } else {
         Ok(false)
@@ -1234,12 +1355,22 @@ pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Res
 #[tauri::command]
 pub fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize, String> {
     let current = runtime_lease(&*state)?;
-    let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
-    let server = actor.server.as_mut().ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
+    let mut actor = state
+        .gateway
+        .lock()
+        .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
+    let server = actor
+        .server
+        .as_mut()
+        .ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
     if server.runtime_generation != current.generation.id {
         return Err("Gateway RuntimeLease 已失效，请重新启动 Gateway。".into());
     }
-    let mut registry = server.shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
+    let mut registry = server
+        .shared
+        .registry
+        .lock()
+        .map_err(|_| "Gateway registry poisoned".to_string())?;
     prune_registry(&mut registry);
     let count = registry.sessions.len();
     registry.sessions.clear();
@@ -1294,10 +1425,20 @@ mod tests {
     #[test]
     fn gateway_public_url_is_https_or_loopback_debug_only() {
         let local = "http://127.0.0.1:43137/";
-        assert!(validated_public_gateway_url(Some("https://gateway.example.com/".into()), local).is_ok());
+        assert!(
+            validated_public_gateway_url(Some("https://gateway.example.com/".into()), local)
+                .is_ok()
+        );
         assert!(validated_public_gateway_url(Some(local.into()), local).is_ok());
-        assert!(validated_public_gateway_url(Some("http://gateway.example.com/".into()), local).is_err());
-        assert!(validated_public_gateway_url(Some("https://user:pass@gateway.example.com/".into()), local).is_err());
+        assert!(
+            validated_public_gateway_url(Some("http://gateway.example.com/".into()), local)
+                .is_err()
+        );
+        assert!(validated_public_gateway_url(
+            Some("https://user:pass@gateway.example.com/".into()),
+            local
+        )
+        .is_err());
     }
 
     #[test]
@@ -1310,7 +1451,10 @@ mod tests {
     #[test]
     fn gateway_request_body_limit_is_fail_closed() {
         assert_eq!(validated_content_length("0").unwrap(), 0);
-        assert_eq!(validated_content_length(&MAX_GATEWAY_BODY_BYTES.to_string()).unwrap(), MAX_GATEWAY_BODY_BYTES);
+        assert_eq!(
+            validated_content_length(&MAX_GATEWAY_BODY_BYTES.to_string()).unwrap(),
+            MAX_GATEWAY_BODY_BYTES
+        );
         assert!(validated_content_length(&(MAX_GATEWAY_BODY_BYTES + 1).to_string()).is_err());
         assert!(validated_content_length("not-a-number").is_err());
     }
@@ -1341,13 +1485,19 @@ mod tests {
             "http://gateway.local/api/harnessdock/connect?token=abc&extra=1",
         ] {
             let url = Url::parse(target).unwrap();
-            assert!(connect_token(&url).is_err(), "accepted malformed connect URL: {target}");
+            assert!(
+                connect_token(&url).is_err(),
+                "accepted malformed connect URL: {target}"
+            );
         }
     }
 
     #[test]
     fn cookies_are_parsed_without_exposing_other_values() {
-        assert_eq!(cookie_value("a=1; hd_session=abc; b=2", "hd_session"), Some("abc".into()));
+        assert_eq!(
+            cookie_value("a=1; hd_session=abc; b=2", "hd_session"),
+            Some("abc".into())
+        );
         assert_eq!(cookie_value("a=1", "hd_session"), None);
     }
 

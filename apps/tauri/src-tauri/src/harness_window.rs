@@ -287,7 +287,10 @@ impl Drop for SurfaceOperationGuard {
 }
 
 #[cfg(not(mobile))]
-fn claim_surface_operation(app: &AppHandle, operation: SurfaceOperation) -> Result<SurfaceOperationGuard, String> {
+fn claim_surface_operation(
+    app: &AppHandle,
+    operation: SurfaceOperation,
+) -> Result<SurfaceOperationGuard, String> {
     app.state::<crate::AppState>()
         .surface_actor
         .lock()
@@ -342,7 +345,9 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
             if same_origin
                 && visible
                 && !recovery_pending
-                && current_url.as_ref().is_some_and(|current| !has_launch_token(current))
+                && current_url
+                    .as_ref()
+                    .is_some_and(|current| !has_launch_token(current))
             {
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -352,7 +357,9 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
             let navigation_id = begin_harness_load(&app, lease.generation.id)?;
             show_splash(&app, "正在打开 Harness Web…");
             let result = if same_origin
-                && current_url.as_ref().is_some_and(|current| !has_launch_token(current))
+                && current_url
+                    .as_ref()
+                    .is_some_and(|current| !has_launch_token(current))
             {
                 window.reload()
             } else {
@@ -416,7 +423,9 @@ pub async fn harness_close(app: AppHandle) -> Result<(), String> {
         cancel_harness_load(&app);
         hide_splash(&app);
         if let Some(window) = app.get_webview_window("harness") {
-            window.hide().map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
+            window
+                .hide()
+                .map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
         }
         Ok(())
     }
@@ -443,10 +452,9 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
         let launch_url = validated_runtime_url(&lease.launch_url)?;
         let navigation_id = begin_harness_load(&app, lease.generation.id)?;
         show_splash(&app, "正在刷新 Harness Web…");
-        let result = if current
-            .as_ref()
-            .is_some_and(|value| value.origin().ascii_serialization() == lease.origin && !has_launch_token(value))
-        {
+        let result = if current.as_ref().is_some_and(|value| {
+            value.origin().ascii_serialization() == lease.origin && !has_launch_token(value)
+        }) {
             window.reload()
         } else {
             window.navigate(launch_url)
@@ -542,7 +550,9 @@ pub async fn harness_restart_web(app: AppHandle) -> Result<crate::runtime::Runti
 }
 
 #[tauri::command]
-pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
+pub async fn harness_safe_mode_restart(
+    app: AppHandle,
+) -> Result<crate::runtime::RuntimeStatus, String> {
     #[cfg(mobile)]
     {
         let _ = app;
@@ -556,7 +566,9 @@ pub async fn harness_safe_mode_restart(app: AppHandle) -> Result<crate::runtime:
 }
 
 #[tauri::command]
-pub async fn harness_clear_quarantine_restart(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
+pub async fn harness_clear_quarantine_restart(
+    app: AppHandle,
+) -> Result<crate::runtime::RuntimeStatus, String> {
     #[cfg(mobile)]
     {
         let _ = app;
@@ -584,15 +596,25 @@ fn harness_window(app: &AppHandle) -> Result<tauri::WebviewWindow<tauri::Wry>, S
 #[tauri::command]
 pub fn harness_minimize(app: AppHandle) -> Result<(), String> {
     #[cfg(mobile)]
-    { let _ = app; Ok(()) }
+    {
+        let _ = app;
+        Ok(())
+    }
     #[cfg(not(mobile))]
-    { harness_window(&app)?.minimize().map_err(|error| format!("无法最小化 Harness 窗口: {error}")) }
+    {
+        harness_window(&app)?
+            .minimize()
+            .map_err(|error| format!("无法最小化 Harness 窗口: {error}"))
+    }
 }
 
 #[tauri::command]
 pub fn harness_toggle_maximize(app: AppHandle) -> Result<HarnessWindowState, String> {
     #[cfg(mobile)]
-    { let _ = app; Ok(HarnessWindowState { maximized: false }) }
+    {
+        let _ = app;
+        Ok(HarnessWindowState { maximized: false })
+    }
     #[cfg(not(mobile))]
     {
         let window = harness_window(&app)?;
@@ -601,25 +623,35 @@ pub fn harness_toggle_maximize(app: AppHandle) -> Result<HarnessWindowState, Str
         } else {
             window.maximize().map_err(|error| error.to_string())?;
         }
-        Ok(HarnessWindowState { maximized: window.is_maximized().unwrap_or(false) })
+        Ok(HarnessWindowState {
+            maximized: window.is_maximized().unwrap_or(false),
+        })
     }
 }
 
 #[tauri::command]
 pub fn harness_window_state(app: AppHandle) -> Result<HarnessWindowState, String> {
     #[cfg(mobile)]
-    { let _ = app; Ok(HarnessWindowState { maximized: false }) }
+    {
+        let _ = app;
+        Ok(HarnessWindowState { maximized: false })
+    }
     #[cfg(not(mobile))]
     {
         let window = harness_window(&app)?;
-        Ok(HarnessWindowState { maximized: window.is_maximized().unwrap_or(false) })
+        Ok(HarnessWindowState {
+            maximized: window.is_maximized().unwrap_or(false),
+        })
     }
 }
 
 #[tauri::command]
 pub fn control_show(app: AppHandle) -> Result<(), String> {
     #[cfg(mobile)]
-    { let _ = app; Ok(()) }
+    {
+        let _ = app;
+        Ok(())
+    }
     #[cfg(not(mobile))]
     {
         let recovery = app
@@ -639,9 +671,15 @@ pub fn control_show(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn splash_status(app: AppHandle, status: String) -> Result<(), String> {
     #[cfg(mobile)]
-    { let _ = (app, status); Ok(()) }
+    {
+        let _ = (app, status);
+        Ok(())
+    }
     #[cfg(not(mobile))]
-    { set_splash_status(&app, &status); Ok(()) }
+    {
+        set_splash_status(&app, &status);
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -656,8 +694,12 @@ pub fn startup_recovery_status(app: AppHandle) -> Result<Option<String>, String>
 #[cfg(not(mobile))]
 async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
-        window.show().map_err(|error| format!("无法显示插件诊断窗口: {error}"))?;
-        window.set_focus().map_err(|error| format!("无法聚焦插件诊断窗口: {error}"))?;
+        window
+            .show()
+            .map_err(|error| format!("无法显示插件诊断窗口: {error}"))?;
+        window
+            .set_focus()
+            .map_err(|error| format!("无法聚焦插件诊断窗口: {error}"))?;
         return Ok(());
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
@@ -681,7 +723,10 @@ async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn shell_settings_show(app: AppHandle) -> Result<(), String> {
     #[cfg(mobile)]
-    { let _ = app; Err("移动端不提供桌面插件诊断窗口。".into()) }
+    {
+        let _ = app;
+        Err("移动端不提供桌面插件诊断窗口。".into())
+    }
     #[cfg(not(mobile))]
     {
         let _operation = claim_surface_operation(&app, SurfaceOperation::Diagnostics)?;
@@ -703,7 +748,11 @@ mod tests {
 
     #[test]
     fn only_nonempty_token_is_launch_credential() {
-        assert!(has_launch_token(&validated_runtime_url("http://127.0.0.1:4321/?token=x").unwrap()));
-        assert!(!has_launch_token(&validated_runtime_url("http://127.0.0.1:4321/?tab=plugins").unwrap()));
+        assert!(has_launch_token(
+            &validated_runtime_url("http://127.0.0.1:4321/?token=x").unwrap()
+        ));
+        assert!(!has_launch_token(
+            &validated_runtime_url("http://127.0.0.1:4321/?tab=plugins").unwrap()
+        ));
     }
 }

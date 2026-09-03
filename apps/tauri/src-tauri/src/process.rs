@@ -78,14 +78,12 @@ pub(crate) fn spawn_registered(
         }
     };
 
-    let mut pids = registry
-        .lock()
-        .map_err(|_| {
-            stop_process_tree(pid);
-            let _ = child.kill();
-            let _ = child.wait();
-            "启动进程注册表已损坏。".to_string()
-        })?;
+    let mut pids = registry.lock().map_err(|_| {
+        stop_process_tree(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        "启动进程注册表已损坏。".to_string()
+    })?;
     if quitting.load(std::sync::atomic::Ordering::Acquire) {
         drop(pids);
         #[cfg(windows)]

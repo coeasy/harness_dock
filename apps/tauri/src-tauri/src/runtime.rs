@@ -12,7 +12,9 @@ use url::Url;
 
 use crate::{
     platform, plugin_quarantine, process as process_control,
-    runtime_actor::{CancellationToken, RuntimeActor, RuntimeGeneration, RuntimeLease, RuntimeMode, RuntimePhase},
+    runtime_actor::{
+        CancellationToken, RuntimeActor, RuntimeGeneration, RuntimeLease, RuntimeMode, RuntimePhase,
+    },
     startup_trace::{self, StartupPhase},
     AppState,
 };
@@ -248,11 +250,16 @@ fn verify_runtime_image(app: &AppHandle) -> Result<RuntimeImage, String> {
         .image_identity
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "Runtime manifest 缺少 sealed imageIdentity。".to_string())?;
-    if manifest.build_commit.as_deref().is_some_and(|value| value.trim().is_empty()) {
+    if manifest
+        .build_commit
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
         return Err("Runtime manifest buildCommit 为空。".into());
     }
     let origin: OriginInfo = serde_json::from_str(
-        &fs::read_to_string(&origin_path).map_err(|error| format!("无法读取 origin.json: {error}"))?,
+        &fs::read_to_string(&origin_path)
+            .map_err(|error| format!("无法读取 origin.json: {error}"))?,
     )
     .map_err(|error| format!("origin.json 无效: {error}"))?;
 
@@ -271,10 +278,8 @@ fn work_dir() -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "harnessdock-tauri-{}-{nonce}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("harnessdock-tauri-{}-{nonce}", std::process::id()));
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -487,7 +492,9 @@ fn validated_ready(
         || ready.nonce != expected_generation.nonce
         || ready.image_identity != expected_generation.image_identity
     {
-        return Err("Runtime ready.json generation/nonce/imageIdentity 未通过当前启动代际校验。".into());
+        return Err(
+            "Runtime ready.json generation/nonce/imageIdentity 未通过当前启动代际校验。".into(),
+        );
     }
     if ready.host != "127.0.0.1" || ready.port == 0 || ready.pid != expected_pid || ready.pid == 0 {
         return Err("Runtime ready.json host/port/PID 未通过受管进程校验。".into());
@@ -561,7 +568,15 @@ fn spawn_runtime(
     token: &CancellationToken,
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &std::sync::atomic::AtomicBool,
-) -> Result<(Child, PathBuf, PathBuf, process_control::StartingProcessGuard), String> {
+) -> Result<
+    (
+        Child,
+        PathBuf,
+        PathBuf,
+        process_control::StartingProcessGuard,
+    ),
+    String,
+> {
     if cancelled(token, quitting) {
         return Err("Runtime generation was cancelled before spawn".into());
     }
@@ -580,11 +595,17 @@ fn spawn_runtime(
     }
     command
         .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
-        .env("DSH_EMBEDDED_READY_FILE", platform::node_cli_path(ready_file))
+        .env(
+            "DSH_EMBEDDED_READY_FILE",
+            platform::node_cli_path(ready_file),
+        )
         .env("DSH_EMBEDDED_VERSION", &image.origin.dsh_version)
         .env("HARNESSDOCK_RUNTIME_GENERATION", generation.id.to_string())
         .env("HARNESSDOCK_RUNTIME_NONCE", &generation.nonce)
-        .env("HARNESSDOCK_RUNTIME_IMAGE_IDENTITY", &generation.image_identity)
+        .env(
+            "HARNESSDOCK_RUNTIME_IMAGE_IDENTITY",
+            &generation.image_identity,
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -688,15 +709,24 @@ fn dump_config(
         return Err("Runtime generation cancelled before config dump".into());
     }
     let mut command = Command::new(platform::node_cli_path(&image.node));
-    command.arg(platform::node_cli_path(&image.dsh)).args(["--profile", "web"]);
+    command
+        .arg(platform::node_cli_path(&image.dsh))
+        .args(["--profile", "web"]);
     if default_only {
         command.arg("--dump-default-config");
     } else {
-        command.args(["--patch"]).arg(platform::node_cli_path(embedded_patch_file)).arg("--dump-config");
+        command
+            .args(["--patch"])
+            .arg(platform::node_cli_path(embedded_patch_file))
+            .arg("--dump-config");
     }
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     platform::configure_child_command(&mut command);
-    let (mut child, registration) = process_control::spawn_registered(&mut command, starting_processes, quitting)?;
+    let (mut child, registration) =
+        process_control::spawn_registered(&mut command, starting_processes, quitting)?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if cancelled(token, quitting) {
@@ -716,7 +746,10 @@ fn dump_config(
                 };
                 registration.complete();
                 if !output.status.success() {
-                    return Err(String::from_utf8_lossy(&output.stderr).chars().take(2_000).collect());
+                    return Err(String::from_utf8_lossy(&output.stderr)
+                        .chars()
+                        .take(2_000)
+                        .collect());
                 }
                 return String::from_utf8(output.stdout)
                     .map_err(|error| format!("dsh config dump 输出不是 UTF-8: {error}"));
@@ -755,21 +788,36 @@ fn user_patch_rows() -> Vec<ConfigDumpRow> {
     let Some(home) = dsh_home_path() else {
         return Vec::new();
     };
-    let paths = [home.join("profiles").join("web").join("cordis.patch.yml"), home.join("cordis.patch.yml")];
+    let paths = [
+        home.join("profiles").join("web").join("cordis.patch.yml"),
+        home.join("cordis.patch.yml"),
+    ];
     let mut rows = Vec::new();
     for path in paths {
-        let Ok(raw) = fs::read_to_string(&path) else { continue };
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
         let source = path.to_string_lossy().into_owned();
         let mut current: Option<ConfigDumpRow> = None;
         for line in raw.lines().map(str::trim_start) {
             if let Some(raw_id) = line.strip_prefix("- id:") {
-                if let Some(row) = current.take() { rows.push(row); }
-                current = Some(ConfigDumpRow { id: decode_yaml_scalar(raw_id), name: None, source: source.clone() });
+                if let Some(row) = current.take() {
+                    rows.push(row);
+                }
+                current = Some(ConfigDumpRow {
+                    id: decode_yaml_scalar(raw_id),
+                    name: None,
+                    source: source.clone(),
+                });
             } else if let Some(row) = current.as_mut() {
-                if let Some(raw_name) = line.strip_prefix("name:") { row.name = Some(decode_yaml_scalar(raw_name)); }
+                if let Some(raw_name) = line.strip_prefix("name:") {
+                    row.name = Some(decode_yaml_scalar(raw_name));
+                }
             }
         }
-        if let Some(row) = current { rows.push(row); }
+        if let Some(row) = current {
+            rows.push(row);
+        }
     }
     rows
 }
@@ -781,11 +829,27 @@ fn recovery_rows(
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<ConfigDumpRow>, String> {
-    match dump_config(image, embedded_patch_file, false, token, starting_processes, quitting) {
+    match dump_config(
+        image,
+        embedded_patch_file,
+        false,
+        token,
+        starting_processes,
+        quitting,
+    ) {
         Ok(config) => Ok(parse_config_dump_rows(&config)),
         Err(full_error) => {
-            let default = dump_config(image, embedded_patch_file, true, token, starting_processes, quitting)
-                .map_err(|default_error| format!("{full_error}; 默认配置转储也失败: {default_error}"))?;
+            let default = dump_config(
+                image,
+                embedded_patch_file,
+                true,
+                token,
+                starting_processes,
+                quitting,
+            )
+            .map_err(|default_error| {
+                format!("{full_error}; 默认配置转储也失败: {default_error}")
+            })?;
             let mut rows = parse_config_dump_rows(&default);
             rows.extend(user_patch_rows());
             Ok(rows)
@@ -817,7 +881,10 @@ fn launch_attempt(
         starting_processes,
         quitting,
     )
-    .map_err(|message| AttemptFailure { message, diagnostic: String::new() })?;
+    .map_err(|message| AttemptFailure {
+        message,
+        diagnostic: String::new(),
+    })?;
     let pid = child.id();
     let ready = match wait_for_ready(
         &mut child,
@@ -877,7 +944,13 @@ fn safe_profile(
         starting_processes,
         quitting,
     )
-    .map_err(|error| format!("安全配置启动失败: {}\n{}", error.message, public_diagnostic(&error.diagnostic)))?;
+    .map_err(|error| {
+        format!(
+            "安全配置启动失败: {}\n{}",
+            error.message,
+            public_diagnostic(&error.diagnostic)
+        )
+    })?;
     process.safe_mode = true;
     process.recovery_source = "safe-profile".into();
     Ok(process)
@@ -918,12 +991,18 @@ fn start_blocking(
         ));
     }
 
-    let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+    let recovery_enabled =
+        std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
     if recovery_enabled {
-        if let Some(quarantine) = plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version) {
+        if let Some(quarantine) =
+            plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version)
+        {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
-            fs::write(&quarantine_file, recovery_patch_ids(&quarantine.isolated_plugins)?)
-                .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
+            fs::write(
+                &quarantine_file,
+                recovery_patch_ids(&quarantine.isolated_plugins)?,
+            )
+            .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
             if let Ok(mut process) = launch_attempt(
                 &image,
@@ -973,22 +1052,25 @@ fn start_blocking(
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 return Err(format!("{}\n{}", first_failure.message, summary));
             }
-            let rows = match recovery_rows(&image, &patch_file, &token, &starting_processes, &quitting) {
-                Ok(rows) => rows,
-                Err(error) => {
-                    eprintln!("Plugin recovery config discovery failed; using safe profile: {error}");
-                    return work_dir_guard.retain_result(safe_profile(
-                        &image,
-                        &patch_file,
-                        &ready_file,
-                        &dir,
-                        &generation,
-                        &token,
-                        &starting_processes,
-                        &quitting,
-                    ));
-                }
-            };
+            let rows =
+                match recovery_rows(&image, &patch_file, &token, &starting_processes, &quitting) {
+                    Ok(rows) => rows,
+                    Err(error) => {
+                        eprintln!(
+                            "Plugin recovery config discovery failed; using safe profile: {error}"
+                        );
+                        return work_dir_guard.retain_result(safe_profile(
+                            &image,
+                            &patch_file,
+                            &ready_file,
+                            &dir,
+                            &generation,
+                            &token,
+                            &starting_processes,
+                            &quitting,
+                        ));
+                    }
+                };
             let (selected, suspected, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 return work_dir_guard.retain_result(safe_profile(
@@ -1005,7 +1087,10 @@ fn start_blocking(
             let recovery_file = dir.join("plugin-recovery.patch.yml");
             fs::write(&recovery_file, recovery_patch(&selected)?)
                 .map_err(|error| format!("无法写入插件兼容恢复 patch: {error}"))?;
-            let isolated = selected.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+            let isolated = selected
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<_>>();
             let _ = fs::remove_file(&ready_file);
             match launch_attempt(
                 &image,
@@ -1056,8 +1141,12 @@ fn start_blocking(
     }
 }
 
-fn lease_from_process(generation: RuntimeGeneration, process: &RuntimeProcess) -> Result<RuntimeLease, String> {
-    let url = Url::parse(&process.ready.url).map_err(|_| "Runtime ready URL invalid".to_string())?;
+fn lease_from_process(
+    generation: RuntimeGeneration,
+    process: &RuntimeProcess,
+) -> Result<RuntimeLease, String> {
+    let url =
+        Url::parse(&process.ready.url).map_err(|_| "Runtime ready URL invalid".to_string())?;
     Ok(RuntimeLease {
         generation,
         pid: process.ready.pid,
@@ -1092,7 +1181,9 @@ pub(crate) fn status_snapshot(state: &AppState) -> RuntimeStatus {
         Ok(actor) => actor,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let dead = actor.process_mut().is_some_and(|process| !process.is_alive());
+    let dead = actor
+        .process_mut()
+        .is_some_and(|process| !process.is_alive());
     if dead {
         let process = actor.invalidate_dead_process();
         drop(actor);
@@ -1114,7 +1205,11 @@ pub fn runtime_status(state: State<'_, AppState>) -> RuntimeStatus {
     status_snapshot(&*state)
 }
 
-async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMode) -> Result<RuntimeStatus, String> {
+async fn start_impl(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: RuntimeMode,
+) -> Result<RuntimeStatus, String> {
     if cfg!(mobile) {
         return Err("Android/iOS 使用 Remote Gateway，不允许启动桌面 dsh Runtime。".into());
     }
@@ -1181,7 +1276,10 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
     };
     for required in [&plugin_path, &compatibility_path, &shell_plugin_path] {
         if !required.is_file() {
-            let error = format!("Tauri Runtime integration resource missing: {}", required.display());
+            let error = format!(
+                "Tauri Runtime integration resource missing: {}",
+                required.display()
+            );
             return Err(mark_start_failed(&*state, generation.id, error));
         }
     }
@@ -1204,7 +1302,8 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
             quitting,
         )
     })
-    .await {
+    .await
+    {
         Ok(process) => process,
         Err(error) => {
             return Err(mark_start_failed(
@@ -1264,7 +1363,10 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
 }
 
 #[tauri::command]
-pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
+pub async fn runtime_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RuntimeStatus, String> {
     start_impl(app, state, RuntimeMode::Normal).await
 }
 
@@ -1362,7 +1464,10 @@ mod tests {
         let rows = parse_config_dump_rows(DUMP);
         let candidates = recovery_candidates(&rows);
         assert_eq!(
-            candidates.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+            candidates
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["old-market-plugin", "user-added"]
         );
     }
@@ -1391,7 +1496,8 @@ mod tests {
     #[test]
     fn diagnostic_attribution_keeps_full_external_quarantine_set() {
         let rows = parse_config_dump_rows(DUMP);
-        let (selected, suspected, reason) = recovery_plan(&rows, "failed to load @legacy/old-market-plugin");
+        let (selected, suspected, reason) =
+            recovery_plan(&rows, "failed to load @legacy/old-market-plugin");
         assert_eq!(selected.len(), 2);
         assert_eq!(suspected, vec!["old-market-plugin"]);
         assert_eq!(reason, "diagnostic-match");
@@ -1402,7 +1508,10 @@ mod tests {
     fn runtime_work_dir_is_private_on_unix() {
         use std::os::unix::fs::PermissionsExt;
         let dir = work_dir().unwrap();
-        assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -1,7 +1,7 @@
 use tauri::AppHandle;
 
-use crate::host_protocol::{HostCommand, SubjectKind};
 pub(crate) use crate::host_protocol::HostCommand as HostIntent;
+use crate::host_protocol::{HostCommand, SubjectKind};
 
 /// Native menu/tray code enters the same HostKernelTask queue as WebView
 /// requests. This guarantees one ordering/dedupe/event path for business

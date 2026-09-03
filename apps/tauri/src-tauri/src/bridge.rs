@@ -8,8 +8,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::host_protocol::{
     CommandEnvelope, HostError, HostSnapshot, ResponseEnvelope, SubjectKind,
-    HOST_PROTOCOL_FEATURE_FLAGS, HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
-    HOST_PROTOCOL_SCHEMA_HASH, HOST_PROTOCOL_VERSION,
+    HOST_PROTOCOL_FEATURE_FLAGS, HOST_PROTOCOL_MIN_COMPATIBLE_VERSION, HOST_PROTOCOL_SCHEMA_HASH,
+    HOST_PROTOCOL_VERSION,
 };
 use crate::surface_actor::SurfaceKind;
 
@@ -57,8 +57,8 @@ fn trusted_subject(
                     false,
                 ));
             }
-            let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>())
-                .ok_or_else(|| {
+            let lease =
+                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -92,7 +92,10 @@ fn trusted_subject(
             Ok(SubjectKind::Diagnostics)
         }
         "control" => {
-            if !matches!(claimed, SubjectKind::DesktopShell | SubjectKind::Diagnostics) {
+            if !matches!(
+                claimed,
+                SubjectKind::DesktopShell | SubjectKind::Diagnostics
+            ) {
                 return Err(HostError::new(
                     "SUBJECT_MISMATCH",
                     ErrorScope::Protocol,
@@ -130,19 +133,38 @@ fn snapshot_subject(
     match window.label() {
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
-            let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
-                HostError::new(
-                    "RUNTIME_LEASE_REQUIRED",
-                    ErrorScope::Runtime,
-                    "Harness snapshot has no current RuntimeLease",
-                    true,
-                )
-            })?;
-            let origin = window.url().ok().map(|url| url.origin().ascii_serialization());
-            Ok((subject, SurfaceKind::Harness, origin, Some(lease.generation.id)))
+            let lease =
+                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                    HostError::new(
+                        "RUNTIME_LEASE_REQUIRED",
+                        ErrorScope::Runtime,
+                        "Harness snapshot has no current RuntimeLease",
+                        true,
+                    )
+                })?;
+            let origin = window
+                .url()
+                .ok()
+                .map(|url| url.origin().ascii_serialization());
+            Ok((
+                subject,
+                SurfaceKind::Harness,
+                origin,
+                Some(lease.generation.id),
+            ))
         }
-        "settings" => Ok((SubjectKind::Diagnostics, SurfaceKind::Diagnostics, None, None)),
-        "control" => Ok((SubjectKind::DesktopShell, SurfaceKind::Diagnostics, None, None)),
+        "settings" => Ok((
+            SubjectKind::Diagnostics,
+            SurfaceKind::Diagnostics,
+            None,
+            None,
+        )),
+        "control" => Ok((
+            SubjectKind::DesktopShell,
+            SurfaceKind::Diagnostics,
+            None,
+            None,
+        )),
         _ if cfg!(mobile) => Ok((SubjectKind::Mobile, SurfaceKind::Gateway, None, None)),
         _ => Err(HostError::new(
             "UNTRUSTED_SURFACE",
@@ -188,7 +210,10 @@ pub fn host_snapshot(
         protocol_version: HOST_PROTOCOL_VERSION,
         min_compatible_version: HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
         schema_hash: HOST_PROTOCOL_SCHEMA_HASH.into(),
-        feature_flags: HOST_PROTOCOL_FEATURE_FLAGS.iter().map(|value| (*value).into()).collect(),
+        feature_flags: HOST_PROTOCOL_FEATURE_FLAGS
+            .iter()
+            .map(|value| (*value).into())
+            .collect(),
         revision: kernel.revision,
         event_sequence: kernel.event_sequence,
         runtime_phase,

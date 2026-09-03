@@ -1,8 +1,8 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{mpsc::SyncSender, Arc, Mutex},
 };
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -73,7 +73,10 @@ impl HostKernelHandle {
     }
 
     pub(crate) fn public_state(&self) -> KernelPublicState {
-        self.public.lock().map(|state| state.clone()).unwrap_or_default()
+        self.public
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -91,9 +94,8 @@ fn protocol_failure(
 }
 
 fn command_fingerprint(envelope: &CommandEnvelope) -> String {
-    serde_json::to_string(&(envelope.subject, &envelope.command)).unwrap_or_else(|_| {
-        format!("{:?}:{:?}", envelope.subject, envelope.command)
-    })
+    serde_json::to_string(&(envelope.subject, &envelope.command))
+        .unwrap_or_else(|_| format!("{:?}:{:?}", envelope.subject, envelope.command))
 }
 
 fn current_revision(app: &AppHandle) -> u64 {
@@ -169,13 +171,7 @@ async fn kernel_loop(
             request_id: request_id.clone(),
             result,
         };
-        record_event(
-            &app,
-            &public,
-            &request_id,
-            operation_id,
-            event_kind,
-        );
+        record_event(&app, &public, &request_id, operation_id, event_kind);
 
         dedupe.insert(request_id.clone(), (fingerprint, response.clone()));
         dedupe_order.push_back(request_id);

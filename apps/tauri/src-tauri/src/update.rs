@@ -90,9 +90,8 @@ fn semantic_version(value: &str) -> Option<SemanticVersion> {
         .split_once('+')
         .map(|(version, build)| (version, Some(build)))
         .unwrap_or((&normalized, None));
-    if build.is_some_and(|value| {
-        value.is_empty() || !value.split('.').all(valid_semver_identifier)
-    }) {
+    if build.is_some_and(|value| value.is_empty() || !value.split('.').all(valid_semver_identifier))
+    {
         return None;
     }
     let (core, prerelease_raw) = without_build
@@ -118,7 +117,9 @@ fn semantic_version(value: &str) -> Option<SemanticVersion> {
                     return None;
                 }
                 if value.bytes().all(|byte| byte.is_ascii_digit()) {
-                    values.push(PrereleaseIdentifier::Numeric(parse_numeric_identifier(value)?));
+                    values.push(PrereleaseIdentifier::Numeric(parse_numeric_identifier(
+                        value,
+                    )?));
                 } else {
                     values.push(PrereleaseIdentifier::Text(value.to_string()));
                 }
@@ -147,10 +148,18 @@ fn compare_prerelease(
     }
     for (left, right) in left.iter().zip(right.iter()) {
         let ordering = match (left, right) {
-            (PrereleaseIdentifier::Numeric(left), PrereleaseIdentifier::Numeric(right)) => left.cmp(right),
-            (PrereleaseIdentifier::Numeric(_), PrereleaseIdentifier::Text(_)) => VersionOrdering::Less,
-            (PrereleaseIdentifier::Text(_), PrereleaseIdentifier::Numeric(_)) => VersionOrdering::Greater,
-            (PrereleaseIdentifier::Text(left), PrereleaseIdentifier::Text(right)) => left.cmp(right),
+            (PrereleaseIdentifier::Numeric(left), PrereleaseIdentifier::Numeric(right)) => {
+                left.cmp(right)
+            }
+            (PrereleaseIdentifier::Numeric(_), PrereleaseIdentifier::Text(_)) => {
+                VersionOrdering::Less
+            }
+            (PrereleaseIdentifier::Text(_), PrereleaseIdentifier::Numeric(_)) => {
+                VersionOrdering::Greater
+            }
+            (PrereleaseIdentifier::Text(left), PrereleaseIdentifier::Text(right)) => {
+                left.cmp(right)
+            }
         };
         if ordering != VersionOrdering::Equal {
             return ordering;
@@ -211,7 +220,11 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
             published_at: release.published_at,
         });
     }
-    let latest_version = release.tag_name.trim_start_matches(['v', 'V']).trim().to_string();
+    let latest_version = release
+        .tag_name
+        .trim_start_matches(['v', 'V'])
+        .trim()
+        .to_string();
     let parsed_latest = semantic_version(&latest_version)
         .ok_or_else(|| "更新服务返回了无效的 HarnessDock 版本号，已拒绝。".to_string())?;
     if !parsed_latest.prerelease.is_empty() {
@@ -222,7 +235,9 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         current_version,
         latest_version,
         release_url: release.html_url,
-        title: release.name.unwrap_or_else(|| "HarnessDock 最新版本".into()),
+        title: release
+            .name
+            .unwrap_or_else(|| "HarnessDock 最新版本".into()),
         notes: release.body.unwrap_or_default(),
         published_at: release.published_at,
     })

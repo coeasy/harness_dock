@@ -272,8 +272,10 @@ impl RuntimeActor {
         if self.state.is_transitioning() {
             return Err("Runtime 正在处理另一个生命周期操作，请稍候再试。".into());
         }
-        if matches!(self.state.phase(), RuntimePhase::Ready | RuntimePhase::Degraded)
-            && self.process.is_some()
+        if matches!(
+            self.state.phase(),
+            RuntimePhase::Ready | RuntimePhase::Degraded
+        ) && self.process.is_some()
         {
             return Err("Runtime 已经处于可用状态。".into());
         }
@@ -363,7 +365,10 @@ impl RuntimeActor {
         self.lease
             .as_ref()
             .is_some_and(|lease| lease.generation.id == generation)
-            && matches!(self.state.phase(), RuntimePhase::Ready | RuntimePhase::Degraded)
+            && matches!(
+                self.state.phase(),
+                RuntimePhase::Ready | RuntimePhase::Degraded
+            )
     }
 }
 

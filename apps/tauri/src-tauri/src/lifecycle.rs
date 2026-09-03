@@ -1,9 +1,6 @@
 use crate::{
-    gateway_host::GatewayPhase,
-    runtime_actor::RuntimePhase,
-    surface_actor::SurfaceOperation,
-    update_actor::UpdatePhase,
-    AppState,
+    gateway_host::GatewayPhase, runtime_actor::RuntimePhase, surface_actor::SurfaceOperation,
+    update_actor::UpdatePhase, AppState,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -23,12 +20,13 @@ impl LifecycleSnapshot {
                 | RuntimePhase::Probing
                 | RuntimePhase::Stopping
                 | RuntimePhase::Cancelling
-        ) && !matches!(self.gateway_phase, GatewayPhase::Starting | GatewayPhase::Stopping)
-            && matches!(
-                self.update_phase,
-                UpdatePhase::Idle | UpdatePhase::Failed | UpdatePhase::Restarting
-            )
-            && self.surface_operation == SurfaceOperation::Idle
+        ) && !matches!(
+            self.gateway_phase,
+            GatewayPhase::Starting | GatewayPhase::Stopping
+        ) && matches!(
+            self.update_phase,
+            UpdatePhase::Idle | UpdatePhase::Failed | UpdatePhase::Restarting
+        ) && self.surface_operation == SurfaceOperation::Idle
     }
 }
 
@@ -73,7 +71,15 @@ mod tests {
             surface_operation: SurfaceOperation::Idle,
         };
         assert!(idle.managed_operations_idle());
-        assert!(LifecycleSnapshot { update_phase: UpdatePhase::Restarting, ..idle }.managed_operations_idle());
-        assert!(!LifecycleSnapshot { runtime_phase: RuntimePhase::Cancelling, ..idle }.managed_operations_idle());
+        assert!(LifecycleSnapshot {
+            update_phase: UpdatePhase::Restarting,
+            ..idle
+        }
+        .managed_operations_idle());
+        assert!(!LifecycleSnapshot {
+            runtime_phase: RuntimePhase::Cancelling,
+            ..idle
+        }
+        .managed_operations_idle());
     }
 }

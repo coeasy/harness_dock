@@ -9,10 +9,14 @@ fn embedded_runtime_root(program: &OsStr) -> Option<PathBuf> {
     let program = node_cli_path(Path::new(program));
     let name = program.file_name()?.to_string_lossy().to_ascii_lowercase();
     let root = if cfg!(windows) {
-        if name != "node.exe" { return None; }
+        if name != "node.exe" {
+            return None;
+        }
         program.parent()?.to_path_buf()
     } else {
-        if name != "node" || program.parent()?.file_name()? != "bin" { return None; }
+        if name != "node" || program.parent()?.file_name()? != "bin" {
+            return None;
+        }
         program.parent()?.parent()?.to_path_buf()
     };
     if root.join("manifest.json").is_file() && root.join("tools").join("bin").is_dir() {
@@ -27,9 +31,15 @@ fn embedded_runtime_root(program: &OsStr) -> Option<PathBuf> {
 /// management available to dsh descendants without leaking bundled tools into
 /// unrelated Host processes.
 fn configure_embedded_runtime_environment(command: &mut std::process::Command) {
-    let Some(root) = embedded_runtime_root(command.get_program()) else { return; };
+    let Some(root) = embedded_runtime_root(command.get_program()) else {
+        return;
+    };
     let tool_bin = root.join("tools").join("bin");
-    let node_bin = if cfg!(windows) { root } else { root.join("bin") };
+    let node_bin = if cfg!(windows) {
+        root
+    } else {
+        root.join("bin")
+    };
     let current = env::var_os("PATH").unwrap_or_default();
     let mut entries = vec![tool_bin, node_bin];
     entries.extend(env::split_paths(&current));

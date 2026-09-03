@@ -42,7 +42,10 @@ pub(crate) fn capability_for(command: &HostCommand) -> Capability {
     command.capability()
 }
 
-pub(crate) fn authorize(request: &AuthorizationRequest<'_>, lease: Option<&RuntimeLease>) -> Decision {
+pub(crate) fn authorize(
+    request: &AuthorizationRequest<'_>,
+    lease: Option<&RuntimeLease>,
+) -> Decision {
     if request.subject == SubjectKind::HarnessWeb {
         let Some(lease) = lease else {
             return Decision::Deny("harness-web-without-runtime-lease");
@@ -160,14 +163,20 @@ mod tests {
             capability: Capability::WebReload,
         };
         assert_eq!(authorize(&request, Some(&lease)), Decision::Allow);
-        let stale = AuthorizationRequest { runtime_generation: Some(6), ..request.clone() };
+        let stale = AuthorizationRequest {
+            runtime_generation: Some(6),
+            ..request.clone()
+        };
         assert!(matches!(authorize(&stale, Some(&lease)), Decision::Deny(_)));
     }
 
     #[test]
     fn harness_web_can_open_admin_surfaces_but_cannot_admin_them() {
         let lease = lease();
-        for capability in [Capability::SurfaceOpenGateway, Capability::SurfaceOpenDiagnostics] {
+        for capability in [
+            Capability::SurfaceOpenGateway,
+            Capability::SurfaceOpenDiagnostics,
+        ] {
             let request = AuthorizationRequest {
                 subject: SubjectKind::HarnessWeb,
                 surface: SurfaceKind::Harness,
@@ -191,7 +200,10 @@ mod tests {
                 runtime_generation: Some(lease.generation.id),
                 capability,
             };
-            assert!(matches!(authorize(&request, Some(&lease)), Decision::Deny(_)));
+            assert!(matches!(
+                authorize(&request, Some(&lease)),
+                Decision::Deny(_)
+            ));
         }
     }
 

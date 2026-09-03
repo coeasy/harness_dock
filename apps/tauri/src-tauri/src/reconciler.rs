@@ -13,11 +13,20 @@ fn bump_revision(app: &AppHandle) {
         .fetch_add(1, Ordering::AcqRel);
 }
 
-fn host_error(code: &str, scope: ErrorScope, message: impl Into<String>, retryable: bool) -> HostError {
+fn host_error(
+    code: &str,
+    scope: ErrorScope,
+    message: impl Into<String>,
+    retryable: bool,
+) -> HostError {
     HostError::new(code, scope, message, retryable)
 }
 
-fn authorize_local(app: &AppHandle, subject: SubjectKind, command: &HostCommand) -> Result<(), HostError> {
+fn authorize_local(
+    app: &AppHandle,
+    subject: SubjectKind,
+    command: &HostCommand,
+) -> Result<(), HostError> {
     let state = app.state::<crate::AppState>();
     let lease = crate::runtime::live_lease(&*state);
     let request = AuthorizationRequest {
@@ -42,12 +51,16 @@ fn authorize_local(app: &AppHandle, subject: SubjectKind, command: &HostCommand)
     }
 }
 
-pub(crate) async fn execute(app: AppHandle, subject: SubjectKind, command: HostCommand) -> Result<(), HostError> {
+pub(crate) async fn execute(
+    app: AppHandle,
+    subject: SubjectKind,
+    command: HostCommand,
+) -> Result<(), HostError> {
     authorize_local(&app, subject, &command)?;
     bump_revision(&app);
-    reconcile_command(app, command).await.map_err(|message| {
-        host_error("RECONCILE_FAILED", ErrorScope::Host, message, true)
-    })
+    reconcile_command(app, command)
+        .await
+        .map_err(|message| host_error("RECONCILE_FAILED", ErrorScope::Host, message, true))
 }
 
 async fn activate_primary(app: AppHandle) -> Result<(), String> {
@@ -68,17 +81,30 @@ async fn reconcile_command(app: AppHandle, command: HostCommand) -> Result<(), S
     match command {
         HostCommand::ActivatePrimary => activate_primary(app).await,
         HostCommand::RefreshHarness => crate::harness_window::harness_reload_web(app).await,
-        HostCommand::RestartRuntime => crate::harness_window::harness_restart_web(app).await.map(|_| ()),
-        HostCommand::StartSafeMode => crate::harness_window::harness_safe_mode_restart(app).await.map(|_| ()),
-        HostCommand::ClearQuarantine => crate::harness_window::harness_clear_quarantine_restart(app).await.map(|_| ()),
+        HostCommand::RestartRuntime => crate::harness_window::harness_restart_web(app)
+            .await
+            .map(|_| ()),
+        HostCommand::StartSafeMode => crate::harness_window::harness_safe_mode_restart(app)
+            .await
+            .map(|_| ()),
+        HostCommand::ClearQuarantine => {
+            crate::harness_window::harness_clear_quarantine_restart(app)
+                .await
+                .map(|_| ())
+        }
         HostCommand::ShowGateway => crate::harness_window::control_show(app),
         HostCommand::ShowDiagnostics => crate::harness_window::shell_settings_show(app).await,
         HostCommand::InstallUpdate => crate::update::update_install(app).await.map(|_| ()),
-        HostCommand::Quit => { crate::request_exit(&app); Ok(()) }
+        HostCommand::Quit => {
+            crate::request_exit(&app);
+            Ok(())
+        }
     }
 }
 
-pub(crate) async fn ensure_runtime_for_boot(app: AppHandle) -> Result<crate::runtime::RuntimeStatus, String> {
+pub(crate) async fn ensure_runtime_for_boot(
+    app: AppHandle,
+) -> Result<crate::runtime::RuntimeStatus, String> {
     bump_revision(&app);
     crate::runtime::start_for_boot(app).await
 }

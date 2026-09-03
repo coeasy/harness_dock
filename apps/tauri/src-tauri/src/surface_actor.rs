@@ -106,11 +106,7 @@ impl SurfaceActorState {
         true
     }
 
-    pub(crate) fn fail_navigation(
-        &mut self,
-        navigation_id: u64,
-        runtime_generation: u64,
-    ) -> bool {
+    pub(crate) fn fail_navigation(&mut self, navigation_id: u64, runtime_generation: u64) -> bool {
         if self.navigation_id != navigation_id
             || self.runtime_generation != Some(runtime_generation)
         {
