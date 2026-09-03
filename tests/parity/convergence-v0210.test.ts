@@ -68,6 +68,18 @@ describe('v0.2.10 Tauri convergence gates', () => {
     expect(process).toContain('-KILL')
   })
 
+  it('serializes VS Code runtime start/stop and discards stale startup results', () => {
+    const extension = read('apps/vscode/src/extension.ts')
+    expect(extension).toContain('let runtimeStart: Promise<BootstrapResult | undefined> | undefined')
+    expect(extension).toContain('let runtimeStop: Promise<void> | undefined')
+    expect(extension).toContain('let runtimeGeneration = 0')
+    expect(extension).toContain('if (runtimeStart) return runtimeStart')
+    expect(extension).toContain('if (generation !== runtimeGeneration)')
+    expect(extension).toContain('runtimeGeneration += 1')
+    expect(extension).toContain('const starting = runtimeStart')
+    expect(extension).toContain('await result.runtime.stop()')
+  })
+
   it('keeps all release-facing versions and runtime bundle URLs on v0.2.10', () => {
     const root = readJson('package.json')
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
