@@ -191,11 +191,42 @@ pub fn host_snapshot(
     })
 }
 
+/// Public diagnostics status never exposes the private launch credential URL.
+/// Internal startup/restart flows continue to consume RuntimeLease.launch_url.
+#[tauri::command]
+pub fn runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
+    let mut status = crate::runtime::status_snapshot(&*app.state::<crate::AppState>());
+    status.app_url = status.app_url.and_then(|value| {
+        url::Url::parse(&value).ok().map(|mut parsed| {
+            parsed.set_username("").ok();
+            let _ = parsed.set_password(None);
+            parsed.set_query(None);
+            parsed.set_fragment(None);
+            parsed.to_string()
+        })
+    });
+    status
+}
+
+/// Diagnostics is an on-demand Surface. Closing it destroys the WebView instead
+/// of leaving a permanent hidden renderer behind.
+#[tauri::command]
+pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        window
+            .close()
+            .map_err(|error| format!("无法关闭插件诊断窗口: {error}"))?;
+    }
+    Ok(())
+}
+
 macro_rules! handler {
     () => {
         tauri::generate_handler![
             $crate::bridge::host_execute,
             $crate::bridge::host_snapshot,
+            $crate::bridge::runtime_status,
+            $crate::bridge::shell_settings_close,
             $crate::platform::platform_info,
             $crate::gateway::gateway_health,
             $crate::gateway::pair_gateway,
@@ -217,11 +248,9 @@ macro_rules! handler {
             $crate::harness_window::harness_safe_mode_restart,
             $crate::harness_window::harness_clear_quarantine_restart,
             $crate::harness_window::shell_settings_show,
-            $crate::harness_window::shell_settings_close,
             $crate::harness_window::splash_status,
             $crate::harness_window::startup_recovery_status,
             $crate::harness_window::app_quit,
-            $crate::runtime::runtime_status,
             $crate::runtime::runtime_start,
             $crate::runtime::runtime_stop,
             $crate::runtime::runtime_clear_plugin_quarantine,
