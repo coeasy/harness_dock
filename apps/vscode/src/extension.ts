@@ -12,6 +12,9 @@ const ERROR_TITLE = 'HarnessDock: Start Failed'
 
 let session: HarnessSession | undefined
 let runtime: DshRuntime | undefined
+let runtimeStart: Promise<BootstrapResult | undefined> | undefined
+let runtimeStop: Promise<void> | undefined
+let runtimeGeneration = 0
 let statusBar: vscode.StatusBarItem | undefined
 const panels = new Set<vscode.WebviewPanel>()
 
@@ -75,9 +78,28 @@ async function openWorkbench(context: vscode.ExtensionContext): Promise<void> {
 /**
  * Starts the shared runtime through the @dsh/bootstrap orchestration (origin →
  * mode resolution → DshRuntime → start, with last-known-good rollback on
- * failure). Returns undefined only when the user dismisses the progress dialog.
+ * failure). Concurrent open commands share one in-flight start. A stop request
+ * advances runtimeGeneration so a late start result is stopped instead of
+ * being published after the user already asked for shutdown.
  */
 async function startRuntime(context: vscode.ExtensionContext): Promise<BootstrapResult | undefined> {
+  if (runtimeStop) await runtimeStop
+  if (runtimeStart) return runtimeStart
+
+  const generation = runtimeGeneration
+  const pending = startRuntimeOnce(context, generation)
+  runtimeStart = pending
+  try {
+    return await pending
+  } finally {
+    if (runtimeStart === pending) runtimeStart = undefined
+  }
+}
+
+async function startRuntimeOnce(
+  context: vscode.ExtensionContext,
+  generation: number,
+): Promise<BootstrapResult | undefined> {
   const originFile = await resolveOriginFile(context)
   // bootstrap writes previous-origin.json under userDataDir; make sure it exists
   await mkdir(context.globalStorageUri.fsPath, { recursive: true })
@@ -116,6 +138,16 @@ async function startRuntime(context: vscode.ExtensionContext): Promise<Bootstrap
       return started
     },
   )
+
+  if (generation !== runtimeGeneration) {
+    console.log(`${LOG_PREFIX} discarding runtime started for stale lifecycle generation`)
+    await result.runtime.stop().catch((error) => {
+      console.log(
+        `${LOG_PREFIX} stale runtime stop failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+    return undefined
+  }
 
   runtime = result.runtime
   session?.recordStarted({
@@ -184,7 +216,32 @@ async function stopWorkbench(): Promise<void> {
 }
 
 async function stopRuntime(reason: string): Promise<void> {
+  if (runtimeStop) return runtimeStop
+  const pending = stopRuntimeOnce(reason)
+  runtimeStop = pending
+  try {
+    await pending
+  } finally {
+    if (runtimeStop === pending) runtimeStop = undefined
+  }
+}
+
+async function stopRuntimeOnce(reason: string): Promise<void> {
   session?.stopRequested()
+  runtimeGeneration += 1
+
+  // A start owns its child before publishing it to `runtime`. Wait for that
+  // bounded startup to settle so generation invalidation can stop a late child
+  // rather than losing it between the start and stop paths.
+  const starting = runtimeStart
+  if (starting) {
+    await starting.catch((error) => {
+      console.log(
+        `${LOG_PREFIX} in-flight start ended during stop: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+  }
+
   const current = runtime
   runtime = undefined
   if (current) {
