@@ -27,6 +27,7 @@ export const HOST_CAPABILITIES = Object.freeze({
   "AppQuit": "app-quit"
 })
 export const HOST_COMMANDS = Object.freeze({
+  "ActivatePrimary": "activate-primary",
   "RefreshHarness": "refresh-harness",
   "RestartRuntime": "restart-runtime",
   "StartSafeMode": "start-safe-mode",
@@ -37,6 +38,7 @@ export const HOST_COMMANDS = Object.freeze({
   "Quit": "quit"
 })
 export const HOST_COMMAND_CAPABILITIES = Object.freeze({
+  "activate-primary": "window-control",
   "refresh-harness": "web-reload",
   "restart-runtime": "runtime-restart",
   "start-safe-mode": "runtime-safe-mode",
