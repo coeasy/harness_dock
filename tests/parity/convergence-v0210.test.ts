@@ -80,6 +80,14 @@ describe('v0.2.10 Tauri convergence gates', () => {
     expect(extension).toContain('await result.runtime.stop()')
   })
 
+  it('fails closed instead of treating malformed release versions as updates', () => {
+    const update = read('apps/tauri/src-tauri/src/update.rs')
+    expect(update).toContain("split(['-', '+'])")
+    expect(update).toContain('if parts.next().is_some()')
+    expect(update).toContain('_ => false')
+    expect(update).not.toContain('normalized_version(latest) != normalized_version(current)')
+  })
+
   it('keeps all release-facing versions and runtime bundle URLs on v0.2.10', () => {
     const root = readJson('package.json')
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
