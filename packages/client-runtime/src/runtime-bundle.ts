@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { inspectBundledRuntime, bundledRuntimeVersion } from './bundled.ts'
+import { assertRuntimeImageIdentity } from './image-identity.ts'
 import { assertBundledRuntimeIntegrity } from './integrity.ts'
 import type { RuntimeProgressEvent } from './runtime.ts'
 
@@ -90,7 +91,12 @@ export async function installRuntimeBundle(input: {
 
     const manifest = JSON.parse(
       await readFile(path.join(input.runtimeDir, 'manifest.json'), 'utf8'),
-    ) as { gitTag?: string; gitCommit?: string; platform?: string; arch?: string }
+    ) as Record<string, unknown> & {
+      gitTag?: string
+      gitCommit?: string
+      platform?: string
+      arch?: string
+    }
     if (input.gitTag && manifest.gitTag !== input.gitTag) {
       throw new Error(`runtime bundle git tag ${manifest.gitTag ?? 'unknown'} != pinned ${input.gitTag}`)
     }
@@ -107,6 +113,7 @@ export async function installRuntimeBundle(input: {
     }
 
     await assertBundledRuntimeIntegrity(input.runtimeDir, platform, arch)
+    await assertRuntimeImageIdentity(input.runtimeDir, manifest)
     await writeFile(path.join(input.runtimeDir, '.ready'), `${new Date().toISOString()}\n`, 'utf8')
   } catch (error) {
     await rm(input.runtimeDir, { recursive: true, force: true }).catch(() => undefined)
