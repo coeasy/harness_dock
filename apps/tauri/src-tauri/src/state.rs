@@ -1,16 +1,18 @@
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
-use crate::{gateway_host, process, runtime};
+use crate::{gateway_host, process, runtime, runtime_actor};
 
 /// Long-lived native host state.
 ///
 /// Keep process ownership and operation guards outside `lib.rs` so the Tauri
-/// composition root does not become a second lifecycle implementation. Runtime
-/// and Gateway modules own their processes; higher-level orchestration reads
-/// these fields through the lifecycle/supervisor modules.
+/// composition root does not become a second lifecycle implementation. Round 2
+/// introduces `runtime_actor` as the single lifecycle model; the three legacy
+/// atomic guards remain temporarily only while the existing Runtime process
+/// procedure is migrated behind that actor boundary.
 pub(crate) struct AppState {
     pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
+    pub(crate) runtime_actor: Mutex<runtime_actor::RuntimeActorState>,
     pub(crate) runtime_starting: AtomicBool,
     pub(crate) runtime_restarting: AtomicBool,
     pub(crate) runtime_stopping: AtomicBool,
@@ -30,6 +32,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             runtime: Mutex::new(None),
+            runtime_actor: Mutex::new(runtime_actor::RuntimeActorState::default()),
             runtime_starting: AtomicBool::new(false),
             runtime_restarting: AtomicBool::new(false),
             runtime_stopping: AtomicBool::new(false),
