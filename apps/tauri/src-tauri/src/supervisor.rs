@@ -15,7 +15,7 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
     if let Ok(mut surface) = state.surface_actor.lock() {
         surface.cancel_navigation();
         surface.end_operation();
-    }
+    };
 }
 
 pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
