@@ -51,40 +51,23 @@ mod update;
 mod update_actor;
 
 #[cfg(not(mobile))]
-use tauri::Manager as _;
-
-#[cfg(not(mobile))]
 pub(crate) use state::AppState;
 #[cfg(not(mobile))]
 pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
 
 /// Desktop is the Native Host: it owns Runtime, Gateway Host, updates, plugins,
-/// tray/menu surfaces and the single-writer Host Kernel.
+/// tray/menu surfaces and the single-writer Host Kernel. lib.rs intentionally
+/// stays a composition root; desktop setup owns desktop-specific admission.
 #[cfg(not(mobile))]
 pub fn run() {
     startup_trace::mark(startup_trace::StartupPhase::ProcessStarted);
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(AppState::default())
-        .setup(|app| {
-            host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
-            match single_instance::install(app.handle().clone()).map_err(std::io::Error::other)? {
-                single_instance::InstallOutcome::Primary(guard) => {
-                    *app.state::<AppState>()
-                        .single_instance
-                        .lock()
-                        .map_err(|_| std::io::Error::other("single-instance state lock poisoned"))? = Some(guard);
-                }
-                single_instance::InstallOutcome::SecondaryHandedOff => {
-                    app.handle().exit(0);
-                    return Ok(());
-                }
-            }
-            desktop::setup(app)
-        })
+        .setup(desktop::setup)
         .invoke_handler(bridge::handler!())
         .build(tauri::generate_context!())
-        .expect("error while building HarnessDock")
-        .run(desktop::handle_run_event);
+        .expect("error while building HarnessDock");
+    app.run(desktop::handle_run_event);
 }
 
 /// Mobile is deliberately a Thin Remote Client. It never owns or starts the
@@ -94,13 +77,13 @@ pub fn run() {
 #[cfg(mobile)]
 #[tauri::mobile_entry_point]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             platform::platform_info,
             gateway::gateway_health,
             gateway::pair_gateway
         ])
         .build(tauri::generate_context!())
-        .expect("error while building HarnessDock mobile client")
-        .run(|_, _| {});
+        .expect("error while building HarnessDock mobile client");
+    app.run(|_, _| {});
 }
