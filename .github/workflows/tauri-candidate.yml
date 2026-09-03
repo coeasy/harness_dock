@@ -12,9 +12,13 @@ on:
       - 'packages/plugin-embedded-client/**'
       - 'packages/plugin-harness-shell/**'
       - 'packages/docs-sync/origin.json'
+      - 'protocol/**'
       - 'release-manifest.json'
       - 'tests/parity/**'
       - 'scripts/check-versions.mjs'
+      - 'scripts/check-embedded-runtime.mjs'
+      - 'scripts/generate-host-protocol.mjs'
+      - 'scripts/check-tauri-size-budget.mjs'
       - 'scripts/build-macos-dmg.sh'
       - 'scripts/verify-windows-installer-icon.mjs'
       - 'scripts/check-android-package.mjs'
@@ -52,6 +56,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm check:versions
       - run: pnpm check:release
+      - run: pnpm check:embedded-runtime
       - run: pnpm test
       - name: Verify locked Rust dependency graph
         run: cargo metadata --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --format-version 1 > /dev/null
@@ -61,8 +66,6 @@ jobs:
         run: pnpm --filter @dsh/plugin-harness-shell build
       - name: Verify publishable Harness Shell package
         run: node scripts/check-shell-package.mjs
-      - name: Bundle Gateway sidecar
-        run: pnpm --filter @dsh/tauri bundle:sidecar
       - name: Validate shared candidate resources
         shell: bash
         run: |
@@ -73,7 +76,7 @@ jobs:
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/package.json
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/index.js
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/client.js
-          test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
+          test -s apps/tauri/src-tauri/src/gateway_host.rs
           test -s apps/tauri/src-tauri/icons/app-icon.png
           test -s scripts/build-macos-dmg.sh
           test -s scripts/verify-windows-installer-icon.mjs
@@ -197,6 +200,8 @@ jobs:
           const manifest = JSON.parse(fs.readFileSync('runtime-prepared/manifest.json', 'utf8'))
           if (manifest.platform !== process.env.EXPECTED_PLATFORM || manifest.arch !== process.env.EXPECTED_ARCH) throw new Error(`runtime manifest mismatch: ${manifest.platform}/${manifest.arch}`)
           if (!manifest.dshVersion || manifest.runtimeSource !== 'official-source-pack') throw new Error('runtime manifest is missing pinned official-source metadata')
+          if (manifest.runtimeEmbedded !== true || manifest.firstLaunchRuntimeDownloadRequired !== false) throw new Error('runtime manifest is not sealed/offline-first')
+          if (!manifest.imageIdentity || manifest.imageIdentityAlgorithm !== 'sha256-v1') throw new Error('runtime manifest is missing sealed image identity')
           NODE
           case "$EXPECTED_PLATFORM" in
             win32)
@@ -271,13 +276,6 @@ jobs:
         run: pnpm --filter @dsh/plugin-embedded-client build
       - name: Build independent Harness Shell plugin
         run: pnpm --filter @dsh/plugin-harness-shell build
-      - name: Bundle Gateway sidecar into Tauri resources
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p apps/tauri/src-tauri/resources
-          pnpm --filter @dsh/tauri bundle:sidecar
-          test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
       - uses: actions/download-artifact@v8
         with:
           name: tauri-runtime-${{ matrix.artifact }}
@@ -292,7 +290,7 @@ jobs:
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/package.json
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/index.js
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/client.js
-          test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
+          test -s apps/tauri/src-tauri/src/gateway_host.rs
           pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
           if [ "${{ runner.os }}" = Linux ]; then
             test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@koromix/koffi-linux-x64/musl_x64
@@ -360,6 +358,8 @@ jobs:
               test -n "$(find apps/tauri/src-tauri/target/release/bundle/dmg -type f -name '*.dmg' -print -quit)"
               ;;
           esac
+      - name: Enforce desktop candidate size budget
+        run: node scripts/check-tauri-size-budget.mjs apps/tauri/src-tauri/target/release/bundle --require
       - uses: actions/upload-artifact@v7
         with:
           name: tauri-desktop-${{ matrix.artifact }}
