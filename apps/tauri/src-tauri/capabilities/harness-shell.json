@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "harness-shell",
-  "description": "v0.2.0 Harness Shell plugin capability for the exact managed desktop Runtime origin family. The Runtime is launched on plain HTTP 127.0.0.1 with an ephemeral port, so no localhost alias, IPv6 or HTTPS origin receives the privileged shell bridge.",
+  "description": "Remote Harness Web capability for the exact managed 127.0.0.1 Runtime origin family. It receives only window primitives plus Host Protocol v2; business authority is revalidated against the current RuntimeLease by the Capability Broker.",
   "local": false,
   "platforms": ["linux", "macOS", "windows"],
   "remote": {
@@ -15,6 +15,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
-    "harness-shell"
+    "harness-shell",
+    "host-protocol"
   ]
 }
