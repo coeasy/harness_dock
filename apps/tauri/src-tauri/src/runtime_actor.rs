@@ -106,19 +106,23 @@ impl RuntimeActorState {
         )
     }
 
-    fn begin(&mut self, mode: RuntimeMode) -> RuntimeGeneration {
+    fn begin(&mut self, mode: RuntimeMode) -> Result<RuntimeGeneration, String> {
+        // The nonce is part of the Runtime ready-file trust boundary. It must be
+        // unpredictable; PID/time hashing is not sufficient because another
+        // local process could pre-create a plausible stale ready file.
+        let nonce = generation_nonce()?;
         self.desired_generation = self.desired_generation.saturating_add(1);
         let id = self.desired_generation;
         let generation = RuntimeGeneration {
             id,
-            nonce: generation_nonce(id),
+            nonce,
             image_identity: "unverified".into(),
             mode,
         };
         self.phase = RuntimePhase::Preparing;
         self.generation = Some(generation.clone());
         self.last_error = None;
-        generation
+        Ok(generation)
     }
 
     fn bind_image(&mut self, generation: u64, image_identity: String) -> Result<(), String> {
@@ -273,7 +277,7 @@ impl RuntimeActor {
         {
             return Err("Runtime 已经处于可用状态。".into());
         }
-        let generation = self.state.begin(mode);
+        let generation = self.state.begin(mode)?;
         let cancellation = CancellationToken::new();
         self.cancellation = Some((generation.id, cancellation.clone()));
         self.lease = None;
@@ -363,19 +367,40 @@ impl RuntimeActor {
     }
 }
 
-fn generation_nonce(generation: u64) -> String {
-    use std::hash::{Hash, Hasher};
-    use std::time::{SystemTime, UNIX_EPOCH};
+fn generation_nonce() -> Result<String, String> {
+    let mut bytes = [0_u8; 16];
+    secure_random(&mut bytes)?;
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    use std::fmt::Write as _;
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").map_err(|error| error.to_string())?;
+    }
+    Ok(encoded)
+}
 
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    generation.hash(&mut hasher);
-    std::process::id().hash(&mut hasher);
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_nanos())
-        .unwrap_or_default()
-        .hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+#[cfg(unix)]
+fn secure_random(buffer: &mut [u8]) -> Result<(), String> {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(buffer))
+        .map_err(|error| format!("OS random source unavailable for Runtime generation: {error}"))
+}
+
+#[cfg(windows)]
+fn secure_random(buffer: &mut [u8]) -> Result<(), String> {
+    #[link(name = "advapi32")]
+    extern "system" {
+        #[link_name = "SystemFunction036"]
+        fn rtl_gen_random(buffer: *mut u8, length: u32) -> u8;
+    }
+    let length = u32::try_from(buffer.len())
+        .map_err(|_| "Runtime generation random request is too large".to_string())?;
+    let ok = unsafe { rtl_gen_random(buffer.as_mut_ptr(), length) };
+    if ok == 0 {
+        Err("Windows cryptographic random source unavailable for Runtime generation".into())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -385,21 +410,23 @@ mod tests {
     #[test]
     fn start_allocates_a_new_generation() {
         let mut state = RuntimeActorState::default();
-        let first = state.begin(RuntimeMode::Normal);
+        let first = state.begin(RuntimeMode::Normal).unwrap();
         assert_eq!(first.id, 1);
+        assert_eq!(first.nonce.len(), 32);
         assert_eq!(state.phase(), RuntimePhase::Preparing);
         state.settle_stopped();
-        let second = state.begin(RuntimeMode::Safe);
+        let second = state.begin(RuntimeMode::Safe).unwrap();
         assert_eq!(second.id, 2);
         assert_eq!(second.mode, RuntimeMode::Safe);
+        assert_ne!(first.nonce, second.nonce);
     }
 
     #[test]
     fn stale_generation_cannot_mark_current_runtime_ready() {
         let mut state = RuntimeActorState::default();
-        let first = state.begin(RuntimeMode::Normal);
+        let first = state.begin(RuntimeMode::Normal).unwrap();
         state.settle_stopped();
-        let second = state.begin(RuntimeMode::Normal);
+        let second = state.begin(RuntimeMode::Normal).unwrap();
         state.mark_starting(second.id).unwrap();
         assert!(state.mark_ready(first.id, false).is_err());
         assert_eq!(state.phase(), RuntimePhase::Starting);
@@ -408,7 +435,7 @@ mod tests {
     #[test]
     fn stop_during_probe_enters_explicit_cancellation() {
         let mut state = RuntimeActorState::default();
-        let generation = state.begin(RuntimeMode::Normal);
+        let generation = state.begin(RuntimeMode::Normal).unwrap();
         state.mark_starting(generation.id).unwrap();
         state.mark_probing(generation.id).unwrap();
         state.begin_stop();
