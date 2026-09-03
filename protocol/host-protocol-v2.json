@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "subjects": [
+    { "rust": "DesktopShell", "wire": "desktop-shell" },
+    { "rust": "HarnessWeb", "wire": "harness-web" },
+    { "rust": "NativeMenu", "wire": "native-menu" },
+    { "rust": "Tray", "wire": "tray" },
+    { "rust": "Diagnostics", "wire": "diagnostics" },
+    { "rust": "Mobile", "wire": "mobile" }
+  ],
+  "capabilities": [
+    { "rust": "WindowControl", "wire": "window-control" },
+    { "rust": "WebReload", "wire": "web-reload" },
+    { "rust": "RuntimeRestart", "wire": "runtime-restart" },
+    { "rust": "RuntimeSafeMode", "wire": "runtime-safe-mode" },
+    { "rust": "RuntimeClearQuarantine", "wire": "runtime-clear-quarantine" },
+    { "rust": "GatewayManage", "wire": "gateway-manage" },
+    { "rust": "DiagnosticsRead", "wire": "diagnostics-read" },
+    { "rust": "UpdateCheck", "wire": "update-check" },
+    { "rust": "UpdateInstall", "wire": "update-install" },
+    { "rust": "AppQuit", "wire": "app-quit" }
+  ],
+  "commands": [
+    { "rust": "RefreshHarness", "wire": "refresh-harness", "capability": "WebReload" },
+    { "rust": "RestartRuntime", "wire": "restart-runtime", "capability": "RuntimeRestart" },
+    { "rust": "StartSafeMode", "wire": "start-safe-mode", "capability": "RuntimeSafeMode" },
+    { "rust": "ClearQuarantine", "wire": "clear-quarantine", "capability": "RuntimeClearQuarantine" },
+    { "rust": "ShowGateway", "wire": "show-gateway", "capability": "GatewayManage" },
+    { "rust": "ShowDiagnostics", "wire": "show-diagnostics", "capability": "DiagnosticsRead" },
+    { "rust": "InstallUpdate", "wire": "install-update", "capability": "UpdateInstall" },
+    { "rust": "Quit", "wire": "quit", "capability": "AppQuit" }
+  ]
+}
