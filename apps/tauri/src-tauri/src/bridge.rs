@@ -3,14 +3,17 @@
 //! Legacy command names remain as compatibility adapters for bundled local
 //! pages, while `host_execute` is the typed Host Protocol v2 entry point. Native
 //! menu/tray code never calls IPC; it submits HostCommand directly to the
-//! Reconciler.
+//! Reconciler. Remote Harness Web never receives legacy business-command
+//! permissions: its authority is derived here from the real WebView label,
+//! current URL origin and current RuntimeLease.
 
 use tauri::{AppHandle, Manager};
 
 use crate::host_protocol::{
-    Capability, CommandEnvelope, HostError, HostResponse, HostSnapshot, ResponseEnvelope,
-    SubjectKind, HOST_PROTOCOL_VERSION,
+    CommandEnvelope, HostError, HostResponse, HostSnapshot, ResponseEnvelope, SubjectKind,
+    HOST_PROTOCOL_VERSION,
 };
+use crate::surface_actor::SurfaceKind;
 
 #[tauri::command]
 pub async fn host_execute(
@@ -97,7 +100,17 @@ fn trusted_subject(
             }
             Ok(claimed)
         }
-        _ if cfg!(mobile) => Ok(SubjectKind::Mobile),
+        _ if cfg!(mobile) => {
+            if claimed != SubjectKind::Mobile {
+                return Err(HostError::new(
+                    "SUBJECT_MISMATCH",
+                    ErrorScope::Protocol,
+                    "Mobile WebView must use the mobile subject",
+                    false,
+                ));
+            }
+            Ok(SubjectKind::Mobile)
+        }
         _ => Err(HostError::new(
             "UNTRUSTED_SURFACE",
             ErrorScope::Protocol,
@@ -107,10 +120,45 @@ fn trusted_subject(
     }
 }
 
+fn snapshot_subject(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+) -> Result<(SubjectKind, SurfaceKind, Option<String>, Option<u64>), HostError> {
+    use crate::host_protocol::ErrorScope;
+    match window.label() {
+        "harness" => {
+            let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
+            let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                HostError::new(
+                    "RUNTIME_LEASE_REQUIRED",
+                    ErrorScope::Runtime,
+                    "Harness snapshot has no current RuntimeLease",
+                    true,
+                )
+            })?;
+            let origin = window.url().ok().map(|url| url.origin().ascii_serialization());
+            Ok((subject, SurfaceKind::Harness, origin, Some(lease.generation.id)))
+        }
+        "settings" => Ok((SubjectKind::Diagnostics, SurfaceKind::Diagnostics, None, None)),
+        "control" => Ok((SubjectKind::DesktopShell, SurfaceKind::Diagnostics, None, None)),
+        _ if cfg!(mobile) => Ok((SubjectKind::Mobile, SurfaceKind::Gateway, None, None)),
+        _ => Err(HostError::new(
+            "UNTRUSTED_SURFACE",
+            ErrorScope::Protocol,
+            "This window cannot request a Host capability snapshot",
+            false,
+        )),
+    }
+}
+
 #[tauri::command]
-pub fn host_snapshot(app: AppHandle) -> HostSnapshot {
+pub fn host_snapshot(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<HostSnapshot, HostError> {
+    let (subject, surface, origin, runtime_generation) = snapshot_subject(&app, &window)?;
     let state = app.state::<crate::AppState>();
-    let (runtime_phase, runtime_generation) = state
+    let (runtime_phase, current_generation) = state
         .runtime_actor
         .lock()
         .map(|actor| (actor.phase(), actor.generation_id()))
@@ -125,25 +173,22 @@ pub fn host_snapshot(app: AppHandle) -> HostSnapshot {
         .lock()
         .map(|actor| actor.phase() == crate::gateway_host::GatewayPhase::Ready)
         .unwrap_or(false);
-    HostSnapshot {
+    let lease = crate::runtime::current_lease(&*state);
+    let capabilities = crate::capability_broker::allowed_capabilities(
+        subject,
+        surface,
+        origin.as_deref(),
+        runtime_generation,
+        lease.as_ref(),
+    );
+    Ok(HostSnapshot {
         protocol_version: HOST_PROTOCOL_VERSION,
         runtime_phase,
-        runtime_generation,
+        runtime_generation: current_generation,
         harness_visible,
         gateway_enabled,
-        capabilities: vec![
-            Capability::WindowControl,
-            Capability::WebReload,
-            Capability::RuntimeRestart,
-            Capability::RuntimeSafeMode,
-            Capability::RuntimeClearQuarantine,
-            Capability::GatewayManage,
-            Capability::DiagnosticsRead,
-            Capability::UpdateCheck,
-            Capability::UpdateInstall,
-            Capability::AppQuit,
-        ],
-    }
+        capabilities,
+    })
 }
 
 macro_rules! handler {
