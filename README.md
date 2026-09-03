@@ -12,8 +12,9 @@
 
 ## 当前版本
 
-- **HarnessDock v0.2.9**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
-- Electron Thin/Full 构建逻辑仅保留在 `apps/desktop` 作为兼容与迁移参考，**不进入正式 candidate / Release，也不再作为主验证路径**；正式客户端、启动、退出和发布门禁统一以 Tauri 为准。
+- **HarnessDock v0.2.10**：Tauri 2 主线，Windows/macOS/Linux 默认且仅发布 Full Runtime 桌面包。
+- 正式客户端的启动、菜单、更新、Runtime/Gateway 管理、候选构建和 Release 全部以 Tauri 为唯一主路径；根级命令不再暴露 Electron 打包入口。
+- `apps/desktop` 仅保留历史兼容源码，不进入正式 candidate / Release，也不是主验证链路。
 - 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
 
 ## 平台矩阵
@@ -27,23 +28,16 @@
 | Android arm64 | Remote-only | release-optimized `.apk` + `.aab` |
 | iOS Simulator arm64 | Remote-only | Simulator `.zip` |
 
-## v0.2.9 安装与升级体验
+## v0.2.10 核心收敛
 
-- 统一 1024x1024 HarnessDock 品牌源图，candidate 自动生成桌面、Android、iOS 所需图标。
-- Windows NSIS 安装器和卸载器显式使用 HarnessDock 图标，并使用品牌化 header/sidebar；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
-- Windows 保持 `com.harnessdock.client` 应用标识与 current-user 安装模式，可直接覆盖升级现有 v0.2.x；禁止意外降级安装。
-- WebView2 bootstrapper 随 Windows 安装器嵌入，缺少 WebView2 时无需再先下载 bootstrapper 本体。
-- Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine 或临时安全配置，Web 仍默认打开；系统 Node 启动异常会自动回退随包 Node。
-- 插件诊断作为独立按需窗口，只在 Harness `菜单`、托盘或应用菜单中明确点击后显示，不抢占 Web 首屏；窗口居中、紧凑并在页面加载完成后显示。
-- 桌面端 Harness 使用自定义标题栏：`菜单`、最小化、最大化/还原、隐藏到系统托盘；刷新、Runtime 重启、清除插件隔离并重启、插件诊断和自动更新统一收敛到菜单。
-- 启动、刷新和重启都使用可见执行态；导航期间由本地 splash 显示动画和状态，页面加载成功后自动回到 Harness Web，失败则回到恢复入口而不是白屏。
-- 启动只显示本地 splash，后台控制页和插件诊断均不抢占首屏；自动更新统一从主界面菜单、托盘或应用菜单进入，失败会留在界面内并给出明确降级路径。
-- Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
-- 顶部入口明确命名为“菜单”，并统一承载 Web 刷新、Runtime 重启、插件隔离恢复、插件诊断和自动更新；插件诊断保持只读、按需打开。
-- 桌面启动由原生协调器直接启动 Runtime，Harness Web 完成绘制后才显示；白板、启动超时和窗口切换期间自动退出均进入可操作恢复路径。
-- loopback 根路径和子路径统一纳入外壳 ACL，避免 Harness Web 首屏或菜单调用出现 `Command ... not allowed by ACL`。
-
-完整的 v0.2.9 启动白板修复和发布前验收方案见 [`docs/plan/v0.2.9-startup-blank-window-recovery.md`](docs/plan/v0.2.9-startup-blank-window-recovery.md)。
+- HarnessDock 启动后由 Tauri 原生协调器直接拉起固定 Runtime，默认进入 Harness Web；隐藏控制页只负责失败恢复。
+- Runtime/插件异常不会让宿主退出；第三方插件可进入 quarantine 或安全配置，Harness Web 仍保留恢复路径。
+- Gateway 启动增加互斥与生命周期 generation，重复 IPC 不会并发拉起多个 sidecar，停止或 Runtime 替换期间产生的陈旧启动结果会被拒绝。
+- Gateway 状态会识别已经退出的子进程；ready PID 必须与受管 sidecar PID 一致。
+- Runtime/Gateway 退出采用“优雅停止 → 有界等待 → 强制回收”，降低 Node worker/子进程遗留风险。
+- 插件诊断是按需窗口，不抢占 Harness Web 首屏；菜单统一提供 Web 刷新、Runtime 重启、插件隔离恢复、诊断和自动更新。
+- Windows 自动更新禁止降级；自动安装必须通过 Tauri updater 公钥与签名清单，签名清单版本还必须与 GitHub 最新稳定 Release 一致。
+- Android/iOS 始终是 Remote-only Thin Client，不在移动设备内启动桌面 Runtime 或 Gateway Host。
 
 ## 架构
 
@@ -72,13 +66,13 @@ pnpm test
 cd apps/tauri && cargo check
 ```
 
-正式发布以 `.github/workflows/tauri-candidate.yml` 为唯一候选构建：它固定上游 commit、生成四个平台 Runtime、执行真实 smoke、构建五个桌面资产和移动端 developer preview，并验证品牌图标。`release.yml` 只接受当前 main 同一 SHA 的 candidate + CI 全绿结果，发布 13 个非空资产和 `SHA256SUMS`。
+正式发布以 `.github/workflows/tauri-candidate.yml` 为唯一候选构建：它固定上游 commit、生成四个平台 Runtime、执行真实 smoke、构建五个桌面资产与移动端候选，并验证品牌图标。`release.yml` 只接受当前 main 同一 SHA 的 candidate + CI 全绿结果，发布完整资产和 `SHA256SUMS`。
 
-Android 候选使用 release profile（`opt-level=z`、Thin LTO、去符号、单 codegen unit、`panic=abort`），并在上传前检查 APK/AAB 包体和最大 native `.so`。旧版 debug APK 的主要体积来自未剥离符号的 `libharnessdock_tauri.so`，不是移动端业务资源。
+Android 候选使用 release profile（`opt-level=z`、Thin LTO、去符号、单 codegen unit、`panic=abort`），并在上传前检查 APK/AAB 包体和最大 native `.so`。
 
 ## 签名状态
 
-当前公开 CI 包尚未启用 Windows Authenticode、Apple Developer ID/notarization、Google Play production signing 或 App Store/TestFlight provisioning。GitHub Release 提供 SHA-256 校验值。
+公开 CI 包仍需外部平台证书才能获得 Windows Authenticode、Apple Developer ID/notarization、Google Play production signing 或 App Store/TestFlight provisioning。GitHub Release 提供 SHA-256 校验值；Tauri 自动更新只有在构建配置了更新公钥且 Release 同步发布有效签名清单时才会执行。
 
 ## License
 
