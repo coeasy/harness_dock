@@ -21,7 +21,6 @@
     "setup": "node scripts/bootstrap.mjs",
     "sync:dsh": "pnpm --filter @dsh/docs-sync start",
     "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
-    "build:desktop": "node scripts/build.mjs",
     "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
     "parity": "pnpm --filter @dsh/parity-tests test",
     "dev:dsh": "node --import tsx scripts/dev-dsh.mjs"
