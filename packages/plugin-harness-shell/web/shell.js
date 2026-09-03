@@ -7,7 +7,6 @@
     ['web.reload', '刷新 Harness Web'],
     ['web.restart', '重启 Harness Web'],
     ['runtime.safe-mode', '隔离插件启动'],
-    ['runtime.clear-quarantine', '清除隔离并重启'],
     ['gateway.manage', '移动设备 / Gateway'],
     ['diagnostics.open', 'GitHub 更新 / 诊断与恢复'],
   ]

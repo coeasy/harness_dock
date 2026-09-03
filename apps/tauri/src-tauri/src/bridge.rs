@@ -57,7 +57,7 @@ fn trusted_subject(
                     false,
                 ));
             }
-            let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>())
+            let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>())
                 .ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
@@ -130,7 +130,7 @@ fn snapshot_subject(
     match window.label() {
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
-            let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+            let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
                 HostError::new(
                     "RUNTIME_LEASE_REQUIRED",
                     ErrorScope::Runtime,
@@ -175,7 +175,7 @@ pub fn host_snapshot(
         .lock()
         .map(|actor| actor.phase() == crate::gateway_host::GatewayPhase::Ready)
         .unwrap_or(false);
-    let lease = crate::runtime::current_lease(&*state);
+    let lease = crate::runtime::live_lease(&*state);
     let capabilities = crate::capability_broker::allowed_capabilities(
         subject,
         surface,
@@ -240,6 +240,7 @@ macro_rules! handler {
             $crate::bridge::host_snapshot,
             $crate::bridge::public_runtime_status,
             $crate::bridge::diagnostics_close,
+            $crate::runtime::runtime_status,
             $crate::platform::platform_info,
             $crate::gateway::gateway_health,
             $crate::gateway::pair_gateway,
@@ -263,7 +264,6 @@ macro_rules! handler {
             $crate::harness_window::shell_settings_show,
             $crate::harness_window::splash_status,
             $crate::harness_window::startup_recovery_status,
-            $crate::harness_window::app_quit,
             $crate::runtime::runtime_start,
             $crate::runtime::runtime_stop,
             $crate::runtime::runtime_clear_plugin_quarantine,

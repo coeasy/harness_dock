@@ -155,6 +155,7 @@ for (const marker of ['firstLaunchRuntimeDownloadRequired = false', 'productionC
 requireText(pnpmTool, "PNPM_BUNDLE_VERSION = '11.7.0'", 'bundled pnpm must match the pinned DeepSeek Harness package-manager version')
 requireText(pnpmTool, 'deafa7ec98a1218b6a047289b92fbe2395c1e22d3495bb711653013218ee15ee', 'bundled pnpm tarball must be pinned by SHA-256')
 requireText(pnpmEnsure, 'PNPM_BUNDLE_SHA256', 'pnpm preparation must verify the pinned tarball digest before extraction')
+requireText(pnpmEnsure, 'cwd: tmpdir()', 'bundled pnpm smoke must run outside the workspace packageManager')
 requireText(pnpmEnsure, 'pluginManagementReady = true', 'bundled Runtime manifest must record that plugin management tooling is ready')
 
 // ExecEnvironment is explicit and child-scoped. The Host process PATH is not a

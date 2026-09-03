@@ -16,6 +16,7 @@ export type ShellCommandName =
   | 'web.restart'
   | 'runtime.safe-mode'
   | 'runtime.clear-quarantine'
+  | 'gateway.manage'
   | 'diagnostics.open'
   | 'app.update.check'
   | 'app.update.install'
@@ -30,6 +31,7 @@ export const SHELL_COMMANDS: readonly ShellCommandName[] = [
   'web.restart',
   'runtime.safe-mode',
   'runtime.clear-quarantine',
+  'gateway.manage',
   'diagnostics.open',
   'app.update.check',
   'app.update.install',

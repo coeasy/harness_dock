@@ -407,12 +407,12 @@
     } catch (error) {
       status(hostDetail, String(error), true)
       // Re-read the native state after a failed stop. The command can fail
-      // after the sidecar has already exited; leaving the button disabled
+      // after the Gateway has already exited; leaving the button disabled
       // would strand the recovery control until the page is reopened.
       try {
         const current = await refreshGatewayHost()
         refreshed = true
-        // A transient admin/IPC failure may leave a live sidecar in place.
+        // A transient admin/IPC failure may leave a live Gateway in place.
         // Keep Stop retryable in that state instead of making the user rely
         // on a page reload or an unrelated refresh click.
         if (current.running) $('gateway-host-stop').disabled = false

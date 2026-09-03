@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -90,7 +91,9 @@ if (!ready) {
 
 await assertBundledPnpm(dest, platform)
 const { stdout } = await execFileAsync(process.execPath, [bundledPnpmEntry(dest), '--version'], {
-  cwd: bundledPnpmPackageDir(dest),
+  // pnpm discovers the nearest packageManager field from cwd. The embedded
+  // runtime deliberately pins a different pnpm major than HarnessDock.
+  cwd: tmpdir(),
   windowsHide: true,
 })
 if (stdout.trim() !== PNPM_BUNDLE_VERSION) {

@@ -1,5 +1,9 @@
 fn main() {
     const COMMANDS: &[&str] = &[
+        "host_execute",
+        "host_snapshot",
+        "public_runtime_status",
+        "diagnostics_close",
         "platform_info",
         "gateway_health",
         "pair_gateway",
@@ -19,8 +23,8 @@ fn main() {
         "harness_restart_web",
         "harness_safe_mode_restart",
         "harness_clear_quarantine_restart",
+        "harness_shell_close",
         "shell_settings_show",
-        "shell_settings_close",
         "splash_status",
         "startup_recovery_status",
         "runtime_status",
@@ -29,7 +33,6 @@ fn main() {
         "runtime_clear_plugin_quarantine",
         "update_check",
         "update_install",
-        "app_quit",
     ];
 
     tauri_build::try_build(

@@ -149,7 +149,7 @@ fn has_launch_token(url: &Url) -> bool {
 
 #[cfg(not(mobile))]
 fn current_runtime_lease(app: &AppHandle) -> Result<crate::runtime_actor::RuntimeLease, String> {
-    crate::runtime::current_lease(&*app.state::<crate::AppState>())
+    crate::runtime::live_lease(&*app.state::<crate::AppState>())
         .ok_or_else(|| "Runtime 尚未就绪，暂时无法打开 Harness Web。".to_string())
 }
 
@@ -440,6 +440,7 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
             .url()
             .ok()
             .and_then(|value| validated_runtime_url(value.as_str()).ok());
+        let launch_url = validated_runtime_url(&lease.launch_url)?;
         let navigation_id = begin_harness_load(&app, lease.generation.id)?;
         show_splash(&app, "正在刷新 Harness Web…");
         let result = if current
@@ -448,12 +449,14 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
         {
             window.reload()
         } else {
-            window.navigate(validated_runtime_url(&lease.launch_url)?)
+            window.navigate(launch_url)
         };
         if let Err(error) = result {
             if let Ok(mut actor) = app.state::<crate::AppState>().surface_actor.lock() {
                 let _ = actor.fail_navigation(navigation_id, lease.generation.id);
             }
+            hide_splash(&app);
+            show_startup_recovery(&app, &format!("无法刷新 Harness Web: {error}"));
             return Err(format!("无法刷新 Harness Web: {error}"));
         }
         schedule_harness_watchdog(&app, navigation_id, lease.generation.id);
@@ -488,7 +491,10 @@ async fn restart_harness_web_impl(
         let _ = window.hide();
     }
     if clear_quarantine {
-        crate::runtime::runtime_clear_plugin_quarantine(app.clone())?;
+        crate::runtime::runtime_clear_plugin_quarantine(app.clone()).map_err(|error| {
+            show_startup_recovery(&app, &error);
+            error
+        })?;
     }
     let status = if safe_mode {
         crate::runtime::restart_managed_safe(app.clone()).await
@@ -561,12 +567,6 @@ pub async fn harness_clear_quarantine_restart(app: AppHandle) -> Result<crate::r
         let _operation = claim_surface_operation(&app, SurfaceOperation::Restart)?;
         restart_harness_web_impl(app, true, false).await
     }
-}
-
-#[tauri::command]
-pub fn app_quit(app: AppHandle) -> Result<(), String> {
-    crate::request_exit(&app);
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -686,19 +686,6 @@ pub async fn shell_settings_show(app: AppHandle) -> Result<(), String> {
     {
         let _operation = claim_surface_operation(&app, SurfaceOperation::Diagnostics)?;
         show_settings_window(&app).await
-    }
-}
-
-#[tauri::command]
-pub fn shell_settings_close(app: AppHandle) -> Result<(), String> {
-    #[cfg(mobile)]
-    { let _ = app; Ok(()) }
-    #[cfg(not(mobile))]
-    {
-        if let Some(window) = app.get_webview_window("settings") {
-            window.hide().map_err(|error| format!("无法隐藏插件诊断窗口: {error}"))?;
-        }
-        Ok(())
     }
 }
 

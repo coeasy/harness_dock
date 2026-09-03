@@ -10,7 +10,7 @@ import {
 } from '../../packages/bootstrap/src/index.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8')
+const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 const readJson = (relative: string): Record<string, any> => JSON.parse(read(relative))
 const unsupportedNativeV02 = [
   'notifications',
@@ -82,10 +82,17 @@ describe('Tauri v0.2 host contract', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
     const harnessWindow = read('apps/tauri/src-tauri/src/harness_window.rs')
     const web = read('apps/tauri/web/app.js')
-    expect(tauri.app.windows[0].visible).toBe(false)
+    const tray = read('apps/tauri/src-tauri/src/tray.rs')
+    expect(tauri.app.windows[0]).toMatchObject({
+      label: 'splash',
+      visible: true,
+    })
+    expect(tauri.app.windows).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'control' })]),
+    )
     expect(desktop).toContain('continuing without automatic install')
     expect(desktop).toContain('continuing with Harness Web')
-    expect(startup).toContain('runtime::start_for_boot')
+    expect(startup).toContain('reconciler::ensure_runtime_for_boot')
     expect(startup).toContain('open_for_startup')
     expect(startup).toContain('show_startup_recovery')
     expect(startup).not.toContain('app.exit')
@@ -95,6 +102,27 @@ describe('Tauri v0.2 host contract', () => {
     expect(harnessWindow).toContain('show_startup_recovery')
     expect(web).toContain('Native startup owns the normal desktop path')
     expect(web).toContain('__harnessDockShowRecovery')
+    expect(tray).toContain('app.get_webview_window("control")')
+  })
+
+  it('keeps every local control-page IPC entry registered and permitted', () => {
+    const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
+    const build = read('apps/tauri/src-tauri/build.rs')
+    const permissions = read('apps/tauri/src-tauri/permissions/harnessdock.toml')
+    const web = read('apps/tauri/web/app.js')
+    expect(web).toContain("call('runtime_status')")
+    expect(web).toContain("call('shell_settings_show')")
+    expect(bridge).toContain('$crate::runtime::runtime_status')
+    expect(bridge).toContain('$crate::harness_window::shell_settings_show')
+    expect(build).toContain('"host_execute"')
+    expect(build).toContain('"host_snapshot"')
+    expect(build).toContain('"diagnostics_close"')
+    expect(build).toContain('"harness_shell_close"')
+    expect(build).toContain('"runtime_status"')
+    expect(build).toContain('"shell_settings_show"')
+    expect(build).not.toContain('"app_quit"')
+    expect(permissions).toContain('"runtime_status", "public_runtime_status"')
+    expect(permissions).toContain('"shell_settings_show"]')
   })
 
   it('keeps the independent Harness Shell on demand and routes business actions through typed intents', () => {
@@ -117,12 +145,13 @@ describe('Tauri v0.2 host contract', () => {
       'core:event:allow-unlisten',
       'core:window:allow-start-dragging',
       'harness-shell',
+      'host-protocol',
     ])
     expect(permission).toContain('identifier = "harness-shell"')
     expect(shell).toContain('SHELL_WEB_SCRIPT')
     expect(shell).toContain("'window.close': 'harness_shell_close'")
-    expect(shell).toContain("'runtime.safe-mode': 'harness_safe_mode_restart'")
-    expect(shell).toContain("'gateway.manage': 'control_show'")
+    expect(shell).toContain("'runtime.safe-mode': 'start-safe-mode'")
+    expect(shell).toContain("'gateway.manage': 'show-gateway'")
     expect(shellService).toContain("'gateway.manage'")
     expect(shellAsset).toContain('window.__DSH_SHELL_BRIDGE__')
     expect(shellAsset).toContain('setBusinessActionsDisabled')
@@ -138,7 +167,7 @@ describe('Tauri v0.2 host contract', () => {
     const capability = readJson('apps/tauri/src-tauri/capabilities/local-main.json')
     const remoteHarness = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
     expect(capability.remote).toBeUndefined()
-    expect(capability.windows).toEqual(['main'])
+    expect(capability.windows).toEqual(['control'])
     expect(capability.permissions).not.toContain('harness-shell')
     expect(remoteHarness.local).toBe(false)
     expect(remoteHarness.windows).toEqual(['harness'])

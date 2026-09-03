@@ -33,14 +33,14 @@
 - Windows NSIS 安装器和卸载器显式使用统一 HarnessDock 图标；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
 - Windows 保持 `com.harnessdock.client` 应用标识与 current-user 安装模式，可直接覆盖升级现有 v0.2.x；禁止意外降级安装。
 - WebView2 bootstrapper 随 Windows 安装器嵌入，缺少 WebView2 时无需再先下载 bootstrapper 本体。
-- Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine 或临时安全配置，Web 仍默认打开。Full Runtime 默认只使用随包固定 Node，不再信任用户 PATH；仅显式设置 `HARNESSDOCK_NODE_BIN` 或 `HARNESSDOCK_USE_SYSTEM_NODE=1` 时尝试兼容系统 Node，覆盖无效则安全回退随包 Node。
+- Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine 或临时安全配置，Web 仍默认打开。正式 Full Runtime 只使用安装包内固定 Node，不信任用户 PATH，也不会在首次启动下载或替换 Runtime。
 - 插件诊断作为独立按需窗口，只在 Harness `菜单`、托盘或应用菜单中明确点击后显示，不抢占 Web 首屏；窗口居中、紧凑并在页面加载完成后显示。
 - 桌面端 Harness 使用自定义标题栏：`菜单`、最小化、最大化/还原、隐藏到系统托盘；刷新、Runtime 重启、清除插件隔离并重启、插件诊断和自动更新统一收敛到菜单。系统托盘不可用时，窗口关闭会转为受管退出，不会留下无法重新打开的后台进程。
 - 启动、刷新和重启都使用可见执行态；导航期间由本地 splash 显示动画和状态，页面加载成功后自动回到 Harness Web，失败则回到恢复入口而不是白屏。
 - 启动只显示本地 splash，后台控制页和插件诊断均不抢占首屏；自动更新统一从主界面菜单、托盘或应用菜单进入，失败会留在界面内并给出明确降级路径。
 - Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
 - 顶部入口明确命名为“菜单”，并统一承载 Web 刷新、Runtime 重启、插件隔离恢复、插件诊断和自动更新；插件诊断保持只读、按需打开。
-- `@dsh/plugin-harness-shell` 是独立可发布的 dsh 外壳插件；Tauri 通过 v1 Host Bridge 接入，能力由原生 Tauri 命令统一提供，未实现的菜单项会隐藏；插件入口自身采用 fail-open，宿主 service 注册失败不会阻断 Runtime/Harness Web。
+- `@dsh/plugin-harness-shell` 是独立可发布的 dsh 外壳插件；Tauri 通过 Host Protocol v2 接入，能力由 Capability Broker 和原生 Actor 统一提供，未实现的菜单项会隐藏；插件入口自身采用 fail-open，宿主 service 注册失败不会阻断 Runtime/Harness Web。
 - 桌面启动由原生协调器直接启动 Runtime，Harness Web 完成绘制后才显示；白板、启动超时和窗口切换期间自动退出均进入可操作恢复路径。
 - 桌面 Harness Shell 权限只授予受管的 `http://127.0.0.1:<ephemeral-port>` Runtime origin；localhost、IPv6、HTTPS alias 与其它本机服务均不获得外壳 IPC。
 - 桌面受管 loopback Harness WebView 只获得事件订阅、标题栏拖拽和显式 `harness-shell` Host Bridge 命令；不再授予整组 `core:default` 能力。
@@ -55,7 +55,7 @@ Desktop (Windows/macOS/Linux)
     +-- pinned Full dsh Runtime (loopback)
     +-- isolated official Harness WebView
     +-- independent harness-shell plugin + versioned Host Bridge
-    +-- Gateway sidecar
+    +-- Native GatewayActor
     +-- plugin failure quarantine/recovery
 
 Mobile (Android/iOS)

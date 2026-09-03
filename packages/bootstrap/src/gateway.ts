@@ -10,6 +10,8 @@ const DEFAULT_LAUNCH_TTL_MS = 60_000
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60_000
 const MAX_BODY_BYTES = 8 * 1024
 const SERVER_CLOSE_TIMEOUT_MS = 2_000
+const REQUEST_TIMEOUT_MS = 8_000
+const MAX_GATEWAY_CONNECTIONS = 64
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -324,6 +326,9 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
       else res.destroy()
     })
   })
+  server.requestTimeout = REQUEST_TIMEOUT_MS
+  server.headersTimeout = REQUEST_TIMEOUT_MS
+  server.maxConnections = MAX_GATEWAY_CONNECTIONS
   const connections = new Set<net.Socket>()
   const trackConnection = (socket: net.Socket): void => {
     connections.add(socket)
@@ -435,7 +440,12 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     }
 
     if (incoming.pathname === '/api/harnessdock/connect') {
-      const token = incoming.searchParams.get('token') || ''
+      const entries = [...incoming.searchParams.entries()]
+      if (entries.length !== 1 || entries[0]?.[0] !== 'token' || !entries[0][1]) {
+        json(res, 400, { error: 'invalid_connect_token' })
+        return
+      }
+      const token = entries[0][1]
       const launch = launches.get(token)
       launches.delete(token)
       if (!launch || launch.expiresAt <= Date.now()) {
@@ -532,6 +542,9 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
         upstreamRes.on('end', resolve)
         upstreamRes.pipe(res)
       })
+      upstreamReq.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        upstreamReq.destroy(new Error('Gateway upstream request timed out.'))
+      })
       upstreamReq.on('error', reject)
       req.on('error', reject)
       req.on('aborted', () => upstreamReq.destroy())
@@ -562,6 +575,7 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
         return
       }
       connected = true
+      upstreamSocket.setTimeout(0)
       const headerLines: string[] = ['Connection: Upgrade', 'Upgrade: websocket']
       for (const [name, value] of Object.entries(req.headers)) {
         const lowerName = name.toLowerCase()
@@ -589,9 +603,11 @@ export async function startHarnessGateway(options: HarnessGatewayOptions): Promi
     if (upstream.protocol === 'https:') {
       const tlsSocket = tls.connect({ host: upstream.hostname, port: portNumber, servername: upstream.hostname })
       upstreamSocket = tlsSocket
+      tlsSocket.setTimeout(REQUEST_TIMEOUT_MS, () => tlsSocket.destroy(new Error('Gateway websocket upstream timed out.')))
       tlsSocket.once('secureConnect', () => onConnected(tlsSocket))
     } else {
       upstreamSocket = net.connect({ host: upstream.hostname, port: portNumber })
+      upstreamSocket.setTimeout(REQUEST_TIMEOUT_MS, () => upstreamSocket.destroy(new Error('Gateway websocket upstream timed out.')))
       upstreamSocket.once('connect', () => onConnected(upstreamSocket))
     }
     trackConnection(upstreamSocket)

@@ -22,7 +22,6 @@ static NATIVE_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 pub(crate) struct KernelPublicState {
     pub(crate) event_sequence: u64,
     pub(crate) revision: u64,
-    pub(crate) last_operation_id: Option<String>,
 }
 
 struct KernelRequest {
@@ -97,12 +96,8 @@ fn command_fingerprint(envelope: &CommandEnvelope) -> String {
     })
 }
 
-fn desired_revision(app: &AppHandle) -> u64 {
-    app.state::<AppState>()
-        .desired
-        .lock()
-        .map(|desired| desired.revision)
-        .unwrap_or(0)
+fn current_revision(app: &AppHandle) -> u64 {
+    app.state::<AppState>().revision.load(Ordering::Acquire)
 }
 
 fn record_event(
@@ -112,12 +107,11 @@ fn record_event(
     operation_id: String,
     kind: HostEventKind,
 ) {
-    let revision = desired_revision(app);
+    let revision = current_revision(app);
     let event = {
         let Ok(mut state) = public.lock() else { return };
         state.event_sequence = state.event_sequence.saturating_add(1);
         state.revision = revision;
-        state.last_operation_id = Some(operation_id.clone());
         HostEvent {
             protocol_version: HOST_PROTOCOL_VERSION,
             sequence: state.event_sequence,

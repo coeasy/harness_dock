@@ -18,6 +18,7 @@ use crate::{runtime_actor::RuntimeLease, AppState};
 
 const MAX_GATEWAY_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_GATEWAY_CONNECTIONS: usize = 64;
+const GATEWAY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(8);
 const GATEWAY_UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +72,12 @@ struct PairResponse {
     expires_at: String,
 }
 
+struct GatewayRejection {
+    status: u16,
+    reason: &'static str,
+    body: &'static [u8],
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HealthResponse {
@@ -97,7 +104,6 @@ struct ConnectTicket {
 #[derive(Clone)]
 struct SessionState {
     id: String,
-    token: String,
     name: String,
     paired_at: SystemTime,
     last_seen_at: SystemTime,
@@ -180,6 +186,7 @@ pub(crate) struct GatewayActorState {
     phase: GatewayPhase,
     generation: u64,
     server: Option<NativeGateway>,
+    lifecycle: Arc<Mutex<()>>,
 }
 
 impl Default for GatewayActorState {
@@ -188,6 +195,7 @@ impl Default for GatewayActorState {
             phase: GatewayPhase::Stopped,
             generation: 0,
             server: None,
+            lifecycle: Arc::new(Mutex::new(())),
         }
     }
 }
@@ -220,7 +228,7 @@ impl GatewayActorState {
     }
 
     fn fail(&mut self, generation: u64) {
-        if self.generation == generation {
+        if self.phase == GatewayPhase::Starting && self.generation == generation {
             self.phase = GatewayPhase::Failed;
             self.server = None;
         }
@@ -417,6 +425,11 @@ fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc
                     let _ = stream.shutdown(Shutdown::Both);
                     break;
                 }
+                if let Err(error) = stream.set_write_timeout(Some(GATEWAY_HANDSHAKE_TIMEOUT)) {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    eprintln!("Native Gateway connection timeout setup failed: {error}");
+                    continue;
+                }
                 let active = shared.active_connections.fetch_add(1, Ordering::AcqRel);
                 if active >= MAX_GATEWAY_CONNECTIONS {
                     shared.active_connections.fetch_sub(1, Ordering::AcqRel);
@@ -493,18 +506,59 @@ fn validated_content_length(value: &str) -> Result<usize, String> {
     Ok(length)
 }
 
+fn is_http_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+fn is_safe_header_value(value: &str) -> bool {
+    !value.bytes().any(|byte| {
+        byte == b'\r' || byte == b'\n' || (byte < 0x20 && byte != b'\t') || byte == 0x7f
+    })
+}
+
 fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(8)))
-        .map_err(|error| error.to_string())?;
+    let deadline = Instant::now() + GATEWAY_HANDSHAKE_TIMEOUT;
+    let set_read_deadline = |stream: &mut TcpStream| -> Result<(), String> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Gateway request timed out".into());
+        }
+        stream
+            .set_read_timeout(Some(remaining))
+            .map_err(|error| error.to_string())
+    };
     let mut data = Vec::with_capacity(4096);
     let header_end = loop {
-        if data.len() > 64 * 1024 {
-            return Err("Gateway request headers too large".into());
-        }
         if let Some(index) = find_bytes(&data, b"\r\n\r\n") {
+            if index + 4 > 64 * 1024 {
+                return Err("Gateway request headers too large".into());
+            }
             break index + 4;
         }
+        if data.len() >= 64 * 1024 {
+            return Err("Gateway request headers too large".into());
+        }
+        set_read_deadline(stream)?;
         let mut buf = [0_u8; 4096];
         let read = stream.read(&mut buf).map_err(|error| error.to_string())?;
         if read == 0 {
@@ -521,6 +575,7 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
     let target = request_parts.next().unwrap_or_default().to_string();
     let version = request_parts.next().unwrap_or_default();
     if method.is_empty()
+        || !is_http_token(&method)
         || target.is_empty()
         || version != "HTTP/1.1"
         || request_parts.next().is_some()
@@ -540,6 +595,9 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
             .split_once(':')
             .ok_or_else(|| "malformed Gateway request header".to_string())?;
         let value = value.trim().to_string();
+        if !is_http_token(name) || !is_safe_header_value(&value) {
+            return Err("invalid Gateway request header".into());
+        }
         if name.eq_ignore_ascii_case("content-length") {
             if saw_content_length {
                 return Err("duplicate Gateway Content-Length".into());
@@ -557,6 +615,7 @@ fn read_request(stream: &mut TcpStream) -> Result<ParsedRequest, String> {
         body.truncate(content_length);
     }
     while body.len() < content_length {
+        set_read_deadline(stream)?;
         let mut buf = vec![0_u8; (content_length - body.len()).min(8192)];
         let read = stream.read(&mut buf).map_err(|error| error.to_string())?;
         if read == 0 {
@@ -607,7 +666,13 @@ fn handle_connection(
             return Err(error);
         }
     };
-    let url = request_path(&request.target)?;
+    let url = match request_path(&request.target) {
+        Ok(url) => url,
+        Err(error) => {
+            let _ = write_status(&mut stream, 400, "Bad Request", b"invalid gateway request target");
+            return Err(error);
+        }
+    };
     match url.path() {
         "/api/harnessdock/health" => {
             if request.method != "GET" {
@@ -647,82 +712,126 @@ fn handle_pair(
         Ok(value) => value,
         Err(_) => return write_status(stream, 400, "Bad Request", b"invalid json"),
     };
-    let mut registry = shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
-    prune_registry(&mut registry);
-    if rate_limited(&mut registry, peer) {
-        return write_status(stream, 429, "Too Many Requests", b"pairing rate limited");
+    let code: String = pair.code.chars().filter(|ch| ch.is_ascii_digit()).collect();
+    if code.len() != 8 {
+        return write_status(stream, 400, "Bad Request", b"invalid pairing code");
     }
-    let now = SystemTime::now();
-    let valid = registry
-        .pairing
-        .as_ref()
-        .is_some_and(|ticket| ticket.code == pair.code && ticket.expires_at > now);
-    if !valid {
-        return write_status(stream, 401, "Unauthorized", b"invalid or expired pairing code");
-    }
-    registry.pairing = None;
     let device_name = pair.device_name.trim();
     if device_name.is_empty() || device_name.chars().count() > 80 {
         return write_status(stream, 400, "Bad Request", b"invalid device name");
     }
-    let session_token = random_hex(32)?;
-    let connect_token = random_hex(24)?;
-    let id = random_hex(12)?;
-    let session_expiry = now + Duration::from_secs(30 * 24 * 60 * 60);
-    registry.sessions.insert(
-        session_token.clone(),
-        SessionState {
-            id,
-            token: session_token.clone(),
-            name: device_name.to_string(),
-            paired_at: now,
-            last_seen_at: now,
-            expires_at: session_expiry,
-            bootstrapped: false,
-        },
-    );
-    registry.connect_tickets.insert(
-        connect_token.clone(),
-        ConnectTicket {
-            token: connect_token.clone(),
-            session_token,
-            expires_at: now + Duration::from_secs(90),
-        },
-    );
-    let connect_url = format!(
-        "{}api/harnessdock/connect?token={}",
-        shared.public_url, connect_token
-    );
-    let body = serde_json::to_vec(&PairResponse {
-        connect_url,
-        expires_at: rfc3339(session_expiry),
-    })
-    .map_err(|error| error.to_string())?;
-    write_json(stream, 200, "OK", &body)
+    let outcome = (|| -> Result<Result<Vec<u8>, GatewayRejection>, String> {
+        let mut registry = shared
+            .registry
+            .lock()
+            .map_err(|_| "Gateway registry poisoned".to_string())?;
+        prune_registry(&mut registry);
+        if rate_limited(&mut registry, peer) {
+            return Ok(Err(GatewayRejection {
+                status: 429,
+                reason: "Too Many Requests",
+                body: b"pairing rate limited",
+            }));
+        }
+        let now = SystemTime::now();
+        let valid = registry
+            .pairing
+            .as_ref()
+            .is_some_and(|ticket| ticket.code == code && ticket.expires_at > now);
+        if !valid {
+            return Ok(Err(GatewayRejection {
+                status: 401,
+                reason: "Unauthorized",
+                body: b"invalid or expired pairing code",
+            }));
+        }
+        let session_token = random_hex(32)?;
+        let connect_token = random_hex(24)?;
+        let id = random_hex(12)?;
+        let session_expiry = now + Duration::from_secs(30 * 24 * 60 * 60);
+        registry.pairing = None;
+        registry.sessions.insert(
+            session_token.clone(),
+            SessionState {
+                id,
+                name: device_name.to_string(),
+                paired_at: now,
+                last_seen_at: now,
+                expires_at: session_expiry,
+                bootstrapped: false,
+            },
+        );
+        registry.connect_tickets.insert(
+            connect_token.clone(),
+            ConnectTicket {
+                token: connect_token.clone(),
+                session_token,
+                expires_at: now + Duration::from_secs(90),
+            },
+        );
+        let connect_url = format!(
+            "{}api/harnessdock/connect?token={}",
+            shared.public_url, connect_token
+        );
+        let body = serde_json::to_vec(&PairResponse {
+            connect_url,
+            expires_at: rfc3339(session_expiry),
+        })
+        .map_err(|error| error.to_string())?;
+        Ok(Ok(body))
+    })()?;
+    match outcome {
+        Ok(body) => write_json(stream, 200, "OK", &body),
+        Err(rejection) => write_status(stream, rejection.status, rejection.reason, rejection.body),
+    }
 }
 
 fn handle_connect(stream: &mut TcpStream, url: &Url, shared: &GatewayShared) -> Result<(), String> {
-    let token = url
-        .query_pairs()
-        .find_map(|(key, value)| (key == "token").then(|| value.into_owned()))
-        .unwrap_or_default();
-    let mut registry = shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
-    prune_registry(&mut registry);
-    let Some(ticket) = registry.connect_tickets.remove(&token) else {
-        return write_status(stream, 401, "Unauthorized", b"invalid connect token");
+    if url.path() != "/api/harnessdock/connect" {
+        return write_status(stream, 404, "Not Found", b"");
+    }
+    let token = match connect_token(url) {
+        Ok(token) => token,
+        Err(error) => return write_status(stream, 400, "Bad Request", error.as_bytes()),
     };
-    if ticket.token != token || ticket.expires_at <= SystemTime::now() {
-        return write_status(stream, 401, "Unauthorized", b"expired connect token");
-    }
-    if !registry.sessions.contains_key(&ticket.session_token) {
-        return write_status(stream, 401, "Unauthorized", b"session not found");
-    }
+    let outcome = (|| -> Result<Result<String, &'static [u8]>, String> {
+        let mut registry = shared
+            .registry
+            .lock()
+            .map_err(|_| "Gateway registry poisoned".to_string())?;
+        prune_registry(&mut registry);
+        let Some(ticket) = registry.connect_tickets.remove(&token) else {
+            return Ok(Err(b"invalid connect token"));
+        };
+        if ticket.token != token || ticket.expires_at <= SystemTime::now() {
+            return Ok(Err(b"expired connect token"));
+        }
+        if !registry.sessions.contains_key(&ticket.session_token) {
+            return Ok(Err(b"session not found"));
+        }
+        Ok(Ok(ticket.session_token))
+    })()?;
+    let session_token = match outcome {
+        Ok(token) => token,
+        Err(body) => return write_status(stream, 401, "Unauthorized", body),
+    };
     let secure = if shared.secure_cookie { "; Secure" } else { "" };
     let response = format!(
         "HTTP/1.1 303 See Other\r\nLocation: /\r\nSet-Cookie: hd_session={}; Path=/; HttpOnly; SameSite=Strict{}\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        ticket.session_token, secure
+        session_token, secure
     );
     stream.write_all(response.as_bytes()).map_err(|error| error.to_string())
+}
+
+fn connect_token(url: &Url) -> Result<String, &'static str> {
+    let mut token = None;
+    for (key, value) in url.query_pairs() {
+        if key != "token" || token.is_some() || value.is_empty() {
+            return Err("exactly one non-empty token query parameter is required");
+        }
+        token = Some(value.into_owned());
+    }
+    token.ok_or("exactly one non-empty token query parameter is required")
 }
 
 fn connect_upstream(host: &str, port: u16) -> Result<TcpStream, String> {
@@ -753,8 +862,12 @@ fn proxy_authenticated(
     client
         .set_read_timeout(None)
         .map_err(|error| format!("failed to clear Gateway handshake timeout: {error}"))?;
-    let session_token = cookie_value(header(&request, "cookie").unwrap_or_default(), "hd_session")
-        .ok_or_else(|| "Gateway session cookie missing".to_string())?;
+    let Some(session_token) =
+        cookie_value(header(&request, "cookie").unwrap_or_default(), "hd_session")
+    else {
+        write_status(&mut client, 401, "Unauthorized", b"session cookie missing")?;
+        return Ok(());
+    };
     let bootstrap = {
         let mut registry = shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
         prune_registry(&mut registry);
@@ -763,11 +876,7 @@ fn proxy_authenticated(
             return Ok(());
         };
         session.last_seen_at = SystemTime::now();
-        let bootstrap = !session.bootstrapped;
-        if bootstrap {
-            session.bootstrapped = true;
-        }
-        bootstrap
+        !session.bootstrapped
     };
     let upstream = Url::parse(&shared.runtime_lease.origin)
         .map_err(|_| "RuntimeLease origin invalid".to_string())?;
@@ -819,6 +928,13 @@ fn proxy_authenticated(
         .write_all(first.as_bytes())
         .and_then(|_| upstream_stream.write_all(&request.raw_body))
         .map_err(|error| error.to_string())?;
+    if bootstrap {
+        if let Ok(mut registry) = shared.registry.lock() {
+            if let Some(session) = registry.sessions.get_mut(&session_token) {
+                session.bootstrapped = true;
+            }
+        }
+    }
 
     let mut client_read = client.try_clone().map_err(|error| error.to_string())?;
     let mut upstream_write = upstream_stream.try_clone().map_err(|error| error.to_string())?;
@@ -859,6 +975,16 @@ fn prune_registry(registry: &mut GatewayRegistry) {
     }
     registry.connect_tickets.retain(|_, ticket| ticket.expires_at > now);
     registry.sessions.retain(|_, session| session.expires_at > now);
+    let instant_now = Instant::now();
+    registry.attempts.retain(|_, attempts| {
+        while attempts
+            .front()
+            .is_some_and(|at| instant_now.duration_since(*at) > Duration::from_secs(60))
+        {
+            attempts.pop_front();
+        }
+        !attempts.is_empty()
+    });
 }
 
 fn device_info(session: &SessionState) -> GatewayDeviceInfo {
@@ -948,12 +1074,15 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 }
 
 fn runtime_lease(state: &AppState) -> Result<RuntimeLease, String> {
-    crate::runtime::current_lease(state)
+    // A RuntimeLease is only usable while its owned process is alive. Refreshing
+    // the Runtime actor here also tears down a Gateway that was left behind by
+    // an unexpected Runtime exit before any pairing/proxy operation uses it.
+    crate::runtime::live_lease(state)
         .ok_or_else(|| "请先启动本地 Runtime，再使用 Mobile Gateway。".to_string())
 }
 
 fn ensure_current_runtime(state: &AppState, generation: u64) -> bool {
-    crate::runtime::current_lease(state)
+    crate::runtime::live_lease(state)
         .is_some_and(|lease| lease.generation.id == generation)
 }
 
@@ -988,19 +1117,34 @@ pub fn gateway_host_start(
         return Err("HarnessDock 正在退出，已拒绝新的 Gateway 启动。".into());
     }
     let lease = runtime_lease(&*state)?;
-    if let Ok(actor) = state.gateway.lock() {
-        if let Some(server) = actor.server.as_ref() {
-            if server.runtime_generation == lease.generation.id {
-                return Ok(server.status());
+    let port = validated_gateway_port(local_port)?;
+    let lifecycle = lifecycle_lock(&state.gateway)?;
+    let generation = {
+        let _serial = lifecycle
+            .lock()
+            .map_err(|_| "Gateway lifecycle lock is poisoned".to_string())?;
+        if let Ok(actor) = state.gateway.lock() {
+            if let Some(server) = actor.server.as_ref() {
+                if server.runtime_generation == lease.generation.id {
+                    return Ok(server.status());
+                }
             }
         }
-    }
-    stop_managed(&state.gateway);
-    let generation = {
-        let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
+        if state
+            .gateway
+            .lock()
+            .map(|actor| actor.is_transitioning())
+            .unwrap_or(true)
+        {
+            return Err("Gateway 正在处理另一个生命周期操作，请稍候。".into());
+        }
+        stop_managed_inner(&state.gateway);
+        let mut actor = state
+            .gateway
+            .lock()
+            .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
         actor.begin_start()?
     };
-    let port = validated_gateway_port(local_port)?;
     let server = match spawn_native_gateway(lease.clone(), port, public_url) {
         Ok(server) => server,
         Err(error) => {
@@ -1018,12 +1162,28 @@ pub fn gateway_host_start(
         }
         return Err("RuntimeLease 在 Gateway 启动期间已失效。".into());
     }
-    let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
-    if let Err(mut stale) = actor.publish(generation, server) {
-        stale.stop();
-        return Err("陈旧 Gateway generation 已被丢弃。".into());
+    let status = {
+        let _serial = lifecycle
+            .lock()
+            .map_err(|_| "Gateway lifecycle lock is poisoned".to_string())?;
+        let mut actor = state
+            .gateway
+            .lock()
+            .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
+        if let Err(mut stale) = actor.publish(generation, server) {
+            stale.stop();
+            return Err("陈旧 Gateway generation 已被丢弃。".into());
+        }
+        actor.server.as_ref().expect("published gateway").status()
+    };
+    // A Runtime stop can race between the pre-spawn lease check and publish.
+    // Re-check after publication and tear down a server that was published
+    // after the Runtime actor had already become unavailable.
+    if !ensure_current_runtime(&*state, lease.generation.id) {
+        stop_managed(&state.gateway);
+        return Err("RuntimeLease 在 Gateway 发布期间已失效。".into());
     }
-    Ok(actor.server.as_ref().expect("published gateway").status())
+    Ok(status)
 }
 
 #[tauri::command]
@@ -1050,9 +1210,14 @@ pub fn gateway_host_create_pairing(state: State<'_, AppState>) -> Result<Gateway
 
 #[tauri::command]
 pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Result<bool, String> {
+    let current = runtime_lease(&*state)?;
     let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
     let server = actor.server.as_mut().ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
+    if server.runtime_generation != current.generation.id {
+        return Err("Gateway RuntimeLease 已失效，请重新启动 Gateway。".into());
+    }
     let mut registry = server.shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
+    prune_registry(&mut registry);
     let token = registry
         .sessions
         .iter()
@@ -1068,9 +1233,14 @@ pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Res
 
 #[tauri::command]
 pub fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize, String> {
+    let current = runtime_lease(&*state)?;
     let mut actor = state.gateway.lock().map_err(|_| "GatewayActor 状态锁已损坏。".to_string())?;
     let server = actor.server.as_mut().ok_or_else(|| "Mobile Gateway 尚未启动。".to_string())?;
+    if server.runtime_generation != current.generation.id {
+        return Err("Gateway RuntimeLease 已失效，请重新启动 Gateway。".into());
+    }
     let mut registry = server.shared.registry.lock().map_err(|_| "Gateway registry poisoned".to_string())?;
+    prune_registry(&mut registry);
     let count = registry.sessions.len();
     registry.sessions.clear();
     registry.connect_tickets.clear();
@@ -1084,14 +1254,38 @@ pub fn gateway_host_stop(state: State<'_, AppState>) -> Result<GatewayHostStatus
     Ok(stopped())
 }
 
-pub(crate) fn stop_managed(gateway: &Mutex<GatewayActorState>) {
-    let server = gateway.lock().ok().and_then(|mut actor| actor.begin_stop());
+fn lifecycle_lock(gateway: &Mutex<GatewayActorState>) -> Result<Arc<Mutex<()>>, String> {
+    gateway
+        .lock()
+        .map(|actor| Arc::clone(&actor.lifecycle))
+        .or_else(|poisoned| Ok(Arc::clone(&poisoned.into_inner().lifecycle)))
+        .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())
+}
+
+fn stop_managed_inner(gateway: &Mutex<GatewayActorState>) {
+    let server = match gateway.lock() {
+        Ok(mut actor) => actor.begin_stop(),
+        Err(poisoned) => poisoned.into_inner().begin_stop(),
+    };
     if let Some(mut server) = server {
         server.stop();
     }
-    if let Ok(mut actor) = gateway.lock() {
-        actor.settle_stopped();
+    match gateway.lock() {
+        Ok(mut actor) => actor.settle_stopped(),
+        Err(poisoned) => poisoned.into_inner().settle_stopped(),
     }
+}
+
+pub(crate) fn stop_managed(gateway: &Mutex<GatewayActorState>) {
+    let lifecycle = match gateway.lock() {
+        Ok(actor) => Arc::clone(&actor.lifecycle),
+        Err(poisoned) => Arc::clone(&poisoned.into_inner().lifecycle),
+    };
+    let _serial = match lifecycle.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    stop_managed_inner(gateway);
 }
 
 #[cfg(test)]
@@ -1127,6 +1321,29 @@ mod tests {
         assert!(request_path("/api/harnessdock/health").is_ok());
         assert!(request_path("https://evil.example/path").is_err());
         assert!(request_path("//evil.example/path").is_err());
+    }
+
+    #[test]
+    fn gateway_rejects_header_injection_bytes() {
+        assert!(is_http_token("X-HarnessDock-Test"));
+        assert!(!is_http_token("X HarnessDock"));
+        assert!(is_safe_header_value("text/plain; charset=utf-8"));
+        assert!(!is_safe_header_value("ok\r\nX-Injected: yes"));
+    }
+
+    #[test]
+    fn connect_requires_exactly_one_non_empty_token() {
+        let valid = Url::parse("http://gateway.local/api/harnessdock/connect?token=abc").unwrap();
+        assert_eq!(connect_token(&valid).unwrap(), "abc");
+        for target in [
+            "http://gateway.local/api/harnessdock/connect",
+            "http://gateway.local/api/harnessdock/connect?token=",
+            "http://gateway.local/api/harnessdock/connect?token=abc&token=def",
+            "http://gateway.local/api/harnessdock/connect?token=abc&extra=1",
+        ] {
+            let url = Url::parse(target).unwrap();
+            assert!(connect_token(&url).is_err(), "accepted malformed connect URL: {target}");
+        }
     }
 
     #[test]

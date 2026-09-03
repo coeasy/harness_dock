@@ -82,6 +82,9 @@ describe('HarnessGateway', () => {
       expect(pair.status).toBe(200)
       const body = (await pair.json()) as { connectUrl: string }
 
+      const malformedConnect = await fetch(`${body.connectUrl}&token=duplicate`, { redirect: 'manual' })
+      expect(malformedConnect.status).toBe(400)
+
       const replay = await fetch(`${gateway.localUrl}api/harnessdock/pair`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

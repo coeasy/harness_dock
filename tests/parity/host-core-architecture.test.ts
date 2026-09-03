@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8')
+const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('v0.2.0 host-core architecture contract', () => {
   it('keeps the Tauri composition root free of lifecycle state ownership', () => {
@@ -20,10 +20,14 @@ describe('v0.2.0 host-core architecture contract', () => {
 
   it('normalizes low-level flags through a typed lifecycle read model', () => {
     const lifecycle = read('apps/tauri/src-tauri/src/lifecycle.rs')
-    expect(lifecycle).toContain('enum RuntimeOperation')
+    expect(lifecycle).toContain('pub(crate) struct LifecycleSnapshot')
+    expect(lifecycle).toContain('runtime_phase: RuntimePhase')
+    expect(lifecycle).toContain('gateway_phase: GatewayPhase')
+    expect(lifecycle).toContain('update_phase: UpdatePhase')
+    expect(lifecycle).toContain('surface_operation: SurfaceOperation')
     expect(lifecycle).toContain('Restarting')
-    expect(lifecycle).toContain('runtime-start-stop-overlap')
     expect(lifecycle).toContain('managed_operations_idle')
+    expect(lifecycle).toContain('RuntimePhase::Cancelling')
   })
 
   it('routes cross-service shutdown through the supervisor', () => {

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8')
+const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 const readJson = (relative: string) => JSON.parse(read(relative))
 
 describe('Tauri shell fail-open guarantees', () => {
@@ -34,6 +34,7 @@ describe('Tauri shell fail-open guarantees', () => {
       'core:event:allow-unlisten',
       'core:window:allow-start-dragging',
       'harness-shell',
+      'host-protocol',
     ])
     expect(capability.remote.urls).toEqual([
       'http://127.0.0.1:*/*',

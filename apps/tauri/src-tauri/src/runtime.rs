@@ -291,6 +291,39 @@ fn work_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+struct WorkDirGuard {
+    path: PathBuf,
+    retained: bool,
+}
+
+impl WorkDirGuard {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            retained: false,
+        }
+    }
+
+    fn retain(&mut self) {
+        self.retained = true;
+    }
+
+    fn retain_result<T>(&mut self, result: Result<T, String>) -> Result<T, String> {
+        if result.is_ok() {
+            self.retain();
+        }
+        result
+    }
+}
+
+impl Drop for WorkDirGuard {
+    fn drop(&mut self) {
+        if !self.retained {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 fn embedded_patch(plugin: &Path, compatibility: &Path, shell: &Path) -> Result<String, String> {
     let plugin_url = Url::from_file_path(platform::node_cli_path(plugin))
         .map_err(|_| "无法把 embedded client 插件路径转换为 file URL。".to_string())?;
@@ -674,7 +707,13 @@ fn dump_config(
         }
         match child.try_wait() {
             Ok(Some(_)) => {
-                let output = child.wait_with_output().map_err(|error| error.to_string())?;
+                let output = match child.wait_with_output() {
+                    Ok(output) => output,
+                    Err(error) => {
+                        registration.complete();
+                        return Err(error.to_string());
+                    }
+                };
                 registration.complete();
                 if !output.status.success() {
                     return Err(String::from_utf8_lossy(&output.stderr).chars().take(2_000).collect());
@@ -683,7 +722,12 @@ fn dump_config(
                     .map_err(|error| format!("dsh config dump 输出不是 UTF-8: {error}"));
             }
             Ok(None) => {}
-            Err(error) => return Err(error.to_string()),
+            Err(error) => {
+                registration.terminate_tree();
+                process_control::stop_child_tree(&mut child);
+                registration.complete();
+                return Err(error.to_string());
+            }
         }
         if deadline <= Instant::now() {
             registration.terminate_tree();
@@ -852,17 +896,17 @@ fn start_blocking(
     quitting: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<RuntimeProcess, String> {
     let dir = work_dir()?;
+    let mut work_dir_guard = WorkDirGuard::new(dir.clone());
     let patch_file = dir.join("embedded.patch.yml");
     let ready_file = dir.join("ready.json");
     let patch = embedded_patch(&plugin_path, &compatibility_path, &shell_plugin_path)?;
     fs::write(&patch_file, patch).map_err(|error| format!("无法写入 embedded patch: {error}"))?;
     if cancelled(&token, &quitting) {
-        let _ = fs::remove_dir_all(&dir);
         return Err("Runtime generation cancelled before startup".into());
     }
 
     if force_safe_mode {
-        return safe_profile(
+        return work_dir_guard.retain_result(safe_profile(
             &image,
             &patch_file,
             &ready_file,
@@ -871,7 +915,7 @@ fn start_blocking(
             &token,
             &starting_processes,
             &quitting,
-        );
+        ));
     }
 
     let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
@@ -897,6 +941,7 @@ fn start_blocking(
                 process.isolated_plugins = quarantine.isolated_plugins;
                 process.suspected_plugins = quarantine.suspected_plugins;
                 process.quarantine_expires_at = Some(quarantine.expires_at);
+                work_dir_guard.retain();
                 return Ok(process);
             }
             let _ = plugin_quarantine::clear(&quarantine_state_path);
@@ -916,27 +961,46 @@ fn start_blocking(
         &starting_processes,
         &quitting,
     ) {
-        Ok(process) => return Ok(process),
+        Ok(process) => {
+            work_dir_guard.retain();
+            return Ok(process);
+        }
         Err(first_failure) => {
             if cancelled(&token, &quitting) {
-                let _ = fs::remove_dir_all(&dir);
                 return Err("Runtime generation cancelled during startup".into());
             }
             if !recovery_enabled {
                 let summary = public_diagnostic(&first_failure.diagnostic);
-                let _ = fs::remove_dir_all(&dir);
                 return Err(format!("{}\n{}", first_failure.message, summary));
             }
             let rows = match recovery_rows(&image, &patch_file, &token, &starting_processes, &quitting) {
                 Ok(rows) => rows,
                 Err(error) => {
                     eprintln!("Plugin recovery config discovery failed; using safe profile: {error}");
-                    return safe_profile(&image, &patch_file, &ready_file, &dir, &generation, &token, &starting_processes, &quitting);
+                    return work_dir_guard.retain_result(safe_profile(
+                        &image,
+                        &patch_file,
+                        &ready_file,
+                        &dir,
+                        &generation,
+                        &token,
+                        &starting_processes,
+                        &quitting,
+                    ));
                 }
             };
             let (selected, suspected, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
-                return safe_profile(&image, &patch_file, &ready_file, &dir, &generation, &token, &starting_processes, &quitting);
+                return work_dir_guard.retain_result(safe_profile(
+                    &image,
+                    &patch_file,
+                    &ready_file,
+                    &dir,
+                    &generation,
+                    &token,
+                    &starting_processes,
+                    &quitting,
+                ));
             }
             let recovery_file = dir.join("plugin-recovery.patch.yml");
             fs::write(&recovery_file, recovery_patch(&selected)?)
@@ -968,6 +1032,7 @@ fn start_blocking(
                     process.isolated_plugins = isolated;
                     process.suspected_plugins = suspected;
                     process.quarantine_expires_at = quarantine.map(|value| value.expires_at);
+                    work_dir_guard.retain();
                     Ok(process)
                 }
                 Err(recovery_failure) => {
@@ -975,7 +1040,16 @@ fn start_blocking(
                         "Plugin quarantine attempt failed: {} / {}",
                         first_failure.message, recovery_failure.message
                     );
-                    safe_profile(&image, &patch_file, &ready_file, &dir, &generation, &token, &starting_processes, &quitting)
+                    work_dir_guard.retain_result(safe_profile(
+                        &image,
+                        &patch_file,
+                        &ready_file,
+                        &dir,
+                        &generation,
+                        &token,
+                        &starting_processes,
+                        &quitting,
+                    ))
                 }
             }
         }
@@ -994,12 +1068,29 @@ fn lease_from_process(generation: RuntimeGeneration, process: &RuntimeProcess) -
 }
 
 pub(crate) fn current_lease(state: &AppState) -> Option<RuntimeLease> {
-    state.runtime_actor.lock().ok().and_then(|actor| actor.lease())
+    match state.runtime_actor.lock() {
+        Ok(actor) => actor.lease(),
+        Err(poisoned) => poisoned.into_inner().lease(),
+    }
+}
+
+pub(crate) fn live_lease(state: &AppState) -> Option<RuntimeLease> {
+    let _ = status_snapshot(state);
+    current_lease(state)
+}
+
+fn mark_start_failed(state: &AppState, generation: u64, error: String) -> String {
+    match state.runtime_actor.lock() {
+        Ok(mut actor) => actor.mark_failed(generation, error.clone()),
+        Err(poisoned) => poisoned.into_inner().mark_failed(generation, error.clone()),
+    }
+    error
 }
 
 pub(crate) fn status_snapshot(state: &AppState) -> RuntimeStatus {
-    let Ok(mut actor) = state.runtime_actor.lock() else {
-        return phase_status(RuntimePhase::Failed, None);
+    let mut actor = match state.runtime_actor.lock() {
+        Ok(actor) => actor,
+        Err(poisoned) => poisoned.into_inner(),
     };
     let dead = actor.process_mut().is_some_and(|process| !process.is_alive());
     if dead {
@@ -1046,10 +1137,7 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
     let image = match verify_runtime_image(&app) {
         Ok(image) => image,
         Err(error) => {
-            if let Ok(mut actor) = state.runtime_actor.lock() {
-                actor.mark_failed(generation.id, error.clone());
-            }
-            return Err(error);
+            return Err(mark_start_failed(&*state, generation.id, error));
         }
     };
     let generation = {
@@ -1057,23 +1145,44 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
             .runtime_actor
             .lock()
             .map_err(|_| "RuntimeActor 状态锁已损坏。".to_string())?;
-        let generation = actor.bind_image(generation.id, image.image_identity.clone())?;
-        actor.mark_starting(generation.id)?;
-        actor.mark_probing(generation.id)?;
+        let generation = match actor.bind_image(generation.id, image.image_identity.clone()) {
+            Ok(generation) => generation,
+            Err(error) => {
+                actor.mark_failed(generation.id, error.clone());
+                return Err(error);
+            }
+        };
+        if let Err(error) = actor.mark_starting(generation.id) {
+            actor.mark_failed(generation.id, error.clone());
+            return Err(error);
+        }
+        if let Err(error) = actor.mark_probing(generation.id) {
+            actor.mark_failed(generation.id, error.clone());
+            return Err(error);
+        }
         generation
     };
 
-    let plugin_path = resource_path(&app, "plugin-embedded-client/index.js")?;
-    let compatibility_path = resource_path(&app, "dsh-client-runtime-compat/index.js")?;
-    let shell_plugin_path = resource_path(&app, "plugin-harness-shell/index.js")?;
-    let quarantine_state_path = quarantine_path(&app)?;
+    let plugin_path = match resource_path(&app, "plugin-embedded-client/index.js") {
+        Ok(path) => path,
+        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+    };
+    let compatibility_path = match resource_path(&app, "dsh-client-runtime-compat/index.js") {
+        Ok(path) => path,
+        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+    };
+    let shell_plugin_path = match resource_path(&app, "plugin-harness-shell/index.js") {
+        Ok(path) => path,
+        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+    };
+    let quarantine_state_path = match quarantine_path(&app) {
+        Ok(path) => path,
+        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+    };
     for required in [&plugin_path, &compatibility_path, &shell_plugin_path] {
         if !required.is_file() {
             let error = format!("Tauri Runtime integration resource missing: {}", required.display());
-            if let Ok(mut actor) = state.runtime_actor.lock() {
-                actor.mark_failed(generation.id, error.clone());
-            }
-            return Err(error);
+            return Err(mark_start_failed(&*state, generation.id, error));
         }
     }
     let starting_processes = Arc::clone(&state.starting_processes);
@@ -1081,7 +1190,7 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
     let force_safe_mode = mode == RuntimeMode::Safe;
     let spawn_generation = generation.clone();
     let spawn_token = token.clone();
-    let process = tauri::async_runtime::spawn_blocking(move || {
+    let process = match tauri::async_runtime::spawn_blocking(move || {
         start_blocking(
             image,
             plugin_path,
@@ -1095,28 +1204,47 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
             quitting,
         )
     })
-    .await
-    .map_err(|error| format!("Runtime 启动任务失败: {error}"))?;
+    .await {
+        Ok(process) => process,
+        Err(error) => {
+            return Err(mark_start_failed(
+                &*state,
+                generation.id,
+                format!("Runtime 启动任务失败: {error}"),
+            ));
+        }
+    };
 
     let mut process = match process {
         Ok(process) => process,
         Err(error) => {
-            if let Ok(mut actor) = state.runtime_actor.lock() {
-                actor.mark_failed(generation.id, error.clone());
-            }
-            return Err(error);
+            return Err(mark_start_failed(&*state, generation.id, error));
         }
     };
     if state.quitting.load(Ordering::Acquire) || token.is_cancelled() {
         process.stop();
-        if let Ok(mut actor) = state.runtime_actor.lock() {
-            if actor.generation_id() == Some(generation.id) {
-                actor.settle_stopped();
+        match state.runtime_actor.lock() {
+            Ok(mut actor) => {
+                if actor.generation_id() == Some(generation.id) {
+                    actor.settle_stopped();
+                }
+            }
+            Err(poisoned) => {
+                let mut actor = poisoned.into_inner();
+                if actor.generation_id() == Some(generation.id) {
+                    actor.settle_stopped();
+                }
             }
         }
         return Err("Runtime generation was cancelled before publication".into());
     }
-    let lease = lease_from_process(generation.clone(), &process)?;
+    let lease = match lease_from_process(generation.clone(), &process) {
+        Ok(lease) => lease,
+        Err(error) => {
+            process.stop();
+            return Err(mark_start_failed(&*state, generation.id, error));
+        }
+    };
     let degraded = process.safe_mode || !process.isolated_plugins.is_empty();
     {
         let mut actor = state
@@ -1158,11 +1286,17 @@ fn stop_impl(state: &AppState) -> Result<RuntimeStatus, String> {
     if let Some(mut process) = process {
         process.stop();
     }
-    let mut actor = state
-        .runtime_actor
-        .lock()
-        .map_err(|_| "RuntimeActor 状态锁已损坏。".to_string())?;
-    actor.settle_stopped();
+    {
+        let mut actor = state
+            .runtime_actor
+            .lock()
+            .map_err(|_| "RuntimeActor 状态锁已损坏。".to_string())?;
+        actor.settle_stopped();
+    }
+    // Gateway start publishes outside the RuntimeActor lock. A stop can
+    // therefore pass its first Gateway sweep while a late start is still
+    // publishing; sweep again after Runtime has settled to close that race.
+    crate::gateway_host::stop_managed(&state.gateway);
     Ok(phase_status(RuntimePhase::Stopped, None))
 }
 
@@ -1195,12 +1329,16 @@ pub fn runtime_clear_plugin_quarantine(app: AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn stop_managed(runtime: &Mutex<RuntimeActor>) {
-    let process = runtime.lock().ok().and_then(|mut actor| actor.begin_stop());
+    let process = match runtime.lock() {
+        Ok(mut actor) => actor.begin_stop(),
+        Err(poisoned) => poisoned.into_inner().begin_stop(),
+    };
     if let Some(mut process) = process {
         process.stop();
     }
-    if let Ok(mut actor) = runtime.lock() {
-        actor.settle_stopped();
+    match runtime.lock() {
+        Ok(mut actor) => actor.settle_stopped(),
+        Err(poisoned) => poisoned.into_inner().settle_stopped(),
     }
 }
 
@@ -1266,5 +1404,15 @@ mod tests {
         let dir = work_dir().unwrap();
         assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failed_runtime_start_reclaims_its_private_work_dir() {
+        let dir = work_dir().unwrap();
+        {
+            let _guard = WorkDirGuard::new(dir.clone());
+            assert!(dir.is_dir());
+        }
+        assert!(!dir.exists());
     }
 }

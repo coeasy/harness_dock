@@ -32,9 +32,9 @@ v0.2.0 只有一个桌面宿主：`apps/tauri`。启动后首个业务界面直�
 ```text
 Tauri Native Host
   ├─ Full dsh Runtime（loopback）
-  ├─ Gateway sidecar（受控远程连接）
+  ├─ Native GatewayActor（受控远程连接）
   ├─ Harness WebView（Runtime ready 后显示）
-  ├─ harness-shell plugin + v1 Host Bridge
+  ├─ harness-shell plugin + Host Protocol v2
   └─ signed Tauri updater
 
 Mobile Tauri

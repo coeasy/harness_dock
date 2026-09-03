@@ -140,6 +140,7 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
     const operation = (async (): Promise<RuntimeSession> => {
       if (pendingDisconnect) await pendingDisconnect
       this.disconnectRequested = false
+      if (this.session) return this.session
       const session = await this.connectImpl()
       if (this.disconnectRequested) {
         this.session = undefined

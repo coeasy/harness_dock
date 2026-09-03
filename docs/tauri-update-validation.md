@@ -4,7 +4,7 @@ v0.2.0 的桌面更新只由 Tauri updater 负责，Electron updater、`app-upda
 
 ## 运行链路
 
-1. Shell 菜单调用 `app.update.check` 或 `app.update.install`。
+1. 远程 Harness Shell 只请求 `diagnostics.open`；本地诊断面通过 Host Protocol v2 请求 `install-update`，Release 检查在 Rust 更新流程内部完成。
 2. Rust 原生层访问当前稳定 GitHub Release，校验版本、平台和资产信息。
 3. 只有配置 `HARNESSDOCK_UPDATER_PUBLIC_KEY` 且 Release 提供四个平台匹配的 `.sig` 与 `latest.json` 时，`app.update.install` 才允许下载。
 4. Tauri updater 校验签名后安装，先执行受控 Runtime/Gateway 清理，再重启客户端。
@@ -15,7 +15,6 @@ v0.2.0 的桌面更新只由 Tauri updater 负责，Electron updater、`app-upda
 ```bash
 pnpm check:versions
 pnpm check:release
-pnpm --filter @dsh/tauri bundle:sidecar
 pnpm tauri:check
 pnpm test
 ```

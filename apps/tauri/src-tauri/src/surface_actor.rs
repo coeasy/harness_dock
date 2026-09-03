@@ -25,7 +25,6 @@ pub(crate) enum SurfaceOperation {
     Refresh,
     Restart,
     SafeMode,
-    Update,
     Diagnostics,
 }
 

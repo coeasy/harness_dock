@@ -5,15 +5,16 @@ import { describe, expect, it } from 'vitest'
 import { apply, service } from '../src/index.ts'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const read = (relative: string) => readFileSync(path.join(packageRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('independent Harness Shell dsh plugin', () => {
   it('publishes a versioned manifest and distributable entrypoint', () => {
     const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'))
     const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'manifest.json'), 'utf8'))
-    const entry = readFileSync(path.join(packageRoot, 'src', 'index.ts'), 'utf8')
-    const web = readFileSync(path.join(packageRoot, 'src', 'web', 'shell.js'), 'utf8')
-    const bundledEntry = readFileSync(path.join(packageRoot, 'lib', 'index.js'), 'utf8')
-    const bundledWeb = readFileSync(path.join(packageRoot, 'web', 'shell.js'), 'utf8')
+    const entry = read('src/index.ts')
+    const web = read('src/web/shell.js')
+    const bundledEntry = read('lib/index.js')
+    const bundledWeb = read('web/shell.js')
     expect(packageJson.private).not.toBe(true)
     expect(packageJson.files).toEqual(expect.arrayContaining(['lib', 'manifest.json', 'web']))
     expect(manifest).toMatchObject({
@@ -30,7 +31,10 @@ describe('independent Harness Shell dsh plugin', () => {
     expect(web).toContain('runtime.safe-mode')
     expect(web).toContain('gateway.manage')
     expect(web).toContain('移动设备 / Gateway')
-    expect(web).toContain('app.update.install')
+    expect(web).toContain('diagnostics.open')
+    expect(web).not.toContain('runtime.clear-quarantine')
+    expect(web).not.toContain('app.update.install')
+    expect(web).not.toContain('app.quit')
     expect(web).toContain('isWindowCommand')
     expect(web).toContain('setBusinessActionsDisabled')
     expect(web).toContain("window.addEventListener('pagehide'")

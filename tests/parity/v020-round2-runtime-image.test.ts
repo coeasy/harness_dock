@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8')
+const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('v0.2.0 Round 2 immutable Runtime image', () => {
   it('seals the final post-pruning payload with a deterministic content identity', () => {
@@ -49,6 +49,6 @@ describe('v0.2.0 Round 2 immutable Runtime image', () => {
 
     expect(architecture).toContain('Immutable Embedded Runtime')
     expect(architecture).toContain('首次启动不下载 Node 或 dsh')
-    expect(architecture).toContain('Runtime manifest/hash')
+    expect(architecture).toContain('Runtime manifest/image identity/hash')
   })
 })

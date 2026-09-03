@@ -24,7 +24,6 @@ const BRIDGE_SCRIPT: &str = r#"
     'web.reload': 'refresh-harness',
     'web.restart': 'restart-runtime',
     'runtime.safe-mode': 'start-safe-mode',
-    'runtime.clear-quarantine': 'clear-quarantine',
     'gateway.manage': 'show-gateway',
     'diagnostics.open': 'show-diagnostics'
   });

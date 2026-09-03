@@ -4,7 +4,6 @@
   const $ = (id) => document.getElementById(id)
   let requestSequence = 0
   let lastSequence = 0
-  let lastRevision = 0
   let unlistenHostEvent = null
 
   function call(command, args) {
@@ -40,8 +39,9 @@
 
   function render(snapshot) {
     if (!snapshot) return
-    lastSequence = Number(snapshot.eventSequence || 0)
-    lastRevision = Number(snapshot.revision || 0)
+    const sequence = Number(snapshot.eventSequence || 0)
+    if (!Number.isSafeInteger(sequence) || sequence < lastSequence) return
+    lastSequence = sequence
     const phase = snapshot.runtimePhase || 'stopped'
     $('runtime-state').textContent = phase
     const lines = [
@@ -90,6 +90,7 @@
       setStatus($('update-detail'), '更新操作已交给 UpdateActor；状态变化将通过 HostEvent 推送。')
     } catch (error) {
       setStatus($('update-detail'), message(error), true)
+    } finally {
       button.disabled = false
     }
   }
@@ -100,15 +101,13 @@
     unlistenHostEvent = await listen('harnessdock://host-event', async (event) => {
       const payload = event?.payload || {}
       const sequence = Number(payload.sequence || 0)
-      const revision = Number(payload.revision || 0)
-      if (sequence <= lastSequence && revision <= lastRevision) return
+      if (!Number.isSafeInteger(sequence) || sequence <= lastSequence) return
       if (lastSequence && sequence > lastSequence + 1) {
         // A lost event is repaired by a full source-of-truth snapshot.
         await refresh()
         return
       }
       lastSequence = sequence
-      lastRevision = revision
       await refresh()
     })
   }
@@ -120,8 +119,14 @@
     try { await call('diagnostics_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
   })
 
-  void refresh()
-  void subscribe().catch((error) => setStatus($('runtime-detail'), message(error), true))
+  void (async () => {
+    try {
+      await subscribe()
+      await refresh()
+    } catch (error) {
+      setStatus($('runtime-detail'), message(error), true)
+    }
+  })()
   window.addEventListener('pagehide', () => {
     if (typeof unlistenHostEvent === 'function') unlistenHostEvent()
   }, { once: true })

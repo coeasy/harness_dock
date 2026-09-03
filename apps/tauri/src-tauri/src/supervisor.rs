@@ -48,10 +48,7 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
     if state.quitting.swap(true, Ordering::SeqCst) {
         return;
     }
-    if let Ok(mut desired) = state.desired.lock() {
-        desired.app = crate::reconciler::AppDesiredState::Exiting;
-        desired.revision = desired.revision.saturating_add(1);
-    }
+    state.revision.fetch_add(1, Ordering::AcqRel);
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         wait_for_managed_processes(handle.clone()).await;

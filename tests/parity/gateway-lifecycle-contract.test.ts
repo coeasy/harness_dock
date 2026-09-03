@@ -33,7 +33,7 @@ describe('Gateway lifecycle admission contract', () => {
       path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
       'utf8',
     )
-    const stop = source.slice(source.indexOf('pub(crate) fn stop_managed'))
+    const stop = source.slice(source.indexOf('fn stop_managed_inner'))
     const take = stop.indexOf('actor.begin_stop()')
     const stopServer = stop.indexOf('server.stop()')
     const settle = stop.indexOf('actor.settle_stopped()')

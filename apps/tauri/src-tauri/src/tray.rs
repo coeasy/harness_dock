@@ -4,8 +4,10 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
+use url::Url;
 
 fn show_primary(app: &AppHandle) {
+    let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>());
     if let Some(window) = app.get_webview_window("harness") {
         // SurfaceActor is the only source of truth for Harness navigation.
         // Never reintroduce a parallel harness_loading AtomicBool.
@@ -15,11 +17,30 @@ fn show_primary(app: &AppHandle) {
             .lock()
             .map(|surface| surface.phase() == crate::surface_actor::SurfacePhase::Loading)
             .unwrap_or(false);
-        if window.is_visible().unwrap_or(false) || !loading {
-            let _ = window.show();
-            let _ = window.set_focus();
+        if loading && lease.is_some() {
+            if let Some(splash) = app.get_webview_window("splash") {
+                let _ = splash.show();
+                let _ = splash.set_focus();
+            }
             return;
         }
+        if lease.as_ref().is_some_and(|lease| {
+            window
+                .url()
+                .ok()
+                .and_then(|url| Url::parse(url.as_str()).ok())
+                .is_some_and(|url| url.origin().ascii_serialization() == lease.origin)
+        }) {
+            // Re-open through the Host Kernel so a tray click revalidates the
+            // current RuntimeLease instead of resurfacing an old Runtime URL.
+            desktop::spawn_intent(app, workflow::HostIntent::ActivatePrimary);
+            return;
+        }
+        let _ = window.hide();
+    }
+    if lease.is_some() {
+        desktop::spawn_intent(app, workflow::HostIntent::ActivatePrimary);
+        return;
     }
     if let Some(window) = app.get_webview_window("splash") {
         if window.is_visible().unwrap_or(false) {
@@ -27,6 +48,10 @@ fn show_primary(app: &AppHandle) {
             let _ = window.set_focus();
             return;
         }
+    }
+    if let Some(window) = app.get_webview_window("control") {
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 

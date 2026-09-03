@@ -53,6 +53,7 @@ afterEach(async () => {
     expect(session.provider).toBe('remote')
     expect(duplicate).toBe(session)
     expect(session.appUrl).toContain('/api/harnessdock/connect?token=')
+    expect(await provider.connect()).toBe(session)
     expect((await provider.health()).ok).toBe(true)
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })

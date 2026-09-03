@@ -12,6 +12,7 @@ describe('Harness shell contract', () => {
     expect(SHELL_API_VERSION).toBe(1)
     expect(SHELL_COMMANDS).toContain('web.reload')
     expect(SHELL_COMMANDS).toContain('runtime.safe-mode')
+    expect(SHELL_COMMANDS).toContain('gateway.manage')
     expect(SHELL_COMMANDS).toContain('app.update.install')
     expect(isShellCommandName('window.close')).toBe(true)
     expect(isShellCommandName('settings.open')).toBe(false)

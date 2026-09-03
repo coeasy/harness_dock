@@ -28,7 +28,7 @@ if (values.help) {
 Options:
       --skip-install    skip pnpm install
       --skip-tests      skip unit tests
-      --check-only      bundle the sidecar and run cargo check only
+      --check-only      run the Rust host check only
   -h, --help            show this help
 
 The Tauri host is the only desktop build target. Cross-platform release
@@ -67,7 +67,6 @@ if (!values['skip-tests']) run(pnpmCommand, ['test'], 'unit tests')
 
 run(pnpmCommand, ['--filter', '@dsh/plugin-embedded-client', 'build'], 'build embedded client plugin')
 run(pnpmCommand, ['--filter', '@dsh/plugin-harness-shell', 'build'], 'build independent Harness Shell plugin')
-run(pnpmCommand, ['--filter', '@dsh/tauri', 'bundle:sidecar'], 'bundle Gateway sidecar')
 run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:check'], 'check Tauri Rust host')
 if (!values['check-only']) run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:build'], 'build Tauri client')
 
