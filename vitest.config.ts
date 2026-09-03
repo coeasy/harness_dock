@@ -9,5 +9,6 @@ export default defineConfig({
     ],
     exclude: ['**/node_modules/**', '**/dist/**', '**/out/**'],
     environment: 'node',
+    reporters: process.env.GITHUB_ACTIONS ? ['default', 'github-actions'] : ['default'],
   },
 })
