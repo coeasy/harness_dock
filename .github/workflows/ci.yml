@@ -54,18 +54,25 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/tauri/src-tauri
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm --filter @dsh/plugin-embedded-client build
       - run: pnpm --filter @dsh/plugin-harness-shell build
+      - name: Verify publishable Harness Shell package
+        run: node scripts/check-shell-package.mjs
       - name: Bundle and validate Gateway sidecar
         run: pnpm --filter @dsh/tauri bundle:sidecar
+      - name: Check Tauri Rust formatting
+        run: cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml -- --check
       - name: Check Tauri Rust host
-        run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
+        run: cargo check --locked --manifest-path apps/tauri/src-tauri/Cargo.toml
       - name: Test Tauri runtime recovery logic
-        run: cargo test --manifest-path apps/tauri/src-tauri/Cargo.toml --lib
+        run: cargo test --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --lib
       - name: Verify Tauri version contract
         shell: bash
         run: |
@@ -75,6 +82,7 @@ jobs:
           cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/tauri/src-tauri/Cargo.toml | head -1)"
           test "$tauri_version" = "$root_version"
           test "$cargo_version" = "$root_version"
+          test -s apps/tauri/src-tauri/Cargo.lock
           test -s apps/tauri/src-tauri/resources/gateway-sidecar.mjs
 
   sync:
