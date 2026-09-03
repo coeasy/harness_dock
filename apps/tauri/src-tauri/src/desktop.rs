@@ -95,6 +95,23 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 }
 
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // Desktop owns the Host Kernel and single-instance admission. Keeping these
+    // here lets lib.rs remain a composition root while mobile builds exclude
+    // the entire Native Host control plane.
+    crate::host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
+    match crate::single_instance::install(app.handle().clone()).map_err(std::io::Error::other)? {
+        crate::single_instance::InstallOutcome::Primary(guard) => {
+            *app.state::<AppState>()
+                .single_instance
+                .lock()
+                .map_err(|_| std::io::Error::other("single-instance state lock poisoned"))? = Some(guard);
+        }
+        crate::single_instance::InstallOutcome::SecondaryHandedOff => {
+            app.handle().exit(0);
+            return Ok(());
+        }
+    }
+
     // Never mutate the process-global PATH here. Runtime/tool processes resolve
     // packaged executables explicitly and receive any environment overrides on
     // their own Command, so plugins cannot change the host's executable search
@@ -153,9 +170,6 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
             event: tauri::WindowEvent::Destroyed,
             ..
         } if label == "control" && !has_primary_surface(app_handle) => {
-            // Recovery is an on-demand surface, not a permanent hidden owner.
-            // If the user closes the last visible recovery surface and there is
-            // no tray/primary surface, exit through the supervised path.
             if !app_handle
                 .state::<AppState>()
                 .tray_available
