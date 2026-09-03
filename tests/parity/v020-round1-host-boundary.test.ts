@@ -48,7 +48,7 @@ describe('v0.2.0 Round 1 host boundaries', () => {
     const nodePrune = read('packages/client-runtime/src/node-runtime-prune.ts')
     const plan = read('docs/v0.2.0-architecture-five-round-final.md')
 
-    expect(check).toContain('resource_path(&app, "dsh-runtime")')
+    expect(check).toContain('canonical resource_path(app, "dsh-runtime") contract')
     expect(check).toContain('first-launch Runtime startup must not download Node or dsh')
     expect(runtimePackage).toContain('prune-node-cli.ts')
     expect(nodePrune).toContain("path.join('node_modules', 'npm')")
