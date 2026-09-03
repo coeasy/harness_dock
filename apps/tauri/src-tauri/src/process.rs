@@ -49,12 +49,20 @@ pub(crate) fn spawn_registered(
     registry: &StartingProcessRegistry,
     quitting: &std::sync::atomic::AtomicBool,
 ) -> Result<(Child, StartingProcessGuard), String> {
-    let mut pids = registry
-        .lock()
-        .map_err(|_| "启动进程注册表已损坏。".to_string())?;
-    if quitting.load(std::sync::atomic::Ordering::Acquire) {
-        return Err("HarnessDock 正在退出，已拒绝启动后台进程。".into());
+    // Admission uses short critical sections only. Spawning a process and
+    // assigning its Windows Job Object can block, so neither operation may run
+    // while the registry mutex is held. The second check closes the race with
+    // request_exit: a child created after shutdown begins is killed before it
+    // can become a published managed process.
+    {
+        let _pids = registry
+            .lock()
+            .map_err(|_| "启动进程注册表已损坏。".to_string())?;
+        if quitting.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("HarnessDock 正在退出，已拒绝启动后台进程。".into());
+        }
     }
+
     let mut child = command
         .spawn()
         .map_err(|error| format!("无法启动受管后台进程: {error}"))?;
@@ -70,8 +78,28 @@ pub(crate) fn spawn_registered(
         }
     };
 
+    let mut pids = registry
+        .lock()
+        .map_err(|_| {
+            stop_process_tree(pid);
+            let _ = child.kill();
+            let _ = child.wait();
+            "启动进程注册表已损坏。".to_string()
+        })?;
+    if quitting.load(std::sync::atomic::Ordering::Acquire) {
+        drop(pids);
+        #[cfg(windows)]
+        if let Some(job) = job.as_ref() {
+            job.terminate();
+        }
+        stop_process_tree(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("HarnessDock 正在退出，已取消刚启动的后台进程。".into());
+    }
     pids.insert(pid);
     drop(pids);
+
     Ok((
         child,
         StartingProcessGuard {
