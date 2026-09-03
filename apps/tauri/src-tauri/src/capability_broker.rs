@@ -33,16 +33,7 @@ pub(crate) const ALL_CAPABILITIES: [Capability; 10] = [
 ];
 
 pub(crate) fn capability_for(command: &HostCommand) -> Capability {
-    match command {
-        HostCommand::RefreshHarness => Capability::WebReload,
-        HostCommand::RestartRuntime => Capability::RuntimeRestart,
-        HostCommand::StartSafeMode => Capability::RuntimeSafeMode,
-        HostCommand::ClearQuarantine => Capability::RuntimeClearQuarantine,
-        HostCommand::ShowGateway => Capability::GatewayManage,
-        HostCommand::ShowDiagnostics => Capability::DiagnosticsRead,
-        HostCommand::InstallUpdate => Capability::UpdateInstall,
-        HostCommand::Quit => Capability::AppQuit,
-    }
+    command.capability()
 }
 
 pub(crate) fn authorize(request: &AuthorizationRequest<'_>, lease: Option<&RuntimeLease>) -> Decision {
