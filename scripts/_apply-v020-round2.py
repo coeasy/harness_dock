@@ -1,0 +1,154 @@
+from pathlib import Path
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one anchor, found {count}")
+    return text.replace(old, new, 1)
+
+
+app = Path("apps/tauri/web/app.js")
+text = app.read_text()
+anchor = "  const $ = (id) => document.getElementById(id)\n"
+helper = r'''  const $ = (id) => document.getElementById(id)
+
+  // Native Runtime/Gateway state may legitimately contain one-time launch
+  // credentials. Keep the real URL in memory for navigation, but strip all
+  // credentials, query/fragment data and common secret key/value forms before
+  // anything reaches a user-visible status surface.
+  function publicText(value) {
+    const raw = value && typeof value === 'object' && 'message' in value
+      ? String(value.message || '')
+      : String(value ?? '')
+    const withoutUrls = raw.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (candidate) => {
+      try {
+        const url = new URL(candidate)
+        url.username = ''
+        url.password = ''
+        url.search = ''
+        url.hash = ''
+        return url.toString()
+      } catch {
+        return candidate.replace(/[?#].*$/, '')
+      }
+    })
+    return withoutUrls
+      .replace(/\b(token|authorization|password|secret|api[-_]?key)\b\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+      .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+  }
+
+  function safeDisplayUrl(value) {
+    if (!value) return ''
+    try {
+      const url = new URL(String(value))
+      url.username = ''
+      url.password = ''
+      url.search = ''
+      url.hash = ''
+      return url.toString()
+    } catch {
+      return publicText(value)
+    }
+  }
+'''
+text = replace_once(text, anchor, helper, "control publicText helper")
+text = replace_once(
+    text,
+    "    element.textContent = value || ''\n",
+    "    element.textContent = bad ? publicText(value) : (value || '')\n",
+    "status redaction boundary",
+)
+text = replace_once(
+    text,
+    "    const base = [current.dshVersion || '', node, current.appUrl].filter(Boolean).join(' · ')\n",
+    "    const base = [current.dshVersion || '', node, safeDisplayUrl(current.appUrl)].filter(Boolean).join(' · ')\n",
+    "runtime URL display",
+)
+text = replace_once(
+    text,
+    "    status(hostDetail, current.running ? `Local ${current.localUrl || '-'}\\nPublic ${current.publicUrl || '-'}` : 'Gateway 尚未启动。')\n",
+    "    status(hostDetail, current.running ? `Local ${safeDisplayUrl(current.localUrl) || '-'}\\nPublic ${safeDisplayUrl(current.publicUrl) || '-'}` : 'Gateway 尚未启动。')\n",
+    "gateway URL display",
+)
+app.write_text(text)
+
+shell = Path("packages/plugin-harness-shell/web/shell.js")
+text = shell.read_text()
+anchor = "  const state = { busy: false, maximized: false, mounted: false }\n\n"
+helper = r'''  const state = { busy: false, maximized: false, mounted: false }
+
+  // Shell errors can originate in native IPC or third-party hosts. Never put a
+  // reusable launch token, Authorization value, password or query string into
+  // the Harness document even though textContent already prevents HTML injection.
+  const publicText = (value) => {
+    const raw = value && typeof value === 'object' && 'message' in value
+      ? String(value.message || '')
+      : String(value ?? '')
+    const withoutUrls = raw.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (candidate) => {
+      try {
+        const url = new URL(candidate)
+        url.username = ''
+        url.password = ''
+        url.search = ''
+        url.hash = ''
+        return url.toString()
+      } catch {
+        return candidate.replace(/[?#].*$/, '')
+      }
+    })
+    return withoutUrls
+      .replace(/\b(token|authorization|password|secret|api[-_]?key)\b\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+      .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+  }
+
+'''
+text = replace_once(text, anchor, helper, "shell publicText helper")
+text = replace_once(
+    text,
+    "      toast.textContent = message\n",
+    "      toast.textContent = publicText(message)\n",
+    "shell toast redaction",
+)
+shell.write_text(text)
+
+Path("tests/parity/public-diagnostics-redaction.test.ts").write_text(r'''import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8')
+
+describe('public diagnostics secret boundary', () => {
+  it('never renders the Runtime launch URL verbatim in the recovery/control page', () => {
+    const control = read('apps/tauri/web/app.js')
+    expect(control).toContain('function publicText(value)')
+    expect(control).toContain('function safeDisplayUrl(value)')
+    expect(control).toContain("bad ? publicText(value) : (value || '')")
+    expect(control).toContain('safeDisplayUrl(current.appUrl)')
+    expect(control).toContain('safeDisplayUrl(current.localUrl)')
+    expect(control).toContain('safeDisplayUrl(current.publicUrl)')
+    expect(control).not.toContain("[current.dshVersion || '', node, current.appUrl]")
+    expect(control).toContain("url.search = ''")
+    expect(control).toContain("url.hash = ''")
+    expect(control).toContain('Bearer [redacted]')
+  })
+
+  it('sanitizes every Shell toast, including bridge event errors', () => {
+    const shell = read('packages/plugin-harness-shell/web/shell.js')
+    expect(shell).toContain('const publicText = (value) =>')
+    expect(shell).toContain('toast.textContent = publicText(message)')
+    expect(shell).not.toContain('toast.textContent = message')
+    expect(shell).toContain("url.search = ''")
+    expect(shell).toContain('Bearer [redacted]')
+    expect(shell).toContain("showToast(event.message || '外壳状态异常')")
+  })
+
+  it('keeps real credential-bearing URLs only on internal navigation paths', () => {
+    const control = read('apps/tauri/web/app.js')
+    expect(control).toContain('await openHarnessWithRetry(currentRuntime.appUrl)')
+    expect(control).toContain('window.location.assign(paired.connectUrl)')
+  })
+})
+''')
