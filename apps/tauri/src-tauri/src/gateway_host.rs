@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fs::File,
     io::{self, Read, Write},
-    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
+    net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
@@ -18,6 +18,7 @@ use crate::{runtime_actor::RuntimeLease, AppState};
 
 const MAX_GATEWAY_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_GATEWAY_CONNECTIONS: usize = 64;
+const GATEWAY_UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -117,7 +118,11 @@ struct GatewayShared {
     runtime_lease: RuntimeLease,
     public_url: String,
     secure_cookie: bool,
+    stop: Arc<AtomicBool>,
     active_connections: AtomicUsize,
+    next_connection_id: AtomicUsize,
+    connection_streams: Mutex<HashMap<usize, Vec<TcpStream>>>,
+    connection_workers: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 pub(crate) struct NativeGateway {
@@ -137,6 +142,8 @@ impl NativeGateway {
         if let Some(handle) = self.thread.take() {
             let _ = handle.join();
         }
+        shutdown_active_connections(&self.shared);
+        join_connection_workers(&self.shared);
     }
 
     fn status(&self) -> GatewayHostStatus {
@@ -295,14 +302,18 @@ fn spawn_native_gateway(lease: RuntimeLease, port: u16, public_url: Option<Strin
     let local_url = format!("http://127.0.0.1:{}/", local_addr.port());
     let public_url = validated_public_gateway_url(public_url, &local_url)?;
     let secure_cookie = public_url.starts_with("https://");
+    let stop = Arc::new(AtomicBool::new(false));
     let shared = Arc::new(GatewayShared {
         registry: Mutex::new(GatewayRegistry::default()),
         runtime_lease: lease.clone(),
         public_url: public_url.clone(),
         secure_cookie,
+        stop: Arc::clone(&stop),
         active_connections: AtomicUsize::new(0),
+        next_connection_id: AtomicUsize::new(1),
+        connection_streams: Mutex::new(HashMap::new()),
+        connection_workers: Mutex::new(Vec::new()),
     });
-    let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let thread_shared = Arc::clone(&shared);
     let handle = thread::Builder::new()
@@ -320,11 +331,90 @@ fn spawn_native_gateway(lease: RuntimeLease, port: u16, public_url: Option<Strin
     })
 }
 
+struct ActiveConnectionGuard {
+    id: usize,
+    shared: Arc<GatewayShared>,
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut streams) = self.shared.connection_streams.lock() {
+            streams.remove(&self.id);
+        }
+        self.shared.active_connections.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn register_connection_stream(shared: &GatewayShared, id: usize, stream: &TcpStream) -> Result<(), String> {
+    let shutdown_stream = stream.try_clone().map_err(|error| error.to_string())?;
+    let mut streams = shared
+        .connection_streams
+        .lock()
+        .map_err(|_| "Gateway connection registry poisoned".to_string())?;
+    if shared.stop.load(Ordering::Acquire) {
+        let _ = shutdown_stream.shutdown(Shutdown::Both);
+        return Err("Native Gateway is stopping".into());
+    }
+    streams.entry(id).or_default().push(shutdown_stream);
+    Ok(())
+}
+
+fn shutdown_active_connections(shared: &GatewayShared) {
+    let streams = shared
+        .connection_streams
+        .lock()
+        .map(|mut registry| {
+            registry
+                .drain()
+                .flat_map(|(_, streams)| streams)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for stream in streams {
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+}
+
+fn reap_finished_connection_workers(shared: &GatewayShared) {
+    let finished = shared
+        .connection_workers
+        .lock()
+        .map(|mut workers| {
+            let mut finished = Vec::new();
+            let mut index = 0;
+            while index < workers.len() {
+                if workers[index].is_finished() {
+                    finished.push(workers.swap_remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            finished
+        })
+        .unwrap_or_default();
+    for worker in finished {
+        let _ = worker.join();
+    }
+}
+
+fn join_connection_workers(shared: &GatewayShared) {
+    let workers = shared
+        .connection_workers
+        .lock()
+        .map(|mut workers| workers.drain(..).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for worker in workers {
+        let _ = worker.join();
+    }
+}
+
 fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc<GatewayShared>) {
     while !stop.load(Ordering::Acquire) {
+        reap_finished_connection_workers(&shared);
         match listener.accept() {
             Ok((mut stream, peer)) => {
                 if stop.load(Ordering::Acquire) {
+                    let _ = stream.shutdown(Shutdown::Both);
                     break;
                 }
                 let active = shared.active_connections.fetch_add(1, Ordering::AcqRel);
@@ -333,18 +423,44 @@ fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc
                     let _ = write_status(&mut stream, 503, "Service Unavailable", b"gateway connection limit reached");
                     continue;
                 }
+                let connection_id = shared.next_connection_id.fetch_add(1, Ordering::AcqRel);
+                if let Err(error) = register_connection_stream(&shared, connection_id, &stream) {
+                    shared.active_connections.fetch_sub(1, Ordering::AcqRel);
+                    eprintln!("Native Gateway connection registration failed: {error}");
+                    continue;
+                }
                 let connection_shared = Arc::clone(&shared);
                 let spawned = thread::Builder::new()
                     .name("harnessdock-gateway-connection".into())
                     .spawn(move || {
-                        if let Err(error) = handle_connection(stream, peer, Arc::clone(&connection_shared)) {
+                        let _guard = ActiveConnectionGuard {
+                            id: connection_id,
+                            shared: Arc::clone(&connection_shared),
+                        };
+                        if let Err(error) = handle_connection(
+                            stream,
+                            peer,
+                            connection_id,
+                            Arc::clone(&connection_shared),
+                        ) {
                             eprintln!("Native Gateway connection failed: {error}");
                         }
-                        connection_shared.active_connections.fetch_sub(1, Ordering::AcqRel);
                     });
-                if let Err(error) = spawned {
-                    shared.active_connections.fetch_sub(1, Ordering::AcqRel);
-                    eprintln!("Native Gateway connection thread failed: {error}");
+                match spawned {
+                    Ok(worker) => {
+                        if let Ok(mut workers) = shared.connection_workers.lock() {
+                            workers.push(worker);
+                        } else {
+                            let _ = worker.join();
+                        }
+                    }
+                    Err(error) => {
+                        if let Ok(mut streams) = shared.connection_streams.lock() {
+                            streams.remove(&connection_id);
+                        }
+                        shared.active_connections.fetch_sub(1, Ordering::AcqRel);
+                        eprintln!("Native Gateway connection thread failed: {error}");
+                    }
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -356,6 +472,8 @@ fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc
             }
         }
     }
+    shutdown_active_connections(&shared);
+    join_connection_workers(&shared);
 }
 
 struct ParsedRequest {
@@ -474,7 +592,12 @@ fn header<'a>(request: &'a ParsedRequest, name: &str) -> Option<&'a str> {
         .map(|(_, value)| value.as_str())
 }
 
-fn handle_connection(mut stream: TcpStream, peer: SocketAddr, shared: Arc<GatewayShared>) -> Result<(), String> {
+fn handle_connection(
+    mut stream: TcpStream,
+    peer: SocketAddr,
+    connection_id: usize,
+    shared: Arc<GatewayShared>,
+) -> Result<(), String> {
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(error) => {
@@ -502,7 +625,7 @@ fn handle_connection(mut stream: TcpStream, peer: SocketAddr, shared: Arc<Gatewa
         }
         "/api/harnessdock/pair" => handle_pair(&mut stream, peer.ip(), &request, &shared),
         "/api/harnessdock/connect" => handle_connect(&mut stream, &url, &shared),
-        _ => proxy_authenticated(stream, request, shared),
+        _ => proxy_authenticated(stream, request, connection_id, shared),
     }
 }
 
@@ -602,7 +725,34 @@ fn handle_connect(stream: &mut TcpStream, url: &Url, shared: &GatewayShared) -> 
     stream.write_all(response.as_bytes()).map_err(|error| error.to_string())
 }
 
-fn proxy_authenticated(mut client: TcpStream, request: ParsedRequest, shared: Arc<GatewayShared>) -> Result<(), String> {
+fn connect_upstream(host: &str, port: u16) -> Result<TcpStream, String> {
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("Native Gateway upstream address invalid: {error}"))?;
+    let mut last_error = None;
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, GATEWAY_UPSTREAM_CONNECT_TIMEOUT) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(format!(
+        "Native Gateway upstream connect failed: {}",
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no upstream address resolved".into())
+    ))
+}
+
+fn proxy_authenticated(
+    mut client: TcpStream,
+    request: ParsedRequest,
+    connection_id: usize,
+    shared: Arc<GatewayShared>,
+) -> Result<(), String> {
+    client
+        .set_read_timeout(None)
+        .map_err(|error| format!("failed to clear Gateway handshake timeout: {error}"))?;
     let session_token = cookie_value(header(&request, "cookie").unwrap_or_default(), "hd_session")
         .ok_or_else(|| "Gateway session cookie missing".to_string())?;
     let bootstrap = {
@@ -623,8 +773,8 @@ fn proxy_authenticated(mut client: TcpStream, request: ParsedRequest, shared: Ar
         .map_err(|_| "RuntimeLease origin invalid".to_string())?;
     let host = upstream.host_str().ok_or_else(|| "RuntimeLease origin host missing".to_string())?;
     let port = upstream.port().ok_or_else(|| "RuntimeLease origin port missing".to_string())?;
-    let mut upstream_stream = TcpStream::connect((host, port))
-        .map_err(|error| format!("Native Gateway upstream connect failed: {error}"))?;
+    let mut upstream_stream = connect_upstream(host, port)?;
+    register_connection_stream(&shared, connection_id, &upstream_stream)?;
     upstream_stream
         .set_nodelay(true)
         .map_err(|error| error.to_string())?;
@@ -676,6 +826,8 @@ fn proxy_authenticated(mut client: TcpStream, request: ParsedRequest, shared: Ar
         let _ = io::copy(&mut client_read, &mut upstream_write);
     });
     let _ = io::copy(&mut upstream_stream, &mut client);
+    let _ = client.shutdown(Shutdown::Both);
+    let _ = upstream_stream.shutdown(Shutdown::Both);
     let _ = forward.join();
     Ok(())
 }
@@ -981,6 +1133,14 @@ mod tests {
     fn cookies_are_parsed_without_exposing_other_values() {
         assert_eq!(cookie_value("a=1; hd_session=abc; b=2", "hd_session"), Some("abc".into()));
         assert_eq!(cookie_value("a=1", "hd_session"), None);
+    }
+
+    #[test]
+    fn upstream_connect_is_bounded_and_uses_resolved_socket_addresses() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connected = connect_upstream("127.0.0.1", port).unwrap();
+        assert_eq!(connected.peer_addr().unwrap().port(), port);
     }
 
     #[test]
