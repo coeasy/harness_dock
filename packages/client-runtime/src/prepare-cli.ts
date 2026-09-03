@@ -310,7 +310,6 @@ if (!nodeSource) {
     canCopyHostNode({
       hostPlatform: process.platform,
       targetPlatform: platform,
-      electronVersion: process.versions.electron,
     })
   ) {
     const target = path.join(dest, bundledNodeRel(platform))

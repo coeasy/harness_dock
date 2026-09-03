@@ -9,9 +9,11 @@ const PAIR_PATH: &str = "/api/harnessdock/pair";
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayHealth {
+    pub schema_version: u8,
     pub ok: bool,
     pub provider: Option<String>,
     pub app_url: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -32,7 +34,9 @@ fn is_loopback(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    host.parse::<IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
+    host.parse::<IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }
 
 fn normalize_gateway_origin(value: &str) -> Result<Url, String> {
@@ -40,11 +44,15 @@ fn normalize_gateway_origin(value: &str) -> Result<Url, String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("Gateway 地址不能包含用户名或密码。".into());
     }
-    let host = url.host_str().ok_or_else(|| "Gateway 地址缺少主机名。".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Gateway 地址缺少主机名。".to_string())?;
     let secure = url.scheme() == "https";
     let loopback_dev = url.scheme() == "http" && is_loopback(host);
     if !secure && !loopback_dev {
-        return Err("远程 Gateway 必须使用 HTTPS；HTTP 仅允许 localhost/loopback 开发环境。".into());
+        return Err(
+            "远程 Gateway 必须使用 HTTPS；HTTP 仅允许 localhost/loopback 开发环境。".into(),
+        );
     }
     if url.path() != "/" && !url.path().is_empty() {
         return Err("Gateway 地址必须是 origin 根地址，不能包含路径。".into());
@@ -57,7 +65,8 @@ fn normalize_gateway_origin(value: &str) -> Result<Url, String> {
 }
 
 fn endpoint(base: &Url, path: &str) -> Result<Url, String> {
-    base.join(path).map_err(|_| "无法构造 Gateway API 地址。".to_string())
+    base.join(path)
+        .map_err(|_| "无法构造 Gateway API 地址。".to_string())
 }
 
 #[tauri::command]
@@ -72,11 +81,28 @@ pub async fn gateway_health(base_url: String) -> Result<GatewayHealth, String> {
     if !response.status().is_success() {
         return Err(format!("Gateway health 返回 HTTP {}。", response.status()));
     }
-    response.json::<GatewayHealth>().await.map_err(|error| format!("Gateway health 响应无效: {error}"))
+    let health = response
+        .json::<GatewayHealth>()
+        .await
+        .map_err(|error| format!("Gateway health 响应无效: {error}"))?;
+    if health.schema_version != 1 || health.provider.as_deref() != Some("remote") {
+        return Err("Gateway health 响应不符合 HarnessDock v0.2.0 协议。".into());
+    }
+    if let Some(app_url) = health.app_url.as_deref() {
+        let app_origin = normalize_gateway_origin(app_url)?;
+        if app_origin.origin() != base.origin() {
+            return Err("Gateway health 返回了跨 origin 的 appUrl，已拒绝。".into());
+        }
+    }
+    Ok(health)
 }
 
 #[tauri::command]
-pub async fn pair_gateway(base_url: String, code: String, device_name: String) -> Result<PairResponse, String> {
+pub async fn pair_gateway(
+    base_url: String,
+    code: String,
+    device_name: String,
+) -> Result<PairResponse, String> {
     let base = normalize_gateway_origin(&base_url)?;
     let normalized_code: String = code.chars().filter(|ch| ch.is_ascii_digit()).collect();
     if normalized_code.len() != 8 {
@@ -89,7 +115,10 @@ pub async fn pair_gateway(base_url: String, code: String, device_name: String) -
 
     let response = reqwest::Client::new()
         .post(endpoint(&base, PAIR_PATH)?)
-        .json(&PairRequest { code: &normalized_code, device_name: name })
+        .json(&PairRequest {
+            code: &normalized_code,
+            device_name: name,
+        })
         .timeout(std::time::Duration::from_secs(8))
         .send()
         .await
@@ -105,13 +134,31 @@ pub async fn pair_gateway(base_url: String, code: String, device_name: String) -
         return Err(format!("Gateway 配对返回 HTTP {}。", response.status()));
     }
 
-    let paired = response.json::<PairResponse>().await.map_err(|error| format!("Gateway 配对响应无效: {error}"))?;
-    let connect = Url::parse(&paired.connect_url).map_err(|_| "Gateway 返回了无效连接 URL。".to_string())?;
+    let paired = response
+        .json::<PairResponse>()
+        .await
+        .map_err(|error| format!("Gateway 配对响应无效: {error}"))?;
+    let connect =
+        Url::parse(&paired.connect_url).map_err(|_| "Gateway 返回了无效连接 URL。".to_string())?;
     if connect.origin() != base.origin() {
         return Err("Gateway 返回了跨 origin 的连接 URL，已拒绝。".into());
     }
-    if connect.scheme() != "https" && !(connect.scheme() == "http" && connect.host_str().is_some_and(is_loopback)) {
+    if connect.scheme() != "https"
+        && !(connect.scheme() == "http" && connect.host_str().is_some_and(is_loopback))
+    {
         return Err("Gateway 返回了不安全的连接 URL，已拒绝。".into());
+    }
+    if connect.path() != "/api/harnessdock/connect"
+        || !connect.username().is_empty()
+        || connect.password().is_some()
+        || connect.fragment().is_some()
+        || connect.query_pairs().count() != 1
+        || connect
+            .query_pairs()
+            .find(|(key, value)| key == "token" && !value.is_empty())
+            .is_none()
+    {
+        return Err("Gateway 返回了无效的一次性连接 URL，已拒绝。".into());
     }
     Ok(paired)
 }

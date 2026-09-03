@@ -67,7 +67,7 @@ describe('inspectBundledRuntime', () => {
 })
 
 describe('canCopyHostNode', () => {
-  it('allows copying the host node.exe when targeting the same OS outside Electron', () => {
+  it('allows copying the host Node binary when targeting the same OS', () => {
     expect(
       canCopyHostNode({ hostPlatform: 'win32', targetPlatform: 'win32' }),
     ).toBe(true)
@@ -75,13 +75,6 @@ describe('canCopyHostNode', () => {
       canCopyHostNode({
         hostPlatform: 'win32',
         targetPlatform: 'linux',
-      }),
-    ).toBe(false)
-    expect(
-      canCopyHostNode({
-        hostPlatform: 'win32',
-        targetPlatform: 'win32',
-        electronVersion: '37.0.0',
       }),
     ).toBe(false)
   })

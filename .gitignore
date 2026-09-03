@@ -7,7 +7,7 @@ Thumbs.db
 *.log
 .cache/
 coverage/
-apps/desktop/release/
+apps/tauri/src-tauri/target/
 apps/perry/release/
 apps/perry/.perry/
 apps/vscode/resources/
@@ -15,7 +15,6 @@ runtimes/
 .tmp/
 .worktrees/
 .rundata/
-apps/desktop/build/generated*.png
 .env
 .env.local
 *.tgz

@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  dev-dsh.bat - start the dsh web process only (no Electron)
+rem  dev-dsh.bat - start the dsh web process only (no desktop client)
 rem
 rem  The embedded client plugin is injected and a ready file is
 rem  resolved; the web UI URL is printed to this console.

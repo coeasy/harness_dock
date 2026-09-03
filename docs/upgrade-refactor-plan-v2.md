@@ -1,6 +1,7 @@
-# HarnessDock 升级改造计划 v2
+# HarnessDock 升级改造计划 v2（历史文档）
 
 > 状态：规划稿（2026-08-28 基于当前仓库实测梳理）
+> 当前实现：v0.2.0 桌面宿主已统一为 Tauri；本文中的 Electron 兼容路线不再是执行要求。
 > 前置：`docs/upgrade-refactor-plan.md`（v1）中 Phase D/E/F 已全部落地，本文取代 v1 成为当前唯一有效规划
 > 事实基线见 §1（全部为实测数据，非估算）
 

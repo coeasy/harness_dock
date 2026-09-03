@@ -1,6 +1,6 @@
 {
   "name": "harnessdock",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "private": true,
   "description": "DeepSeek Harness full-capability client: embed official Web UI, pin docs+runtime to the same exact version.",
   "type": "module",
@@ -11,29 +11,29 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:versions": "node scripts/check-versions.mjs",
+    "check:versions": "node scripts/check-tauri-only.mjs && node scripts/check-versions.mjs && node scripts/generate-host-protocol.mjs --check",
+    "check:tauri-only": "node scripts/check-tauri-only.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check:size": "node scripts/check-size.mjs",
+    "check:embedded-runtime": "node scripts/check-embedded-runtime.mjs",
+    "generate:host-protocol": "node scripts/generate-host-protocol.mjs",
+    "check:host-protocol": "node scripts/generate-host-protocol.mjs --check",
     "perf:report": "node scripts/perf-report.mjs",
     "mark:released": "node scripts/mark-released.mjs",
-    "e2e": "pnpm --filter ./tests/e2e test",
+    "tauri:dev": "pnpm --filter @dsh/tauri tauri:dev",
+    "tauri:build": "pnpm --filter @dsh/tauri tauri:build",
+    "tauri:check": "pnpm --filter @dsh/tauri tauri:check",
+    "e2e": "pnpm --filter @dsh/parity-tests e2e",
     "build": "pnpm -r --if-present run build",
     "setup": "node scripts/bootstrap.mjs",
     "sync:dsh": "pnpm --filter @dsh/docs-sync start",
     "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
-    "build:desktop": "node scripts/build.mjs",
-    "pack:desktop": "pnpm --filter @dsh/desktop pack:current",
-    "pack:desktop:full": "pnpm --filter @dsh/desktop pack:current:full",
-    "pack:desktop:win": "pnpm --filter @dsh/desktop pack:win",
-    "pack:desktop:win:full": "pnpm --filter @dsh/desktop pack:win:full",
-    "pack:desktop:mac": "pnpm --filter @dsh/desktop pack:mac",
-    "pack:desktop:mac:full": "pnpm --filter @dsh/desktop pack:mac:full",
-    "pack:desktop:linux": "pnpm --filter @dsh/desktop pack:linux",
-    "pack:desktop:linux:full": "pnpm --filter @dsh/desktop pack:linux:full",
+    "build:desktop": "pnpm tauri:build",
     "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
     "parity": "pnpm --filter @dsh/parity-tests test",
     "dev:dsh": "node --import tsx scripts/dev-dsh.mjs",
-    "start:desktop": "pnpm --filter @dsh/desktop start"
+    "start:desktop": "pnpm tauri:dev",
+    "check:shell-package": "pnpm --filter @dsh/plugin-harness-shell build && node scripts/check-shell-package.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
@@ -41,11 +41,5 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "electron"
-    ]
   }
 }

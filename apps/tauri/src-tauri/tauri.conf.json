@@ -1,24 +1,16 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "HarnessDock",
-  "version": "0.2.9",
+  "version": "0.2.0",
   "identifier": "com.harnessdock.client",
-  "build": { "frontendDist": "../web" },
+  "build": {
+    "frontendDist": "../web",
+    "beforeDevCommand": "pnpm prepare:icons",
+    "beforeBuildCommand": "pnpm prepare:icons"
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      {
-        "label": "main",
-        "title": "HarnessDock",
-        "visible": false,
-        "width": 1180,
-        "height": 780,
-        "minWidth": 720,
-        "minHeight": 560,
-        "resizable": true,
-        "fullscreen": false,
-        "useHttpsScheme": true
-      },
       {
         "label": "splash",
         "title": "HarnessDock",
@@ -43,13 +35,23 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
     "shortDescription": "HarnessDock DeepSeek Harness client",
-    "longDescription": "Full-only Tauri desktop and mobile host for DeepSeek Harness with local desktop runtime and secure mobile gateway pairing.",
-    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "longDescription": "Full-only Tauri Native Host for DeepSeek Harness with sealed local Runtime and secure Rust-native mobile Gateway pairing.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "resources": {
       "../../../packages/docs-sync/origin.json": "origin.json",
       "../../../packages/plugin-embedded-client/lib/index.js": "plugin-embedded-client/index.js",
+      "../../../packages/plugin-harness-shell/lib/index.js": "plugin-harness-shell/index.js",
+      "../../../packages/plugin-harness-shell/web/shell.js": "plugin-harness-shell/web/shell.js",
       "resources/": ""
     },
     "windows": {
@@ -58,9 +60,6 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
-        "headerImage": "icons/installer-header.bmp",
-        "uninstallerHeaderImage": "icons/installer-header.bmp",
-        "sidebarImage": "icons/installer-sidebar.bmp",
         "installMode": "currentUser",
         "languages": ["English", "SimpChinese", "TradChinese"],
         "displayLanguageSelector": false

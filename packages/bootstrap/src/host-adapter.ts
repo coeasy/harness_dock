@@ -15,9 +15,9 @@ export interface RemoteGatewayPairResult {
 }
 
 /**
- * Host-neutral contract used by Electron during migration and by the Tauri
- * desktop/mobile surfaces. UI code must depend on this shape rather than on
- * Electron IPC, Tauri IPC, or a particular native framework.
+ * Host-neutral contract shared by the Tauri desktop/mobile surfaces and the
+ * editor extension. UI code must depend on this shape rather than on a native
+ * IPC implementation.
  */
 export interface HarnessHostAdapter {
   readonly profile: HarnessHostProfile

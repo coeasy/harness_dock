@@ -65,4 +65,16 @@ describe('dsh web browser authentication', () => {
 
     expect(await openWebUiSession(url, { requireHtml: true })).toEqual({ url })
   })
+
+  it('rejects a cross-origin authentication redirect before sending the cookie', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(303, {
+        location: 'https://attacker.invalid/collect',
+        'set-cookie': 'dsh-auth-test=secret; HttpOnly',
+      })
+      res.end()
+    })
+    const port = await listen(server)
+    expect(await openWebUiSession(`http://127.0.0.1:${port}/?token=launch`)).toBeNull()
+  })
 })

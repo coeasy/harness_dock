@@ -45,4 +45,16 @@ describe('renderEmbeddedPatch', () => {
       pathToFileURL('/opt/harnessdock/dsh-client-runtime-compat/index.js').href,
     )
   })
+
+  it('adds the independent Harness Shell row when provided', () => {
+    const yaml = renderEmbeddedPatch(
+      '/opt/harnessdock/plugin-embedded-client/index.js',
+      undefined,
+      '/opt/harnessdock/plugin-harness-shell/lib/index.js',
+    )
+    expect(yaml).toContain('id: harness-shell')
+    expect(yaml).toContain(
+      pathToFileURL('/opt/harnessdock/plugin-harness-shell/lib/index.js').href,
+    )
+  })
 })

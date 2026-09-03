@@ -4,4 +4,3 @@ packages:
   - tests/*
 onlyBuiltDependencies:
   - esbuild
-  - electron

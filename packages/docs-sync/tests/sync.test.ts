@@ -135,7 +135,7 @@ describe('syncDsh capability summary output', () => {
         npmIntegrity: 'sha512-abc',
         npmTarball: 'https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.1-rc.2.tgz',
         docsHash: hashDocs({ 'docs/user/guide/index.zh.md': GUIDE_MD }),
-        clientVersion: '0.1.0',
+        clientVersion: '0.2.0',
         now: '2026-01-01T00:00:00.000Z',
       })
       writeFileSync(tempPaths(dir).origin, `${JSON.stringify(expectedOrigin, null, 2)}\n`, 'utf8')

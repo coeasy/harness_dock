@@ -4,16 +4,23 @@ import path from 'node:path'
 import { type HarnessHostId } from './host-capabilities.ts'
 import { defaultSharedStateDir } from './host.ts'
 
-export type RuntimeLeaseHostInput = HarnessHostId | 'perry'
+/** Old owner names are read-only migration data; no runtime can acquire them. */
+export type LegacyRuntimeLeaseHost =
+  | 'electron'
+  | 'perry-desktop'
+  | 'perry-ios'
+  | 'perry-android'
+type RuntimeLeaseRecordHost = HarnessHostId | LegacyRuntimeLeaseHost
+export type RuntimeLeaseHostInput = HarnessHostId
 
 export interface RuntimeLeaseRecord {
   schemaVersion: 2
   token: string
   /** Canonical v0.2 owner identity. */
-  ownerHost: HarnessHostId
+  ownerHost: RuntimeLeaseRecordHost
   ownerPid: number
   /** @deprecated v0.1/v0.2 transition alias; use ownerHost. */
-  host: HarnessHostId
+  host: RuntimeLeaseRecordHost
   /** @deprecated v0.1/v0.2 transition alias; use ownerPid. */
   hostPid: number
   runtimePid?: number
@@ -82,17 +89,24 @@ export function isProcessAlive(pid: number): boolean {
 
 function isHarnessHostId(value: unknown): value is HarnessHostId {
   return (
-    value === 'electron' ||
     value === 'tauri' ||
-    value === 'perry-desktop' ||
-    value === 'perry-ios' ||
-    value === 'perry-android' ||
+    value === 'tauri-ios' ||
+    value === 'tauri-android' ||
     value === 'vscode'
   )
 }
 
+function isLegacyRuntimeLeaseHost(value: unknown): value is LegacyRuntimeLeaseHost {
+  return (
+    value === 'electron' ||
+    value === 'perry-desktop' ||
+    value === 'perry-ios' ||
+    value === 'perry-android'
+  )
+}
+
 export function normalizeRuntimeLeaseHost(host: RuntimeLeaseHostInput): HarnessHostId {
-  return host === 'perry' ? 'perry-desktop' : host
+  return host
 }
 
 function positiveProtocolVersion(value: unknown): number {
@@ -104,12 +118,12 @@ function normalizeRecord(parsed: unknown): RuntimeLeaseRecord | null {
   const record = parsed as Record<string, unknown>
   if (typeof record.token !== 'string') return null
 
-  let ownerHost: HarnessHostId
+  let ownerHost: RuntimeLeaseRecordHost
   let ownerPid: number
   if (record.schemaVersion === 2) {
-    const candidateHost = isHarnessHostId(record.ownerHost)
+    const candidateHost = isHarnessHostId(record.ownerHost) || isLegacyRuntimeLeaseHost(record.ownerHost)
       ? record.ownerHost
-      : isHarnessHostId(record.host)
+      : isHarnessHostId(record.host) || isLegacyRuntimeLeaseHost(record.host)
         ? record.host
         : null
     const candidatePid = Number.isInteger(record.ownerPid)
@@ -287,8 +301,20 @@ export async function acquireRuntimeLease(
         throw new RuntimeLeaseConflictError(holder)
       }
 
-      await rm(activePath, { force: true }).catch(() => undefined)
-      await rm(lockPath, { force: true }).catch(() => undefined)
+      // Reclaim the lock by moving it out of the ownership path. Removing it
+      // directly has a TOCTOU window: another host can acquire a freshly
+      // created lock between the stale check and rm(lockPath), after which
+      // this process would delete the new owner's lock. The active record is
+      // deliberately left alone; the next owner replaces it atomically, and
+      // touching it here would have the same race after a new acquisition.
+      const stalePath = `${lockPath}.${randomUUID()}.stale`
+      try {
+        await rename(lockPath, stalePath)
+      } catch (reclaimError) {
+        if ((reclaimError as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw reclaimError
+      }
+      await rm(stalePath, { force: true }).catch(() => undefined)
     }
   }
 

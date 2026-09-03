@@ -1,7 +1,7 @@
 import type { ParsedUrl } from './types.ts'
 
 // Keep the complete loopback URL. dsh 0.1.2+ appends a browser launch token
-// (`/?token=...`) which must survive until Electron navigates to the page.
+// (`/?token=...`) which must survive until the native host navigates to the page.
 const LOOPBACK = /(https?:\/\/127\.0\.0\.1:(\d+)(?:\/[^\s)\]}>'"\u001b]*)?)/i
 const WEB_TOKEN = /([?&]token=)[^&\s)\]}>'"\u001b]+/gi
 

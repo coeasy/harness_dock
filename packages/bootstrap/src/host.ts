@@ -1,8 +1,8 @@
 import os from 'node:os'
 import path from 'node:path'
 
-export type DesktopHostKind = 'electron' | 'tauri' | 'perry'
-export type DesktopHostChannel = 'stable' | 'lts' | 'preview'
+export type DesktopHostKind = 'tauri'
+export type DesktopHostChannel = 'stable'
 
 export interface DesktopHostCapabilities {
   downloads: boolean
@@ -23,23 +23,6 @@ export interface DesktopHostDescriptor {
   capabilities: DesktopHostCapabilities
 }
 
-export const ELECTRON_HOST: DesktopHostDescriptor = {
-  kind: 'electron',
-  channel: 'lts',
-  productName: 'HarnessDock Legacy Electron',
-  appId: 'com.dsh.client',
-  capabilities: {
-    downloads: true,
-    filePicker: true,
-    clipboardPermission: true,
-    nativeJsBridge: true,
-    serviceWorkers: true,
-    autoUpdate: true,
-    tray: true,
-    notifications: true,
-  },
-}
-
 export const TAURI_HOST: DesktopHostDescriptor = {
   kind: 'tauri',
   channel: 'stable',
@@ -53,17 +36,8 @@ export const TAURI_HOST: DesktopHostDescriptor = {
     serviceWorkers: true,
     autoUpdate: true,
     tray: true,
-    notifications: true,
+    notifications: false,
   },
-}
-
-/** @deprecated Read/upgrade compatibility only. Perry is not an active v0.2 build target. */
-export const PERRY_HOST: DesktopHostDescriptor = {
-  ...TAURI_HOST,
-  kind: 'perry',
-  channel: 'preview',
-  productName: 'HarnessDock Legacy Perry',
-  appId: 'com.dsh.client.perry.preview',
 }
 
 export function defaultSharedStateDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -78,7 +52,7 @@ export function defaultHostUserDataDir(
 ): string {
   if (env.HARNESSDOCK_HOST_DATA_DIR) return path.resolve(env.HARNESSDOCK_HOST_DATA_DIR)
 
-  const leaf = host === 'electron' ? 'ElectronLegacy' : host === 'tauri' ? 'Tauri' : 'PerryLegacy'
+  const leaf = 'Tauri'
   if (process.platform === 'win32') {
     const base = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
     return path.join(base, 'HarnessDock', leaf)

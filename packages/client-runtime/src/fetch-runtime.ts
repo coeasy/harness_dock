@@ -370,7 +370,7 @@ async function extractInto(tgzBuffer: Buffer, nodeModules: string, name: string)
     // Remove any stale/partial destination first, then place the fresh copy.
     // On Windows AV/indexers briefly hold handles on freshly extracted files,
     // which makes both rm() and rename() fail with EPERM; retry with backoff.
-    for (let attempt = 1; ; attempt += 1) {
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
       try {
         await rm(destDir, { recursive: true, force: true })
         break

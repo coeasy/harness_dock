@@ -1,21 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "harness-shell",
-  "description": "Minimal capability for the loopback Harness WebView shell. It can open the separate local Plugin Diagnostics window and operate only the owning Harness window.",
+  "description": "Remote Harness Web capability for the exact managed 127.0.0.1 Runtime origin family. It receives only window primitives plus Host Protocol v2; business authority is revalidated against the current RuntimeLease by the Capability Broker.",
   "local": false,
   "platforms": ["linux", "macOS", "windows"],
   "remote": {
     "urls": [
       "http://127.0.0.1:*/*",
-      "http://127.0.0.1:*",
-      "http://localhost:*/*",
-      "http://localhost:*",
-      "https://127.0.0.1:*/*",
-      "https://127.0.0.1:*",
-      "https://localhost:*/*",
-      "https://localhost:*"
+      "http://127.0.0.1:*"
     ]
   },
   "windows": ["harness"],
-  "permissions": ["core:default", "harness-shell"]
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "harness-shell",
+    "host-protocol"
+  ]
 }

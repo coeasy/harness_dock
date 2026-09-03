@@ -30,6 +30,19 @@ export {
 export type { UpdatePhase, UpdateSnapshot, UpdateTarget } from './update-state.ts'
 export { REDACTED, redactDiagnostics } from './diagnostics-redaction.ts'
 export { ClientPolicyDeniedError } from './client-services.ts'
+export {
+  SHELL_API_VERSION,
+  SHELL_COMMANDS,
+  assertShellBridgeVersion,
+  isShellCommandName,
+  normalizeShellCapabilities,
+} from './shell-contract.ts'
+export type {
+  ShellBridge,
+  ShellCapabilities,
+  ShellCommandName,
+  ShellStatusEvent,
+} from './shell-contract.ts'
 export type {
   AppLifecycleService,
   ClientLogEvent,
