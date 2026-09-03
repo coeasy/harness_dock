@@ -81,7 +81,8 @@ pub(crate) fn authorize(request: &AuthorizationRequest<'_>, lease: Option<&Runti
             | Capability::RuntimeSafeMode
             | Capability::RuntimeClearQuarantine
             | Capability::UpdateCheck
-            | Capability::UpdateInstall => Decision::Allow,
+            | Capability::UpdateInstall
+            | Capability::AppQuit => Decision::Allow,
             _ => Decision::Deny("diagnostics-surface-capability-denied"),
         },
         SubjectKind::Mobile => match request.capability {
@@ -179,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn local_diagnostics_can_manage_signed_updates_but_cannot_exit_host() {
+    fn local_diagnostics_can_manage_signed_updates_and_supervised_exit() {
         let allowed = allowed_capabilities(
             SubjectKind::Diagnostics,
             SurfaceKind::Diagnostics,
@@ -188,6 +189,6 @@ mod tests {
             None,
         );
         assert!(allowed.contains(&Capability::UpdateInstall));
-        assert!(!allowed.contains(&Capability::AppQuit));
+        assert!(allowed.contains(&Capability::AppQuit));
     }
 }
