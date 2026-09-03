@@ -1,7 +1,10 @@
 import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-export const PNPM_BUNDLE_VERSION = '10.12.1'
+// Keep the Runtime package manager aligned with the pinned DeepSeek Harness
+// build/profile toolchain, not with the HarnessDock repository's own pnpm.
+export const PNPM_BUNDLE_VERSION = '11.7.0'
+export const PNPM_BUNDLE_SHA256 = 'deafa7ec98a1218b6a047289b92fbe2395c1e22d3495bb711653013218ee15ee'
 
 export function bundledPnpmPackageDir(runtimeRoot: string): string {
   return path.join(runtimeRoot, 'tools', 'pnpm', 'node_modules', 'pnpm')
