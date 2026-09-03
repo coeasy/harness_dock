@@ -61,6 +61,8 @@ jobs:
         with:
           workspaces: apps/tauri/src-tauri
       - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Verify embedded Full Runtime source contract
+        run: pnpm check:embedded-runtime
       - run: pnpm --filter @dsh/plugin-embedded-client build
       - run: pnpm --filter @dsh/plugin-harness-shell build
       - name: Verify publishable Harness Shell package

@@ -2,8 +2,9 @@
 /**
  * Size-budget gate for Tauri release artifacts.
  *
- * Tauri ships one full desktop package, so the gate keys off the actual
- * artifact type and never scans an obsolete release directory.
+ * Desktop installers intentionally remain self-contained: Node + pinned dsh
+ * are embedded in every desktop package. These budgets therefore measure a
+ * compact Full Runtime product, not a Host-only/bootstrap downloader.
  */
 import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -13,14 +14,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const releaseRoot = process.env.DSH_RELEASE_ROOT ?? path.join(repoRoot, 'apps', 'tauri', 'src-tauri', 'target')
 const MB = 1024 * 1024
 const BUDGETS_MB = {
-  exe: 260,
-  msi: 260,
-  dmg: 260,
-  AppImage: 260,
-  deb: 260,
+  exe: 150,
+  msi: 170,
+  dmg: 180,
+  AppImage: 190,
+  deb: 160,
   apk: 180,
   aab: 180,
-  zip: 260,
+  zip: 190,
 }
 const ARTIFACT_RE = /^HarnessDock[-_].*\.(exe|msi|dmg|AppImage|deb|apk|aab|zip)$/i
 
@@ -67,7 +68,7 @@ for (const artifact of artifacts.sort((a, b) => a.name.localeCompare(b.name))) {
   )
 }
 if (failed) {
-  console.error('\n[check:size] FAILED: one or more Tauri artifacts exceed the size budget.')
+  console.error('\n[check:size] FAILED: one or more Tauri artifacts exceed the compact Full Runtime budget.')
   process.exit(1)
 }
-console.log('\n[check:size] all Tauri artifact budgets pass.')
+console.log('\n[check:size] all compact Full Runtime artifact budgets pass.')

@@ -14,6 +14,7 @@
     "check:versions": "node scripts/check-versions.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check:size": "node scripts/check-size.mjs",
+    "check:embedded-runtime": "node scripts/check-embedded-runtime.mjs",
     "perf:report": "node scripts/perf-report.mjs",
     "mark:released": "node scripts/mark-released.mjs",
     "tauri:dev": "pnpm --filter @dsh/tauri tauri:dev",
