@@ -142,6 +142,13 @@ pub(crate) struct NativeGateway {
 }
 
 impl NativeGateway {
+    fn is_finished(&self) -> bool {
+        self.thread
+            .as_ref()
+            .map(std::thread::JoinHandle::is_finished)
+            .unwrap_or(true)
+    }
+
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Release);
         let _ = TcpStream::connect_timeout(&self.local_addr, Duration::from_millis(150));
@@ -1175,6 +1182,16 @@ fn ensure_current_runtime(state: &AppState, generation: u64) -> bool {
 
 #[tauri::command]
 pub fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStatus, String> {
+    let finished = state
+        .gateway
+        .lock()
+        .ok()
+        .and_then(|actor| actor.server.as_ref().map(NativeGateway::is_finished))
+        .unwrap_or(false);
+    if finished {
+        stop_managed(&state.gateway);
+        return Ok(stopped());
+    }
     let generation = state.gateway.lock().ok().and_then(|actor| {
         actor
             .server
@@ -1220,7 +1237,7 @@ pub fn gateway_host_start(
             .map_err(|_| "Gateway lifecycle lock is poisoned".to_string())?;
         if let Ok(actor) = state.gateway.lock() {
             if let Some(server) = actor.server.as_ref() {
-                if server.runtime_generation == lease.generation.id {
+                if server.runtime_generation == lease.generation.id && !server.is_finished() {
                     return Ok(server.status());
                 }
             }
