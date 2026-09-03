@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use crate::runtime_actor::RuntimePhase;
+
 pub const HOST_PROTOCOL_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,19 +132,6 @@ pub struct ResponseEnvelope {
     pub result: Result<HostResponse, HostError>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RuntimePhase {
-    Stopped,
-    Preparing,
-    Starting,
-    Probing,
-    Ready,
-    Degraded,
-    Stopping,
-    Failed,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostSnapshot {
@@ -180,5 +169,20 @@ mod tests {
             command: HostCommand::RestartRuntime,
         };
         assert!(envelope.validate().is_ok());
+    }
+
+    #[test]
+    fn protocol_uses_runtime_actor_phase_including_cancellation() {
+        let snapshot = HostSnapshot {
+            protocol_version: HOST_PROTOCOL_VERSION,
+            runtime_phase: RuntimePhase::Cancelling,
+            runtime_generation: Some(7),
+            harness_visible: false,
+            gateway_enabled: false,
+            capabilities: vec![Capability::RuntimeRestart],
+        };
+        let json = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(json["runtimePhase"], "cancelling");
+        assert_eq!(json["runtimeGeneration"], 7);
     }
 }
