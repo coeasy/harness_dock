@@ -1,11 +1,7 @@
 export type HarnessHostId =
-  | 'electron'
   | 'tauri'
   | 'tauri-ios'
   | 'tauri-android'
-  | 'perry-desktop'
-  | 'perry-ios'
-  | 'perry-android'
   | 'vscode'
 
 export type HarnessHostChannel = 'stable' | 'lts' | 'preview' | 'experimental'
@@ -35,29 +31,6 @@ export interface HarnessHostProfile {
   capabilities: HarnessHostCapabilities
 }
 
-/** Legacy v0.1 desktop baseline retained for compatibility, not the v0.2 release host. */
-export const ELECTRON_HOST_PROFILE: HarnessHostProfile = {
-  id: 'electron',
-  productName: 'HarnessDock Legacy Electron',
-  channel: 'lts',
-  appId: 'com.dsh.client',
-  capabilities: {
-    runtimes: ['local'],
-    downloads: true,
-    filePicker: true,
-    clipboardPermission: true,
-    nativeJsBridge: true,
-    serviceWorkers: true,
-    autoUpdate: true,
-    tray: true,
-    notifications: true,
-    pushNotifications: false,
-    deepLinks: true,
-    secureCredentials: true,
-    backgroundExecution: true,
-  },
-}
-
 /** v0.2 stable desktop host. Capability flags describe implemented Tauri features only. */
 export const TAURI_HOST_PROFILE: HarnessHostProfile = {
   id: 'tauri',
@@ -71,8 +44,8 @@ export const TAURI_HOST_PROFILE: HarnessHostProfile = {
     clipboardPermission: true,
     nativeJsBridge: true,
     serviceWorkers: true,
-    autoUpdate: false,
-    tray: false,
+    autoUpdate: true,
+    tray: true,
     notifications: false,
     pushNotifications: false,
     deepLinks: false,
@@ -126,36 +99,8 @@ export const TAURI_ANDROID_HOST_PROFILE: HarnessHostProfile = {
   },
 }
 
-/** @deprecated Historical lease/profile compatibility only; no Perry app is built or released. */
-export const PERRY_DESKTOP_HOST_PROFILE: HarnessHostProfile = {
-  ...TAURI_HOST_PROFILE,
-  id: 'perry-desktop',
-  channel: 'experimental',
-  productName: 'HarnessDock Legacy Perry',
-  appId: 'com.dsh.client.perry.preview',
-}
-
-/** @deprecated Historical compatibility only. */
-export const PERRY_IOS_HOST_PROFILE: HarnessHostProfile = {
-  ...TAURI_IOS_HOST_PROFILE,
-  id: 'perry-ios',
-  channel: 'experimental',
-  productName: 'HarnessDock Legacy Perry Mobile',
-  appId: 'com.dsh.client.mobile.preview',
-}
-
-/** @deprecated Historical compatibility only. */
-export const PERRY_ANDROID_HOST_PROFILE: HarnessHostProfile = {
-  ...TAURI_ANDROID_HOST_PROFILE,
-  id: 'perry-android',
-  channel: 'experimental',
-  productName: 'HarnessDock Legacy Perry Mobile',
-  appId: 'com.dsh.client.mobile.preview',
-}
-
-/** Supported host profiles. Electron remains readable as the v0.1 LTS baseline. */
+/** Supported v0.2 host profiles. */
 export const HOST_PROFILES = {
-  electron: ELECTRON_HOST_PROFILE,
   tauri: TAURI_HOST_PROFILE,
   'tauri-ios': TAURI_IOS_HOST_PROFILE,
   'tauri-android': TAURI_ANDROID_HOST_PROFILE,

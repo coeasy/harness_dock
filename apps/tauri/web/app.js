@@ -1,6 +1,45 @@
 (() => {
   'use strict'
   const $ = (id) => document.getElementById(id)
+
+  // Native Runtime/Gateway state may legitimately contain one-time launch
+  // credentials. Keep the real URL in memory for navigation, but strip all
+  // credentials, query/fragment data and common secret key/value forms before
+  // anything reaches a user-visible status surface.
+  function publicText(value) {
+    const raw = value && typeof value === 'object' && 'message' in value
+      ? String(value.message || '')
+      : String(value ?? '')
+    const withoutUrls = raw.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (candidate) => {
+      try {
+        const url = new URL(candidate)
+        url.username = ''
+        url.password = ''
+        url.search = ''
+        url.hash = ''
+        return url.toString()
+      } catch {
+        return candidate.replace(/[?#].*$/, '')
+      }
+    })
+    return withoutUrls
+      .replace(/\b(token|authorization|password|secret|api[-_]?key)\b\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+      .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+  }
+
+  function safeDisplayUrl(value) {
+    if (!value) return ''
+    try {
+      const url = new URL(String(value))
+      url.username = ''
+      url.password = ''
+      url.search = ''
+      url.hash = ''
+      return url.toString()
+    } catch {
+      return publicText(value)
+    }
+  }
   const runtimeState = $('runtime-state')
   const runtimeDetail = $('runtime-detail')
   const hostState = $('gateway-host-state')
@@ -12,10 +51,35 @@
   const deviceName = $('device-name')
   let currentRuntime
   let desktopStartup
+  let surfaceMode = 'hidden'
+
+  function setSurfaceMode(mode) {
+    surfaceMode = mode
+    const visibility = {
+      recovery: ['desktop-card'],
+      'gateway-host': ['gateway-host-card'],
+      'mobile-remote': ['mobile-remote-card'],
+      hidden: [],
+    }
+    const visible = new Set(visibility[mode] || [])
+    for (const id of ['desktop-card', 'gateway-host-card', 'mobile-remote-card']) {
+      $(id)?.classList.toggle('hidden', !visible.has(id))
+    }
+  }
+
+  window.__harnessDockSetSurface = (mode) => {
+    if (!['recovery', 'gateway-host', 'mobile-remote', 'hidden'].includes(mode)) return
+    setSurfaceMode(mode)
+    if (mode === 'gateway-host') void refreshVisibleControl()
+  }
 
   function showRecoveryCards() {
-    $('desktop-card')?.classList.remove('hidden')
-    $('gateway-host-card')?.classList.remove('hidden')
+    // A normal desktop user should never land in a mixed Runtime/Gateway
+    // administration screen just because Harness Web failed to start. Keep
+    // startup recovery focused on the broken local Runtime; the Gateway card
+    // is exposed only from the explicit secondary control entry in healthy
+    // desktop sessions.
+    setSurfaceMode('recovery')
   }
 
   // The native startup coordinator calls this when Runtime or Harness Web
@@ -31,7 +95,7 @@
 
   function status(element, value, bad = false) {
     if (!element) return
-    element.textContent = value || ''
+    element.textContent = bad ? publicText(value) : (value || '')
     element.classList.toggle('error', bad)
   }
 
@@ -62,7 +126,7 @@
   function runtimeDetailText(current) {
     if (!current?.appUrl) return 'Runtime 尚未启动。HarnessDock 主程序仍可用，可检查配置后重试。'
     const node = current.nodeSource ? `Node=${current.nodeSource}` : ''
-    const base = [current.dshVersion || '', node, current.appUrl].filter(Boolean).join(' · ')
+    const base = [current.dshVersion || '', node, safeDisplayUrl(current.appUrl)].filter(Boolean).join(' · ')
     if (!current.recoveryMode) return base
     if (current.recoverySource === 'safe-profile') {
       return `${base}\n安全启动：已绕过用户插件配置，确保 Harness Web 界面可用。用户配置未修改；可在修复插件后停止并重新启动 Runtime。`
@@ -84,7 +148,9 @@
     status(runtimeDetail, runtimeDetailText(currentRuntime))
     $('runtime-open').disabled = !currentRuntime.appUrl
     $('shell-open-harness').disabled = !currentRuntime.appUrl
-    $('gateway-host-start').disabled = !currentRuntime.appUrl
+    if (!$('gateway-host-state')?.textContent?.includes('ready')) {
+      $('gateway-host-start').disabled = !currentRuntime.appUrl
+    }
     return currentRuntime
   }
 
@@ -113,6 +179,8 @@
       revoke.className = 'danger'
       revoke.textContent = '撤销'
       revoke.addEventListener('click', async () => {
+        const label = device.name || device.id
+        if (!window.confirm(`确认撤销设备“${label}”的 Gateway 会话？该设备需要重新配对才能连接。`)) return
         revoke.disabled = true
         try {
           await call('gateway_host_revoke', { deviceId: device.id })
@@ -130,10 +198,14 @@
   async function refreshGatewayHost() {
     const current = await call('gateway_host_status')
     hostState.textContent = current.running ? 'ready' : 'stopped'
-    status(hostDetail, current.running ? `Local ${current.localUrl || '-'}\nPublic ${current.publicUrl || '-'}` : 'Gateway 尚未启动。')
+    status(hostDetail, current.running ? `Local ${safeDisplayUrl(current.localUrl) || '-'}\nPublic ${safeDisplayUrl(current.publicUrl) || '-'}` : 'Gateway 尚未启动。')
     $('gateway-create-pairing').disabled = !current.running
     $('gateway-revoke-all').disabled = !current.running || !current.devices?.length
     $('gateway-host-stop').disabled = !current.running
+    $('gateway-host-start').disabled = current.running || !currentRuntime?.appUrl
+    $('gateway-public-url').disabled = current.running
+    $('gateway-local-port').disabled = current.running
+    if (!current.running) $('host-pairing').textContent = ''
     renderDevices(current.devices)
     return current
   }
@@ -178,10 +250,25 @@
         window.__harnessDockShowRecovery?.(error)
         await showControl()
       } finally {
+        // The promise only deduplicates one in-flight boot. Keep the button
+        // usable after an explicit Runtime stop or a later crash recovery.
+        desktopStartup = undefined
         $('runtime-start').disabled = false
       }
     })()
     return desktopStartup
+  }
+
+  async function refreshVisibleControl() {
+    const runtimeVisible = !$('desktop-card')?.classList.contains('hidden')
+    const gatewayVisible = !$('gateway-host-card')?.classList.contains('hidden')
+    if (!runtimeVisible && !gatewayVisible) return
+    try {
+      await refreshRuntime()
+      if (gatewayVisible) await refreshGatewayHost()
+    } catch (error) {
+      status(runtimeVisible ? runtimeDetail : hostDetail, String(error), true)
+    }
   }
 
   async function boot() {
@@ -189,14 +276,25 @@
       void splashStatus('正在初始化客户端…')
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
+      const desktop = platform.surface === 'desktop' && platform.runtimeMode === 'local'
+      $('shell-settings-entry')?.classList.toggle('hidden', !desktop)
+      $('shell-open-harness')?.classList.toggle('hidden', !desktop)
+      const startupRecovery = await call('startup_recovery_status').catch(() => undefined)
+      if (startupRecovery) {
+        window.__harnessDockShowRecovery?.(startupRecovery)
+        await showControl()
+        return
+      }
       if (platform.runtimeMode === 'local') {
-        // Native startup owns the normal desktop path. This page stays passive
-        // while hidden and is revealed only if native startup needs recovery.
+        // Native startup owns the normal desktop path. The control window stays
+        // hidden during normal launch, but its secondary Mobile Gateway card is
+        // ready when the user explicitly opens this window from Shell/Tray.
+        setSurfaceMode('gateway-host')
         void splashStatus('正在准备本地 Runtime…')
-        bootStatus('正在准备本地 Runtime，稍后直接打开 Harness Web…')
+        bootStatus('Harness Web 为主界面；此控制页仅在需要管理移动设备时打开。', 'ready')
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')
-        $('mobile-remote-card').classList.remove('hidden')
+        setSurfaceMode('mobile-remote')
         deviceName.value = defaultDeviceName(platform)
       }
     } catch (error) {
@@ -268,21 +366,29 @@
   })
 
   $('gateway-host-start').addEventListener('click', async () => {
+    const portInput = $('gateway-local-port')
+    const publicInput = $('gateway-public-url')
+    if (!portInput.reportValidity() || !publicInput.reportValidity()) return
     $('gateway-host-start').disabled = true
     status(hostDetail, '正在启动受控 Mobile Gateway…')
+    let started = false
     try {
-      const rawPort = Number($('gateway-local-port').value)
-      const publicUrl = $('gateway-public-url').value.trim()
+      const rawPort = Number(portInput.value)
+      const publicUrl = publicInput.value.trim()
       await call('gateway_host_start', {
         publicUrl: publicUrl || null,
         localPort: Number.isInteger(rawPort) ? rawPort : 43137,
       })
       await refreshGatewayHost()
+      started = true
     } catch (error) {
       hostState.textContent = 'error'
       status(hostDetail, String(error), true)
     } finally {
-      $('gateway-host-start').disabled = false
+      // Do not undo refreshGatewayHost's running-state lock. The old logic
+      // unconditionally re-enabled Start after a successful launch, making an
+      // already-running Gateway look restartable with edited settings.
+      if (!started) $('gateway-host-start').disabled = !currentRuntime?.appUrl
     }
   })
 
@@ -292,12 +398,29 @@
 
   $('gateway-host-stop').addEventListener('click', async () => {
     $('gateway-host-stop').disabled = true
+    let refreshed = false
     try {
       await call('gateway_host_stop')
       $('host-pairing').textContent = ''
       await refreshGatewayHost()
+      refreshed = true
     } catch (error) {
       status(hostDetail, String(error), true)
+      // Re-read the native state after a failed stop. The command can fail
+      // after the sidecar has already exited; leaving the button disabled
+      // would strand the recovery control until the page is reopened.
+      try {
+        const current = await refreshGatewayHost()
+        refreshed = true
+        // A transient admin/IPC failure may leave a live sidecar in place.
+        // Keep Stop retryable in that state instead of making the user rely
+        // on a page reload or an unrelated refresh click.
+        if (current.running) $('gateway-host-stop').disabled = false
+      } catch {
+        // The IPC bridge is unavailable; keep the recovery control usable.
+      }
+    } finally {
+      if (!refreshed) $('gateway-host-stop').disabled = false
     }
   })
 
@@ -315,6 +438,7 @@
   })
 
   $('gateway-revoke-all').addEventListener('click', async () => {
+    if (!window.confirm('确认撤销全部已配对设备？所有设备都需要重新配对后才能再次连接。')) return
     $('gateway-revoke-all').disabled = true
     try {
       const count = await call('gateway_host_revoke_all')
@@ -322,6 +446,8 @@
       await refreshGatewayHost()
     } catch (error) {
       status(hostDetail, String(error), true)
+    } finally {
+      $('gateway-revoke-all').disabled = false
     }
   })
 
@@ -357,6 +483,10 @@
       status(gatewayDetail, String(error), true)
       $('gateway-pair').disabled = false
     }
+  })
+
+  window.addEventListener('focus', () => {
+    void refreshVisibleControl()
   })
 
   void boot()

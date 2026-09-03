@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
 import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './ensure-runtime.ts'
-import { scrubElectronEnv } from './env.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
 import { parseWebUrl, redactWebAuthTokens } from './output.ts'
 import {
@@ -50,6 +49,8 @@ export interface DshRuntimeOptions {
   pluginPath: string
   /** optional host-provided bridge for legacy browser client module imports */
   compatibilityPath?: string
+  /** optional independent dsh shell plugin; absent in older compatibility hosts */
+  shellPluginPath?: string
   packaged?: boolean
   env?: NodeJS.ProcessEnv
   cwd?: string
@@ -114,7 +115,10 @@ function emptyRecoveryState(): PluginRecoveryState {
 export class DshRuntime {
   private child: ChildProcessWithoutNullStreams | undefined
   private workDir: string | undefined
-  private stopping = false
+  private startPromise: Promise<ReadyInfo> | undefined
+  private stopPromise: Promise<void> | undefined
+  private stopRequested = false
+  private stopGeneration = 0
   private stopOutcome: StopOutcome | undefined
   private recoveryState: PluginRecoveryState = emptyRecoveryState()
 
@@ -141,11 +145,47 @@ export class DshRuntime {
   }
 
   async start(): Promise<ReadyInfo> {
-    this.stopping = false
-    this.recoveryState = emptyRecoveryState()
+    if (this.startPromise) return this.startPromise
+
+    // A new start may follow a completed stop. If a stop is still in flight,
+    // wait for that specific stop and only proceed when no newer stop request
+    // arrived in the meantime.
+    const pendingStop = this.stopPromise
+    const observedStopGeneration = this.stopGeneration
+    if (!pendingStop) this.stopRequested = false
+    const operation = (async (): Promise<ReadyInfo> => {
+      if (pendingStop) await pendingStop
+      if (this.stopGeneration !== observedStopGeneration || this.stopRequested) {
+        throw new Error('dsh runtime start cancelled by stop request.')
+      }
+      if (this.child) {
+        throw new Error('dsh runtime is already running; call stop() before start().')
+      }
+      this.stopOutcome = undefined
+      this.recoveryState = emptyRecoveryState()
+      try {
+        return await this.startImpl()
+      } catch (error) {
+        await this.cleanupRuntimeArtifacts()
+        throw error
+      }
+    })()
+    this.startPromise = operation
+    try {
+      return await operation
+    } finally {
+      if (this.startPromise === operation) this.startPromise = undefined
+    }
+  }
+
+  private async startImpl(): Promise<ReadyInfo> {
+    this.assertStartActive()
     const env = { ...process.env, ...this.options.env }
     if (this.options.packaged) {
       await verifyPackagedPlugin(this.options.pluginPath, this.options.log)
+      if (this.options.shellPluginPath) {
+        await verifyPackagedPlugin(this.options.shellPluginPath, this.options.log, 'harness shell plugin')
+      }
     }
     const bundledAvailable = this.options.bundledRoot
       ? inspectBundledRuntime(this.options.bundledRoot, process.platform) !== null
@@ -189,7 +229,6 @@ export class DshRuntime {
         command = {
           command: process.execPath,
           argsPrefix: [downloaded.dshBin],
-          extraEnv: { ELECTRON_RUN_AS_NODE: '1' },
         }
       }
     } else if (
@@ -233,25 +272,32 @@ export class DshRuntime {
       }
     }
 
+    this.assertStartActive()
     this.workDir = await mkdtemp(path.join(this.options.cacheDir ?? os.tmpdir(), 'harnessdock-'))
+    this.assertStartActive()
     const patchFile = path.join(this.workDir, 'embedded.patch.yml')
     const readyFile = path.join(this.workDir, 'ready.json')
     await writeFile(
       patchFile,
-      renderEmbeddedPatch(this.options.pluginPath, this.options.compatibilityPath),
+      renderEmbeddedPatch(
+        this.options.pluginPath,
+        this.options.compatibilityPath,
+        this.options.shellPluginPath,
+      ),
       'utf8',
     )
 
-    const childEnv = scrubElectronEnv({
+    const childEnv = {
       ...env,
       ...command.extraEnv,
       DSH_EMBEDDED_READY_FILE: readyFile,
       DSH_EMBEDDED_VERSION: version,
-    })
-    const dumpEnv = scrubElectronEnv({ ...env, ...command.extraEnv })
+    }
+    const dumpEnv = { ...env, ...command.extraEnv }
     const spawnImpl = this.options.spawnImpl ?? spawn
 
     const spawnRuntime = (recoveryPatchFile?: string): ChildProcessWithoutNullStreams => {
+      this.assertStartActive()
       const launchArgs = buildLaunchArgs({ patchFile })
       if (recoveryPatchFile) {
         const hostIndex = launchArgs.indexOf('--host')
@@ -284,19 +330,28 @@ export class DshRuntime {
       ]
       const spawnRequest = buildSpawnRequest(command.command, args)
       return new Promise<string>((resolve, reject) => {
+        let child: ChildProcessWithoutNullStreams
+        try {
+          child = spawnImpl(spawnRequest.command, spawnRequest.args, {
+            cwd: this.options.cwd ?? process.cwd(),
+            env: dumpEnv,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          }) as unknown as ChildProcessWithoutNullStreams
+        } catch (error) {
+          reject(error)
+          return
+        }
+        this.child = child
         let stdout = ''
         let stderr = ''
         let settled = false
-        const child = spawn(spawnRequest.command, spawnRequest.args, {
-          cwd: this.options.cwd ?? process.cwd(),
-          env: dumpEnv,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        })
+        let timer: ReturnType<typeof setTimeout> | undefined
         const finish = (error?: Error) => {
           if (settled) return
           settled = true
-          clearTimeout(timer)
+          if (timer) clearTimeout(timer)
+          if (this.child === child) this.child = undefined
           if (error) reject(error)
           else resolve(stdout)
         }
@@ -313,8 +368,8 @@ export class DshRuntime {
           if (code === 0) finish()
           else finish(new Error(`dsh --dump-config exited with code ${code}: ${redactWebAuthTokens(stderr.slice(-4_000))}`))
         })
-        const timer = setTimeout(() => {
-          child.kill('SIGKILL')
+        timer = setTimeout(() => {
+          void terminateRuntimeChild(child)
           finish(new Error('dsh --dump-config timed out after 15s'))
         }, 15_000)
         timer.unref?.()
@@ -331,6 +386,7 @@ export class DshRuntime {
     if (recoveryEnabled && this.options.pluginQuarantinePath) {
       const quarantine = await readPluginQuarantine(this.options.pluginQuarantinePath, version)
       if (quarantine) {
+        this.assertStartActive()
         const quarantinePatchFile = path.join(this.workDir, 'plugin-quarantine.patch.yml')
         await writeFile(
           quarantinePatchFile,
@@ -351,7 +407,9 @@ export class DshRuntime {
             timeoutMs,
             stabilityMs,
             this.options.log,
+            () => this.stopRequested,
           )
+          this.assertStartActive()
           this.recoveryState = {
             active: true,
             source: 'quarantine',
@@ -368,6 +426,7 @@ export class DshRuntime {
           )
           await terminateRuntimeChild(quarantineChild)
           this.child = undefined
+          if (this.stopRequested) throw quarantineError
           await clearPluginQuarantine(this.options.pluginQuarantinePath).catch(() => undefined)
           await rm(readyFile, { force: true }).catch(() => undefined)
           this.recoveryState = emptyRecoveryState()
@@ -375,6 +434,7 @@ export class DshRuntime {
       }
     }
 
+    this.assertStartActive()
     const child = spawnRuntime()
     this.child = child
 
@@ -386,7 +446,9 @@ export class DshRuntime {
         timeoutMs,
         stabilityMs,
         this.options.log,
+        () => this.stopRequested,
       )
+      this.assertStartActive()
       drainOutput(child, this.options.log)
       return ready
     } catch (error) {
@@ -395,6 +457,7 @@ export class DshRuntime {
       await terminateRuntimeChild(child)
       this.child = undefined
 
+      if (this.stopRequested) throw error
       if (!recoveryEnabled) throw error
 
       let dump = ''
@@ -406,6 +469,7 @@ export class DshRuntime {
         )
         throw error
       }
+      this.assertStartActive()
       const plan = buildPluginRecoveryPlan(parseConfigDumpRows(dump), diagnostic)
       const selected = plan.isolationRows
       if (selected.length === 0) {
@@ -422,6 +486,7 @@ export class DshRuntime {
         `runtime: compatibility recovery isolating ${ids.length} external row(s) for this session: ${ids.join(', ')}`,
       )
 
+      this.assertStartActive()
       const recoveryChild = spawnRuntime(recoveryPatchFile)
       this.child = recoveryChild
       try {
@@ -432,7 +497,9 @@ export class DshRuntime {
           timeoutMs,
           stabilityMs,
           this.options.log,
+          () => this.stopRequested,
         )
+        this.assertStartActive()
         let quarantineExpiresAt: string | undefined
         if (this.options.pluginQuarantinePath) {
           try {
@@ -476,37 +543,70 @@ export class DshRuntime {
   }
 
   async stop(): Promise<void> {
-    if (this.stopping) return
-    this.stopping = true
+    if (this.stopPromise) return this.stopPromise
+    this.stopGeneration += 1
+    this.stopRequested = true
     this.stopOutcome = undefined
+    const start = this.startPromise
+    const operation = (async (): Promise<void> => {
+      const child = this.child
+      this.child = undefined
+      if (child?.pid) {
+        const started = Date.now()
+        const result = await Promise.race<ShutdownResult>([
+          shutdownLadder(child, {
+            termMs: 5_000,
+            killMs: 3_000,
+            isAlive: () => isProcessAlive(child.pid),
+          }),
+          new Promise<ShutdownResult>((resolve) => {
+            setTimeout(() => {
+              resolve({ dead: false, survivors: child.pid ? [child.pid] : [] })
+            }, this.options.stopTimeoutMs ?? 20_000).unref()
+          }),
+        ])
+        this.stopOutcome = { clean: result.dead, ladder: result }
+        if (!result.dead && this.options.log) {
+          this.options.log(
+            `dsh process tree not fully stopped after ${Date.now() - started}ms; survivors: ${result.survivors.join(', ')}`,
+          )
+        }
+      }
+
+      // start() can be between an awaited preparation step and its first
+      // spawn. It observes stopRequested and rejects; wait for that rejection
+      // before deleting its temporary directory so no late startup can revive
+      // a process after the host requested shutdown.
+      await start?.catch(() => undefined)
+      const lateChild = this.child
+      this.child = undefined
+      if (lateChild && lateChild !== child) await terminateRuntimeChild(lateChild)
+      await this.cleanupWorkDir()
+      if (!this.stopOutcome) this.stopOutcome = { clean: true }
+    })()
+    this.stopPromise = operation
+    try {
+      await operation
+    } finally {
+      if (this.stopPromise === operation) this.stopPromise = undefined
+    }
+  }
+
+  private assertStartActive(): void {
+    if (this.stopRequested) throw new Error('dsh runtime start cancelled by stop request.')
+  }
+
+  private async cleanupWorkDir(): Promise<void> {
+    if (!this.workDir) return
+    await rm(this.workDir, { recursive: true, force: true }).catch(() => undefined)
+    this.workDir = undefined
+  }
+
+  private async cleanupRuntimeArtifacts(): Promise<void> {
     const child = this.child
     this.child = undefined
-    if (child?.pid) {
-      const started = Date.now()
-      const result = await Promise.race<ShutdownResult>([
-        shutdownLadder(child, {
-          termMs: 5_000,
-          killMs: 3_000,
-          isAlive: () => isProcessAlive(child.pid),
-        }),
-        new Promise<ShutdownResult>((resolve) => {
-          setTimeout(() => {
-            resolve({ dead: false, survivors: child.pid ? [child.pid] : [] })
-          }, this.options.stopTimeoutMs ?? 20_000).unref()
-        }),
-      ])
-      this.stopOutcome = { clean: result.dead, ladder: result }
-      if (!result.dead && this.options.log) {
-        this.options.log(
-          `dsh process tree not fully stopped after ${Date.now() - started}ms; survivors: ${result.survivors.join(', ')}`,
-        )
-      }
-    }
-    if (this.workDir) {
-      await rm(this.workDir, { recursive: true, force: true }).catch(() => undefined)
-      this.workDir = undefined
-    }
-    if (!this.stopOutcome) this.stopOutcome = { clean: true }
+    if (child) await terminateRuntimeChild(child)
+    await this.cleanupWorkDir()
   }
 }
 
@@ -563,6 +663,7 @@ async function waitForReady(
   timeoutMs: number,
   stabilityMs: number,
   log?: (message: string) => void,
+  shouldCancel?: () => boolean,
 ): Promise<ReadyInfo> {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -607,11 +708,19 @@ async function waitForReady(
       candidateSince = Date.now()
     }
     const validateCandidate = async (): Promise<void> => {
+      if (shouldCancel?.()) {
+        fail(new Error('dsh runtime start cancelled by stop request.'))
+        return
+      }
       if (settled || validating || !candidate || Date.now() - candidateSince < stabilityMs) return
       validating = true
       const current = candidate
       const ready = child.exitCode === null && await probeHttpReady(current.url)
       validating = false
+      if (shouldCancel?.()) {
+        fail(new Error('dsh runtime start cancelled by stop request.'))
+        return
+      }
       if (settled || candidate !== current) return
       if (!ready) {
         candidate = undefined
@@ -621,6 +730,10 @@ async function waitForReady(
       succeed(current)
     }
     const poll = setInterval(() => {
+      if (shouldCancel?.()) {
+        fail(new Error('dsh runtime start cancelled by stop request.'))
+        return
+      }
       void validateCandidate()
       void readFile(readyFile, 'utf8')
         .then((raw) => {
@@ -660,6 +773,7 @@ async function probeHttpReady(url: string): Promise<boolean> {
 async function verifyPackagedPlugin(
   pluginPath: string,
   log?: (message: string) => void,
+  label = 'embedded-client plugin',
 ): Promise<void> {
   try {
     const details = await stat(pluginPath)
@@ -667,10 +781,10 @@ async function verifyPackagedPlugin(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `packaged embedded-client plugin is unavailable: ${pluginPath} (${detail}). Reinstall HarnessDock or use the thin package to redownload the runtime.`,
+      `packaged ${label} is unavailable: ${pluginPath} (${detail}). Reinstall HarnessDock or use the thin package to redownload the runtime.`,
     )
   }
-  log?.(`runtime: embedded plugin verified at ${pluginPath}`)
+  log?.(`runtime: ${label} verified at ${pluginPath}`)
 }
 
 export async function ensureDir(dir: string): Promise<void> {

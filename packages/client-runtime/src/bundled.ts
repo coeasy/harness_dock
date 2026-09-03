@@ -100,7 +100,6 @@ export function runtimeCacheDir(repoRoot: string): string {
 export function canCopyHostNode(input: {
   hostPlatform: NodeJS.Platform
   targetPlatform: NodeJS.Platform
-  electronVersion?: string
 }): boolean {
-  return input.hostPlatform === input.targetPlatform && !input.electronVersion
+  return input.hostPlatform === input.targetPlatform
 }

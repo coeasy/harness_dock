@@ -16,7 +16,7 @@ export function resolveRuntimeMode(input: {
   const raw = input.env.DSH_RUNTIME
   if (raw === 'local' || raw === 'download' || raw === 'bundled') return raw
   // bundled 运行时可用时优先采用（无论 packaged 与否），
-  // 使开发模式（Electron 未打包 / 裸进程）无需 dsh 在 PATH 也能直接启动主进程
+  // 使开发模式（Tauri 未打包 / 裸进程）无需 dsh 在 PATH 也能直接启动主进程
   if (input.bundledAvailable) return 'bundled'
   return input.packaged ? 'download' : 'local'
 }

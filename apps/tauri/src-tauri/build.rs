@@ -15,19 +15,21 @@ fn main() {
         "harness_toggle_maximize",
         "harness_window_state",
         "control_show",
-        "control_hide",
         "harness_reload_web",
         "harness_restart_web",
+        "harness_safe_mode_restart",
         "harness_clear_quarantine_restart",
         "shell_settings_show",
         "shell_settings_close",
         "splash_status",
+        "startup_recovery_status",
         "runtime_status",
         "runtime_start",
-        "runtime_restart",
         "runtime_stop",
+        "runtime_clear_plugin_quarantine",
         "update_check",
         "update_install",
+        "app_quit",
     ];
 
     tauri_build::try_build(

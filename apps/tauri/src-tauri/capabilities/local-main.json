@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-main",
-  "description": "Local bundled HarnessDock control capability. Remote Harness/Gateway documents never receive Tauri IPC permissions.",
-  "windows": ["main"],
+  "description": "On-demand bundled Recovery/Gateway control capability. The window is not created during normal startup; managed Harness Web has a separately minimized remote-origin capability.",
+  "windows": ["control"],
   "permissions": [
     "core:default",
     "platform-info",
@@ -14,6 +14,7 @@
     "runtime-status",
     "runtime-start",
     "runtime-stop",
-    "runtime-maintenance"
+    "runtime-maintenance",
+    "startup-recovery-status"
   ]
 }

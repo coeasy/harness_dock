@@ -21,14 +21,14 @@
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>Web 优先启动</h2><p>桌面端启动后自动启动本地 Runtime，并强制打开 Harness Web。插件诊断只在用户主动点击后出现。</p></div>
+        <div><h2>Web 优先启动</h2><p>桌面端验证安装包内置 sealed Runtime 后直接启动本地 dsh 并打开 Harness Web。插件诊断只在用户主动点击后创建。</p></div>
         <span class="badge">mandatory</span>
       </div>
       <p id="web-detail" class="status">正在读取启动策略…</p>
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>Runtime 与插件状态</h2><p>第三方插件失败会被隔离；系统 Node 启动异常时自动回退内置 Node。恢复操作不会改写用户的真实 DSH 配置。刷新、重启和隔离恢复统一从主界面的“菜单”执行。</p></div>
+        <div><h2>Runtime 与插件状态</h2><p>第三方插件失败可进入隔离恢复；正式产品只从安装包资源启动内置 Node+dsh，不使用系统 Node 兜底，也不会在首次启动下载另一份 Runtime。</p></div>
         <span id="runtime-state" class="badge">checking</span>
       </div>
       <p id="runtime-detail" class="status"></p>
@@ -38,19 +38,22 @@
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>版本更新</h2><p>自动更新从主界面的“菜单”执行：先比较 GitHub 最新稳定 Release，再安装通过签名校验的客户端包；安装完成会先完整关闭 Runtime/Gateway，再重启客户端。</p></div>
-        <span class="badge">主菜单</span>
+        <div><h2>GitHub 自动更新</h2><p>远程 Harness Web 不持有安装更新权限。主界面菜单只负责打开这个本地可信诊断面，由 Capability Broker 授权后检查并安装签名有效的稳定 Release。</p></div>
+        <span class="badge">signed</span>
       </div>
-      <p class="status">未配置发布签名时，菜单会提示最新版本和官方发布页，不会安装未经验证的程序包。</p>
+      <p id="update-detail" class="status">未配置有效发布签名时不会安装未经验证的程序包。</p>
+      <div class="actions">
+        <button id="update-install" class="secondary">检查并安装更新</button>
+      </div>
     </section>
     <section class="card">
       <div class="card-heading">
-        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。只有需要查看 Runtime、插件隔离、更新配置状态或退出客户端时，才使用本窗口。</p></div>
+        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。Recovery、Gateway、Diagnostics 和 Update 都是按需 Surface，不能成为健康 Harness Web 启动的前置依赖。</p></div>
         <span class="badge">on demand</span>
       </div>
-      <p class="status">插件诊断关闭后不会停止 Runtime，也不会关闭 Harness Web。所有会影响运行状态的动作都在主界面显示执行中状态，诊断窗口只负责查看状态和退出客户端。</p>
+      <p class="status">关闭诊断窗口不会停止 Runtime，也不会关闭 Harness Web。退出和更新通过 Host Protocol v2 进入统一 Reconciler/Actor 生命周期。</p>
     </section>
-    <footer>HarnessDock v0.2.9 · Plugin Diagnostics</footer>
+    <footer>HarnessDock v0.2.0 · Plugin Diagnostics</footer>
   </main>
   <script src="./settings.js" defer></script>
 </body>

@@ -3,19 +3,30 @@ name: tauri-ci
 on:
   push:
     branches:
-      - refactor/tauri-v0.2.0
+      - main
+      - 'refactor/**'
     paths:
       - 'apps/tauri/**'
       - 'packages/bootstrap/**'
       - 'packages/client-runtime/**'
-      - 'tests/parity/tauri-host.test.ts'
+      - 'packages/plugin-embedded-client/**'
+      - 'packages/plugin-harness-shell/**'
+      - 'protocol/**'
+      - 'scripts/check-embedded-runtime.mjs'
+      - 'tests/parity/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/tauri-ci.yml'
   pull_request:
     paths:
       - 'apps/tauri/**'
       - 'packages/bootstrap/**'
       - 'packages/client-runtime/**'
-      - 'tests/parity/tauri-host.test.ts'
+      - 'packages/plugin-embedded-client/**'
+      - 'packages/plugin-harness-shell/**'
+      - 'protocol/**'
+      - 'scripts/check-embedded-runtime.mjs'
+      - 'tests/parity/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/tauri-ci.yml'
 
 concurrency:
@@ -38,11 +49,14 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Verify sealed embedded Runtime contract
+        run: pnpm check:embedded-runtime
       - run: pnpm --filter @dsh/bootstrap build
-      - name: Bundle Tauri Gateway sidecar
-        run: pnpm --filter @dsh/desktop exec esbuild ../../packages/bootstrap/src/gateway-sidecar.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/harnessdock-gateway-sidecar.mjs
-      - run: test -s /tmp/harnessdock-gateway-sidecar.mjs
-      - run: pnpm vitest run packages/bootstrap/tests/mobile-gateway-contract.test.ts packages/bootstrap/tests/gateway.test.ts packages/bootstrap/tests/runtime-lease.test.ts tests/parity/tauri-host.test.ts
+      - run: pnpm --filter @dsh/plugin-embedded-client build
+      - run: pnpm --filter @dsh/plugin-harness-shell build
+      - name: Verify Harness Shell generated artifact
+        run: pnpm check:versions
+      - run: pnpm vitest run packages/bootstrap/tests/mobile-gateway-contract.test.ts packages/bootstrap/tests/gateway.test.ts packages/bootstrap/tests/runtime-lease.test.ts tests/parity/*.test.ts
 
   desktop-rust:
     name: desktop-rust (${{ matrix.os }})
@@ -57,15 +71,26 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/tauri/src-tauri
-      - run: cargo check --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Check Native Host
+        run: cargo check --locked --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Test Native Host actors and Gateway
+        run: cargo test --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --lib
 
   android-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: Install Linux Tauri dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - uses: actions/setup-java@v5
@@ -74,6 +99,7 @@ jobs:
           java-version: '17'
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.0
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
@@ -106,8 +132,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.0
           targets: aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
         with:

@@ -12,11 +12,11 @@
   <main class="shell">
     <section class="hero">
       <div class="brand">HarnessDock</div>
-      <h1>Tauri v0.2.9</h1>
+      <h1>HarnessDock v0.2.0</h1>
       <p id="platform-summary" class="muted">正在检测运行环境…</p>
       <div id="boot-status" class="boot-status" role="status" aria-live="polite"><span class="boot-dot" aria-hidden="true"></span><span>界面已就绪，正在准备运行环境…</span></div>
-      <div class="hero-actions"><button id="shell-settings-entry" class="secondary">⚙ 插件诊断</button><button id="shell-open-harness" class="primary">打开 Harness</button></div>
-      <p id="shell-detail" class="status" role="status" aria-live="polite">正常启动将直接打开 Harness Web；此页面只在启动失败时作为恢复入口。</p>
+      <div class="hero-actions"><button id="shell-settings-entry" class="secondary hidden">⚙ 插件诊断</button><button id="shell-open-harness" class="primary hidden">打开 Harness</button></div>
+      <p id="shell-detail" class="status" role="status" aria-live="polite">正常启动将直接打开 Harness Web；此页面仅用于启动恢复或按需管理移动设备 Gateway。</p>
     </section>
     <section id="desktop-card" class="card hidden">
       <div class="card-heading"><div><h2>本地 Runtime</h2><p>桌面端托管完整 DeepSeek Harness Runtime；第三方插件异常只会触发 Runtime 降级，不会关闭 HarnessDock。</p></div><span id="runtime-state" class="badge">stopped</span></div>
@@ -24,9 +24,9 @@
       <p id="runtime-detail" class="status"></p>
     </section>
     <section id="gateway-host-card" class="card hidden">
-      <div class="card-heading"><div><h2>Mobile Gateway</h2><p>Gateway 只监听本机回环地址。真机远程访问请通过可信 HTTPS Tunnel / Reverse Proxy 暴露固定端口。</p></div><span id="gateway-host-state" class="badge">stopped</span></div>
-      <label>公开 HTTPS Origin<input id="gateway-public-url" type="url" autocomplete="url" placeholder="https://dock.example.com" /></label>
-      <label>本地 Gateway 端口<input id="gateway-local-port" type="number" min="1" max="65535" value="43137" /></label>
+      <div class="card-heading"><div><h2>Mobile Gateway</h2><p>Gateway 始终只监听本机 127.0.0.1。真机远程访问请通过可信 HTTPS Tunnel / Reverse Proxy 暴露固定端口；修改端口或公网地址前请先停止 Gateway。</p></div><span id="gateway-host-state" class="badge">stopped</span></div>
+      <label>公开 HTTPS Origin<input id="gateway-public-url" type="url" autocomplete="url" placeholder="https://dock.example.com/" /></label>
+      <label>本地 Gateway 端口<input id="gateway-local-port" type="number" min="1024" max="65535" value="43137" /></label>
       <div class="actions"><button id="gateway-host-start" class="primary">启动 Gateway</button><button id="gateway-host-refresh" class="secondary">刷新</button><button id="gateway-host-stop" class="secondary">停止 Gateway</button></div>
       <p id="gateway-host-detail" class="status"></p><div class="divider"></div>
       <div class="actions"><button id="gateway-create-pairing" class="primary">生成一次性配对码</button><button id="gateway-revoke-all" class="danger">撤销全部设备</button></div>
@@ -34,13 +34,13 @@
     </section>
     <section id="mobile-remote-card" class="card hidden">
       <div class="card-heading"><div><h2>连接 Remote Gateway</h2><p>Android 与 iOS 不在设备内执行桌面 Node Runtime，只通过 HTTPS Gateway 建立安全会话。</p></div><span id="gateway-state" class="badge">offline</span></div>
-      <label>Gateway 地址<input id="gateway-url" type="url" autocomplete="url" placeholder="https://dock.example.com" /></label>
+      <label>Gateway 地址<input id="gateway-url" type="url" autocomplete="url" placeholder="https://dock.example.com/" /></label>
       <label>设备名称<input id="device-name" type="text" maxlength="80" autocomplete="off" /></label>
       <label>一次性配对码<input id="pairing-code" type="text" inputmode="numeric" maxlength="9" autocomplete="one-time-code" placeholder="1234-5678" /></label>
       <div class="actions"><button id="gateway-check" class="secondary">检查 Gateway</button><button id="gateway-pair" class="primary">配对并连接</button></div>
       <p id="gateway-detail" class="status"></p>
     </section>
-    <footer>HarnessDock v0.2.9 · Full-only Tauri Desktop · Remote Mobile</footer>
+    <footer>HarnessDock v0.2.0 · Full Runtime Desktop · Remote Mobile</footer>
   </main>
   <script src="./app.js" defer></script>
 </body>

@@ -2,12 +2,30 @@
   'use strict'
 
   const $ = (id) => document.getElementById(id)
-  let currentRuntime
+  let requestSequence = 0
+  let lastSequence = 0
+  let lastRevision = 0
+  let unlistenHostEvent = null
 
   function call(command, args) {
     const invoke = window.__TAURI__?.core?.invoke
     if (typeof invoke !== 'function') return Promise.reject(new Error('Tauri IPC is unavailable.'))
     return invoke(command, args)
+  }
+
+  function host(commandType) {
+    const requestId = globalThis.crypto?.randomUUID?.() || `diagnostics-${Date.now()}-${++requestSequence}`
+    return call('host_execute', {
+      envelope: {
+        protocolVersion: 2,
+        requestId,
+        subject: 'diagnostics',
+        command: { type: commandType },
+      },
+    }).then((response) => {
+      if (response?.result?.Err) throw new Error(String(response.result.Err.message || 'Host command denied'))
+      return response?.result?.Ok ?? response
+    })
   }
 
   function message(value) {
@@ -20,36 +38,33 @@
     element.classList.toggle('error', bad)
   }
 
-  function runtimeDescription(runtime) {
-    if (!runtime?.appUrl) return 'Runtime 尚未就绪。请关闭诊断窗口后从主界面的“菜单”执行重启。'
+  function render(snapshot) {
+    if (!snapshot) return
+    lastSequence = Number(snapshot.eventSequence || 0)
+    lastRevision = Number(snapshot.revision || 0)
+    const phase = snapshot.runtimePhase || 'stopped'
+    $('runtime-state').textContent = phase
     const lines = [
-      '状态：' + (runtime.recoveryMode ? '兼容模式（Web 可用）' : runtime.state),
-      'Node：' + (runtime.nodeSource || 'unknown'),
-      '版本：' + (runtime.dshVersion || 'unknown'),
-      '地址：' + runtime.appUrl,
+      `状态：${phase}`,
+      `版本：${snapshot.runtimeDshVersion || 'unknown'}`,
+      `Generation：${snapshot.runtimeGeneration ?? 'unknown'}`,
+      `Runtime Image：${snapshot.runtimeImageIdentity || 'unknown'}`,
+      `Host Protocol：v${snapshot.protocolVersion || 2}（最低兼容 v${snapshot.minCompatibleVersion || 2}）`,
+      `Kernel Revision：${snapshot.revision ?? 0}`,
+      `Event Sequence：${snapshot.eventSequence ?? 0}`,
     ]
-    if (runtime.safeMode) lines.push('安全配置：已启用临时干净配置，未修改用户配置。')
-    if (runtime.isolatedPlugins?.length) lines.push('已隔离插件：' + runtime.isolatedPlugins.join(', '))
-    if (runtime.suspectedPlugins?.length) lines.push('疑似故障插件：' + runtime.suspectedPlugins.join(', '))
-    return lines.join('\n')
-  }
-
-  function render(runtime) {
-    currentRuntime = runtime
-    const label = runtime?.recoveryMode ? 'degraded' : (runtime?.state || 'stopped')
-    $('runtime-state').textContent = label
-    setStatus($('runtime-detail'), runtimeDescription(runtime))
+    setStatus($('runtime-detail'), lines.join('\n'))
     setStatus(
       $('web-detail'),
-      runtime?.appUrl
-        ? 'Harness Web 正在使用本地 Runtime；刷新、重启和插件恢复请从主界面的“菜单”执行。'
-        : 'Runtime 尚未提供 Web 地址；请关闭诊断窗口后从主界面的“菜单”重试。',
+      snapshot.harnessVisible
+        ? 'Harness Web 主 Surface 已由 Host Kernel 管理；诊断、Gateway 或更新失败不会替代健康主链。'
+        : 'Harness Web 当前不可见；可关闭诊断窗口后从原生菜单重新显示或恢复。',
     )
   }
 
   async function refresh() {
     try {
-      render(await call('runtime_status'))
+      render(await call('host_snapshot'))
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
     }
@@ -57,23 +72,57 @@
 
   async function quit() {
     $('settings-quit').disabled = true
-    setStatus($('runtime-detail'), '正在关闭 HarnessDock 及其全部后台进程…')
+    setStatus($('runtime-detail'), '正在通过 Host Kernel 关闭 Runtime、Gateway 与客户端…')
     try {
-      await call('app_quit')
+      await host('quit')
     } catch (error) {
-      // The native process may exit before the IPC response is delivered.
-      // Only render an error while the window is still alive.
       setStatus($('runtime-detail'), message(error), true)
       $('settings-quit').disabled = false
     }
   }
 
+  async function installUpdate() {
+    const button = $('update-install')
+    button.disabled = true
+    setStatus($('update-detail'), '正在检查稳定 Release，并验证签名后安装可用更新…')
+    try {
+      await host('install-update')
+      setStatus($('update-detail'), '更新操作已交给 UpdateActor；状态变化将通过 HostEvent 推送。')
+    } catch (error) {
+      setStatus($('update-detail'), message(error), true)
+      button.disabled = false
+    }
+  }
+
+  async function subscribe() {
+    const listen = window.__TAURI__?.event?.listen
+    if (typeof listen !== 'function') return
+    unlistenHostEvent = await listen('harnessdock://host-event', async (event) => {
+      const payload = event?.payload || {}
+      const sequence = Number(payload.sequence || 0)
+      const revision = Number(payload.revision || 0)
+      if (sequence <= lastSequence && revision <= lastRevision) return
+      if (lastSequence && sequence > lastSequence + 1) {
+        // A lost event is repaired by a full source-of-truth snapshot.
+        await refresh()
+        return
+      }
+      lastSequence = sequence
+      lastRevision = revision
+      await refresh()
+    })
+  }
+
   $('runtime-refresh').addEventListener('click', refresh)
   $('settings-quit').addEventListener('click', quit)
+  $('update-install').addEventListener('click', installUpdate)
   $('settings-close').addEventListener('click', async () => {
-    try { await call('shell_settings_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
+    try { await call('diagnostics_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
   })
 
   void refresh()
-  window.setInterval(() => { void refresh() }, 4000)
+  void subscribe().catch((error) => setStatus($('runtime-detail'), message(error), true))
+  window.addEventListener('pagehide', () => {
+    if (typeof unlistenHostEvent === 'function') unlistenHostEvent()
+  }, { once: true })
 })()

@@ -5,7 +5,7 @@ import type { RuntimeMode } from './types.ts'
 export interface ResolvedCommand {
   command: string
   argsPrefix: string[]
-  /** extra environment variables required by this command (e.g. ELECTRON_RUN_AS_NODE) */
+  /** extra environment variables required by this command */
   extraEnv?: Record<string, string>
 }
 

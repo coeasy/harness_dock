@@ -15,6 +15,12 @@ export interface PluginRecoveryPlan {
   reason: PluginRecoveryReason
 }
 
+const HOST_OWNED_PLUGIN_IDS = new Set([
+  'embedded-client',
+  'harnessdock-client-runtime-compat',
+  'harness-shell',
+])
+
 function decodeYamlScalar(raw: string): string {
   const value = raw.trim()
   if (value.startsWith('"') && value.endsWith('"')) {
@@ -94,12 +100,18 @@ export function isOfficialDshSource(source: string): boolean {
   return source.startsWith('@deepseek-ai/') || normalized.includes('/node_modules/@deepseek-ai/')
 }
 
+function isOfficialPluginRow(row: Pick<ConfigDumpRow, 'source' | 'name'>): boolean {
+  if (isOfficialDshSource(row.source)) return true
+  const name = row.name ?? ''
+  return isOfficialDshSource(name)
+}
+
 export function pluginRecoveryCandidates(rows: readonly ConfigDumpRow[]): ConfigDumpRow[] {
   return rows.filter(
     (row) =>
-      row.id !== 'embedded-client' &&
+      !HOST_OWNED_PLUGIN_IDS.has(row.id) &&
       row.source !== '' &&
-      !isOfficialDshSource(row.source),
+      !isOfficialPluginRow(row),
   )
 }
 

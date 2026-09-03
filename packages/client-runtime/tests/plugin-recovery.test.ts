@@ -23,19 +23,45 @@ const dump = `# == @deepseek-ai/dsh-bundle-base
 # == C:\\Temp\\embedded.patch.yml
 - id: embedded-client
   name: 'file:///C:/HarnessDock/embedded.js'
+- id: harnessdock-client-runtime-compat
+  name: 'file:///C:/HarnessDock/compat.js'
+- id: harness-shell
+  name: 'file:///C:/HarnessDock/shell.js'
 `
 
 describe('plugin recovery config dump parsing', () => {
   it('tracks row origin, patches and names without evaluating plugins', () => {
     const rows = parseConfigDumpRows(dump)
-    expect(rows.map((row) => row.id)).toEqual(['official-core', 'official-web', 'old-market-plugin', 'user-added', 'embedded-client'])
+    expect(rows.map((row) => row.id)).toEqual([
+      'official-core',
+      'official-web',
+      'old-market-plugin',
+      'user-added',
+      'embedded-client',
+      'harnessdock-client-runtime-compat',
+      'harness-shell',
+    ])
     expect(rows[1]?.patchedBy).toEqual(['C:\\Users\\me\\.dsh\\profiles\\web\\cordis.patch.yml'])
     expect(rows[2]?.source).toBe('third-party-bundle')
     expect(rows[3]?.name).toBe('file:///C:/Users/me/plugin.js')
   })
 
-  it('never selects official dsh rows or the HarnessDock bridge for fallback isolation', () => {
-    const rows = parseConfigDumpRows(dump)
+  it('never selects official dsh rows or HarnessDock-owned plugins for fallback isolation', () => {
+    const rows = [
+      ...parseConfigDumpRows(dump),
+      {
+        id: 'official-name-only',
+        name: '@deepseek-ai/plugin-name-only',
+        source: 'third-party-bundle',
+        patchedBy: [],
+      },
+      {
+        id: 'official-path-name-only',
+        name: 'C:\\runtime\\node_modules\\@deepseek-ai\\plugin-path-name-only',
+        source: 'third-party-bundle',
+        patchedBy: [],
+      },
+    ]
     expect(isOfficialDshSource('@deepseek-ai/dsh-bundle-web')).toBe(true)
     expect(isOfficialDshSource('C:\\runtime\\node_modules\\@deepseek-ai\\plugin')).toBe(true)
     expect(pluginRecoveryCandidates(rows).map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
@@ -60,10 +86,10 @@ describe('plugin recovery config dump parsing', () => {
     expect(plan.reason).toBe('ambiguous')
   })
 
-  it('keeps official and embedded plugins enabled when multiple third-party plugins are incompatible', () => {
+  it('keeps official and all HarnessDock-owned plugins enabled when multiple third-party plugins are incompatible', () => {
     const selected = selectPluginRecoveryRows(parseConfigDumpRows(dump), 'old-market-plugin failed before user-added could initialize')
     expect(selected.map((row) => row.id)).toEqual(['old-market-plugin', 'user-added'])
-    expect(selected.some((row) => row.id === 'official-core' || row.id === 'official-web' || row.id === 'embedded-client')).toBe(false)
+    expect(selected.some((row) => ['official-core', 'official-web', 'embedded-client', 'harnessdock-client-runtime-compat', 'harness-shell'].includes(row.id))).toBe(false)
   })
 
   it('renders a temporary disabled overlay and de-duplicates row ids', () => {

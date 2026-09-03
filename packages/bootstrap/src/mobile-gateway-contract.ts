@@ -8,6 +8,7 @@ export interface HarnessGatewayHealthPayload {
   ok: boolean
   provider: 'remote'
   appUrl?: string
+  message?: string
 }
 
 export interface HarnessGatewayPairRequest {
@@ -39,11 +40,51 @@ export function normalizeHarnessGatewayOrigin(value: string): URL {
 }
 
 export function assertGatewayConnectUrl(base: string | URL, connectUrl: string): URL {
-  const origin = typeof base === 'string' ? normalizeHarnessGatewayOrigin(base) : base
-  const connect = new URL(connectUrl)
-  if (connect.origin !== origin.origin) throw new Error('Gateway connect URL changed origin.')
+  const origin = normalizeHarnessGatewayOrigin(typeof base === 'string' ? base : base.toString())
+  const connect = new URL(connectUrl.trim())
+  if (connect.origin !== origin.origin) throw new Error('Gateway connect URL changed origin; cross-origin handoff rejected.')
   if (connect.protocol !== 'https:' && !(connect.protocol === 'http:' && isLoopback(connect.hostname))) {
     throw new Error('Gateway connect URL is not secure.')
   }
+  if (
+    connect.username ||
+    connect.password ||
+    connect.pathname !== '/api/harnessdock/connect' ||
+    connect.hash ||
+    connect.searchParams.size !== 1 ||
+    !connect.searchParams.get('token')
+  ) {
+    throw new Error('Gateway connect URL is not a valid one-time handoff URL.')
+  }
   return connect
+}
+
+export function assertGatewayHealthPayload(
+  base: string | URL,
+  value: unknown,
+): HarnessGatewayHealthPayload {
+  const origin = normalizeHarnessGatewayOrigin(typeof base === 'string' ? base : base.toString())
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Gateway health response is not an object.')
+  }
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== HARNESS_GATEWAY_PROTOCOL_VERSION ||
+    typeof record.ok !== 'boolean' ||
+    record.provider !== 'remote'
+  ) {
+    throw new Error('Gateway health response does not match the supported contract.')
+  }
+  if (record.appUrl !== undefined) {
+    if (typeof record.appUrl !== 'string') throw new Error('Gateway health appUrl is invalid.')
+    const appUrl = normalizeHarnessGatewayOrigin(record.appUrl)
+    if (appUrl.origin !== origin.origin) throw new Error('Gateway health appUrl changed origin.')
+  }
+  return {
+    schemaVersion: HARNESS_GATEWAY_PROTOCOL_VERSION,
+    ok: record.ok,
+    provider: 'remote',
+    ...(typeof record.appUrl === 'string' ? { appUrl: record.appUrl } : {}),
+    ...(typeof record.message === 'string' ? { message: record.message } : {}),
+  }
 }

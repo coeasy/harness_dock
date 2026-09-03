@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  dev-dsh.sh - start the dsh web process only (no Electron)
+#  dev-dsh.sh - start the dsh web process only (no desktop client)
 #
 #  Prints the web UI URL once the embedded plugin is ready.
 #  Runtime mode auto-detects bundled (runtimes/pack) first,

@@ -60,6 +60,89 @@ function asServer(value) {
   return value && typeof value === "object" ? value : void 0;
 }
 
+// src/web-auth.ts
+function readConnection(ctx) {
+  if (!ctx || typeof ctx !== "object") return void 0;
+  const root = ctx;
+  const get = root.get;
+  if (typeof get !== "function") return void 0;
+  try {
+    const value = get.call(ctx, "connection");
+    return value && typeof value === "object" ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function browserUrlFor(ctx, baseUrl) {
+  const connection = readConnection(ctx);
+  if (typeof connection?.authenticatedUrl !== "function") return baseUrl;
+  try {
+    return connection.authenticatedUrl(baseUrl);
+  } catch {
+    return baseUrl;
+  }
+}
+function cookiePair(setCookie) {
+  if (!setCookie) return void 0;
+  const pair = setCookie.split(";", 1)[0]?.trim();
+  return pair ? pair : void 0;
+}
+function isLoopbackHost(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+function safeBrowserUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:" || !isLoopbackHost(url.hostname)) return null;
+    if (url.username || url.password || url.hash) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+function sameOriginLocation(location, base) {
+  try {
+    const resolved = new URL(location, base);
+    return resolved.origin === base.origin ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+async function htmlResponse(response) {
+  if (!response.ok) return false;
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType !== "" && !contentType.includes("text/html")) return false;
+  const html = await response.text();
+  return /<!doctype\s+html|<html(?:\s|>)/i.test(html);
+}
+async function probeBrowserUrl(url, timeoutMs = 1e3) {
+  const baseUrl = safeBrowserUrl(url);
+  if (!baseUrl) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const initial = await fetch(baseUrl, { signal: controller.signal, redirect: "manual" });
+    if (await htmlResponse(initial)) return true;
+    if (initial.status !== 303) return false;
+    const location = initial.headers.get("location");
+    const cookie = cookiePair(initial.headers.get("set-cookie"));
+    if (!location || !cookie) return false;
+    const cleanUrl = sameOriginLocation(location, baseUrl);
+    if (!cleanUrl) return false;
+    const page = await fetch(cleanUrl, {
+      signal: controller.signal,
+      redirect: "manual",
+      headers: { cookie }
+    });
+    return htmlResponse(page);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // src/index.ts
 var name = "embedded-client";
 var inject = ["webServer"];
@@ -73,20 +156,25 @@ function apply(ctx) {
     if (written || checking || disposed) return;
     const addr = findListenAddress(ctx);
     if (!addr) return;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+    const browserUrl = browserUrlFor(ctx, baseUrl);
     checking = true;
-    void probeWebUi(addr.port).then((ready) => {
+    void probeBrowserUrl(browserUrl).then((ready) => {
       checking = false;
       if (!ready || written || disposed) return;
       try {
         const payload = {
-          url: `http://127.0.0.1:${addr.port}`,
+          url: browserUrl,
           host: "127.0.0.1",
           port: addr.port,
           pid: process.pid,
           dshVersion: process.env.DSH_EMBEDDED_VERSION ?? "unknown"
         };
         writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}
-`, "utf8");
+`, {
+          encoding: "utf8",
+          mode: 384
+        });
         written = true;
       } catch {
       }
@@ -109,25 +197,6 @@ function apply(ctx) {
     disposed = true;
     clearInterval(timer);
   });
-}
-async function probeWebUi(port) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1e3);
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/`, {
-      signal: controller.signal,
-      redirect: "manual"
-    });
-    if (!response.ok) return false;
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType !== "" && !contentType.toLowerCase().includes("text/html")) return false;
-    const html = await response.text();
-    return /<!doctype\s+html|<html(?:\s|>)/i.test(html);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 export {
   apply,

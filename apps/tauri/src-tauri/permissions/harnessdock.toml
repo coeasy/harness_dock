@@ -10,60 +10,70 @@ commands.allow = ["gateway_health"]
 
 [[permission]]
 identifier = "gateway-pair"
-description = "Allows the bundled launcher to exchange an explicit one-time pairing code for a Gateway connection URL."
+description = "Allows the bundled launcher to exchange an explicit one-time pairing code for a Gateway connection."
 commands.allow = ["pair_gateway"]
 
 [[permission]]
 identifier = "gateway-host"
-description = "Allows the local desktop control window to manage its owned Mobile Gateway sidecar."
+description = "Legacy local control adapter for the owned Native GatewayActor; remote Harness Web never receives it."
 commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_create_pairing", "gateway_host_revoke", "gateway_host_revoke_all", "gateway_host_stop"]
 
 [[permission]]
+identifier = "host-protocol"
+description = "Allows an eligible surface to use the typed Host Protocol. Authority is re-derived from real WebView identity and current RuntimeLease by the Capability Broker."
+commands.allow = ["host_execute", "host_snapshot"]
+
+[[permission]]
 identifier = "harness-window"
-description = "Allows only the local control window to open or close the IPC-free loopback Harness WebView."
-commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "control_hide", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart"]
+description = "Legacy local control primitives for the managed Harness WebView; remote Harness Web receives only harness-shell plus Host Protocol."
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart"]
 
 [[permission]]
 identifier = "runtime-status"
-description = "Allows the bundled desktop launcher to read local Runtime state."
-commands.allow = ["runtime_status"]
+description = "Allows the bundled local control surface to read local Runtime state during migration."
+commands.allow = ["runtime_status", "public_runtime_status"]
 
 [[permission]]
 identifier = "runtime-start"
-description = "Allows the bundled desktop launcher to start the packaged DeepSeek Harness Runtime."
+description = "Allows the bundled local control surface to start the packaged Runtime during migration."
 commands.allow = ["runtime_start"]
 
 [[permission]]
 identifier = "runtime-stop"
-description = "Allows the bundled desktop launcher to stop its owned DeepSeek Harness Runtime."
+description = "Allows the bundled local control surface to stop its owned Runtime during migration."
 commands.allow = ["runtime_stop"]
 
 [[permission]]
 identifier = "runtime-maintenance"
-description = "Allows the local HarnessDock control surfaces to clear a persisted plugin quarantine record."
+description = "Allows trusted local control surfaces to clear persisted plugin quarantine state."
 commands.allow = ["runtime_clear_plugin_quarantine"]
 
 [[permission]]
 identifier = "update-check"
-description = "Allows the local Plugin Diagnostics window to check the official project release feed for a newer version."
+description = "Allows a trusted local window to check the official project release feed."
 commands.allow = ["update_check"]
 
 [[permission]]
 identifier = "update-install"
-description = "Allows a local desktop surface to install only a signed HarnessDock update and restart the client."
+description = "Allows a trusted local desktop surface to install only a signed HarnessDock update."
 commands.allow = ["update_install"]
 
 [[permission]]
 identifier = "harness-shell"
-description = "Allows the loopback Harness WebView to open the separate on-demand Plugin Diagnostics window, run signed updates, and control only its own window."
-commands.allow = ["shell_settings_show", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_close", "harness_reload_web", "harness_restart_web", "harness_clear_quarantine_restart", "update_install"]
+description = "Allows remote Harness Web only minimum native window primitives. Business operations cross Host Protocol and Capability Broker."
+commands.allow = ["harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_shell_close"]
 
 [[permission]]
 identifier = "shell-settings"
-description = "Allows only the local Plugin Diagnostics window to inspect the owned Runtime and exit the client."
-commands.allow = ["shell_settings_close", "runtime_status", "app_quit"]
+description = "Allows the local on-demand Diagnostics window only to destroy itself; state and business operations use Host Protocol."
+commands.allow = ["diagnostics_close"]
 
 [[permission]]
 identifier = "splash-status"
 description = "Allows the bundled launcher to update its desktop startup animation."
 commands.allow = ["splash_status"]
+
+[[permission]]
+identifier = "startup-recovery-status"
+description = "Allows the bundled launcher to read a native startup recovery error created before its page finished loading."
+commands.allow = ["startup_recovery_status"]

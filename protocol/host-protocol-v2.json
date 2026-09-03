@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "subjects": [
+    { "rust": "DesktopShell", "wire": "desktop-shell" },
+    { "rust": "HarnessWeb", "wire": "harness-web" },
+    { "rust": "NativeMenu", "wire": "native-menu" },
+    { "rust": "Tray", "wire": "tray" },
+    { "rust": "Diagnostics", "wire": "diagnostics" },
+    { "rust": "Mobile", "wire": "mobile" }
+  ],
+  "capabilities": [
+    { "rust": "WindowControl", "wire": "window-control" },
+    { "rust": "WebReload", "wire": "web-reload" },
+    { "rust": "RuntimeRestart", "wire": "runtime-restart" },
+    { "rust": "RuntimeSafeMode", "wire": "runtime-safe-mode" },
+    { "rust": "RuntimeQuarantineAdmin", "wire": "runtime-quarantine-admin" },
+    { "rust": "SurfaceOpenGateway", "wire": "surface-open-gateway" },
+    { "rust": "GatewayAdmin", "wire": "gateway-admin" },
+    { "rust": "SurfaceOpenDiagnostics", "wire": "surface-open-diagnostics" },
+    { "rust": "DiagnosticsRead", "wire": "diagnostics-read" },
+    { "rust": "DiagnosticsExport", "wire": "diagnostics-export" },
+    { "rust": "PluginAdmin", "wire": "plugin-admin" },
+    { "rust": "ProfileAdmin", "wire": "profile-admin" },
+    { "rust": "CliAdmin", "wire": "cli-admin" },
+    { "rust": "UpdateCheck", "wire": "update-check" },
+    { "rust": "UpdateInstall", "wire": "update-install" },
+    { "rust": "AppQuit", "wire": "app-quit" }
+  ],
+  "commands": [
+    { "rust": "RefreshHarness", "wire": "refresh-harness", "capability": "WebReload" },
+    { "rust": "RestartRuntime", "wire": "restart-runtime", "capability": "RuntimeRestart" },
+    { "rust": "StartSafeMode", "wire": "start-safe-mode", "capability": "RuntimeSafeMode" },
+    { "rust": "ClearQuarantine", "wire": "clear-quarantine", "capability": "RuntimeQuarantineAdmin" },
+    { "rust": "ShowGateway", "wire": "show-gateway", "capability": "SurfaceOpenGateway" },
+    { "rust": "ShowDiagnostics", "wire": "show-diagnostics", "capability": "SurfaceOpenDiagnostics" },
+    { "rust": "InstallUpdate", "wire": "install-update", "capability": "UpdateInstall" },
+    { "rust": "Quit", "wire": "quit", "capability": "AppQuit" }
+  ]
+}

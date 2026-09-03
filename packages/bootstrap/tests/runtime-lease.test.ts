@@ -24,10 +24,10 @@ describe('runtime lease v2', () => {
   it('blocks a second live host and exposes canonical v2 ownership', async () => {
     const root = await tempRoot()
     const first = await acquireRuntimeLease({
-      host: 'electron',
+      host: 'tauri',
       hostPid: 101,
       leaseRoot: root,
-      token: 'electron-token',
+      token: 'tauri-token-1',
       isPidAlive: (pid) => pid === 101,
     })
     await first.updateRuntime({
@@ -50,9 +50,9 @@ describe('runtime lease v2', () => {
       name: 'RuntimeLeaseConflictError',
       holder: expect.objectContaining({
         schemaVersion: 2,
-        ownerHost: 'electron',
+        ownerHost: 'tauri',
         ownerPid: 101,
-        host: 'electron',
+        host: 'tauri',
         hostPid: 101,
         runtimePid: 202,
         runtimeId: 'runtime-1',
@@ -62,41 +62,6 @@ describe('runtime lease v2', () => {
     } satisfies Partial<RuntimeLeaseConflictError>)
 
     await first.release()
-    expect(await inspectRuntimeLease(root)).toBeNull()
-  })
-
-  it('normalizes the legacy Perry host name and protects replacement owners', async () => {
-    const root = await tempRoot()
-    const stale = await acquireRuntimeLease({
-      host: 'electron',
-      hostPid: 111,
-      leaseRoot: root,
-      token: 'stale-token',
-      isPidAlive: () => true,
-    })
-
-    const replacement = await acquireRuntimeLease({
-      host: 'perry',
-      hostPid: 222,
-      leaseRoot: root,
-      token: 'new-token',
-      isPidAlive: () => false,
-    })
-
-    expect(replacement.host).toBe('perry-desktop')
-    expect(replacement.ownerHost).toBe('perry-desktop')
-    await stale.release()
-    expect(await inspectRuntimeLease(root)).toMatchObject({
-      schemaVersion: 2,
-      token: 'new-token',
-      ownerHost: 'perry-desktop',
-      ownerPid: 222,
-      host: 'perry-desktop',
-      hostPid: 222,
-      protocolVersion: 1,
-    })
-
-    await replacement.release()
     expect(await inspectRuntimeLease(root)).toBeNull()
   })
 
@@ -129,6 +94,39 @@ describe('runtime lease v2', () => {
       acquiredAt: '2026-08-29T00:00:00.000Z',
       updatedAt: '2026-08-29T00:00:01.000Z',
     })
+  })
+
+  it('atomically reclaims a stale lock without deleting the next owner', async () => {
+    const root = await tempRoot()
+    const stale = {
+      schemaVersion: 2,
+      token: 'stale-token',
+      ownerHost: 'tauri',
+      ownerPid: 777,
+      host: 'tauri',
+      hostPid: 777,
+      protocolVersion: 1,
+      acquiredAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:01.000Z',
+    }
+    await writeFile(path.join(root, 'runtime.lock'), `${JSON.stringify(stale)}\n`, 'utf8')
+    await writeFile(path.join(root, 'active.json'), `${JSON.stringify(stale)}\n`, 'utf8')
+
+    const lease = await acquireRuntimeLease({
+      host: 'tauri',
+      hostPid: 888,
+      leaseRoot: root,
+      token: 'fresh-token',
+      isPidAlive: () => false,
+    })
+
+    expect(await inspectRuntimeLease(root)).toMatchObject({
+      token: 'fresh-token',
+      ownerHost: 'tauri',
+      ownerPid: 888,
+    })
+    await lease.release()
+    expect(await inspectRuntimeLease(root)).toBeNull()
   })
 
   it('heartbeats active ownership without weakening token-safe release', async () => {

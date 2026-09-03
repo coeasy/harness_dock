@@ -1,3 +1,8 @@
+import {
+  assertGatewayConnectUrl,
+  assertGatewayHealthPayload,
+} from './mobile-gateway-contract.ts'
+
 export type RuntimeProviderKind = 'local' | 'remote'
 
 /**
@@ -60,7 +65,8 @@ interface HealthResponse {
 }
 
 function isLoopback(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1'
+  const value = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  return value === 'localhost' || value === '127.0.0.1' || value === '::1'
 }
 
 export function normalizeRemoteGatewayUrl(
@@ -74,10 +80,16 @@ export function normalizeRemoteGatewayUrl(
       throw new Error('HarnessDock remote gateways must use HTTPS (HTTP is allowed only for loopback development).')
     }
   }
-  url.username = ''
-  url.password = ''
-  url.hash = ''
-  if (!url.pathname.endsWith('/')) url.pathname = `${url.pathname}/`
+  if (url.pathname !== '/' && url.pathname !== '') {
+    throw new Error('HarnessDock remote gateway URLs must be origin roots.')
+  }
+  if (url.search || url.hash) {
+    throw new Error('HarnessDock remote gateway URLs must not contain query or fragment.')
+  }
+  if (url.username || url.password) {
+    throw new Error('HarnessDock remote gateway URLs must not contain credentials.')
+  }
+  url.pathname = '/'
   return url
 }
 
@@ -87,10 +99,7 @@ function assertPairResponse(value: unknown, gateway: URL): PairResponse {
   if (typeof record.connectUrl !== 'string' || typeof record.expiresAt !== 'string') {
     throw new Error('Gateway pairing response is missing connectUrl/expiresAt.')
   }
-  const connectUrl = new URL(record.connectUrl)
-  if (connectUrl.origin !== gateway.origin) {
-    throw new Error(`Gateway returned a cross-origin connect URL (${connectUrl.origin}).`)
-  }
+  const connectUrl = assertGatewayConnectUrl(gateway, record.connectUrl)
   return {
     connectUrl: connectUrl.toString(),
     expiresAt: record.expiresAt,
@@ -111,6 +120,9 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
   private readonly pairingCode: string
   private readonly deviceName: string
   private session: RuntimeSession | undefined
+  private connectPromise: Promise<RuntimeSession> | undefined
+  private disconnectPromise: Promise<void> | undefined
+  private disconnectRequested = false
 
   constructor(options: RemoteRuntimeProviderOptions) {
     this.gateway = normalizeRemoteGatewayUrl(options.gatewayUrl, {
@@ -123,6 +135,27 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
   }
 
   async connect(): Promise<RuntimeSession> {
+    if (this.connectPromise) return this.connectPromise
+    const pendingDisconnect = this.disconnectPromise
+    const operation = (async (): Promise<RuntimeSession> => {
+      if (pendingDisconnect) await pendingDisconnect
+      this.disconnectRequested = false
+      const session = await this.connectImpl()
+      if (this.disconnectRequested) {
+        this.session = undefined
+        throw new Error('Remote runtime connection cancelled by disconnect request.')
+      }
+      return session
+    })()
+    this.connectPromise = operation
+    try {
+      return await operation
+    } finally {
+      if (this.connectPromise === operation) this.connectPromise = undefined
+    }
+  }
+
+  private async connectImpl(): Promise<RuntimeSession> {
     const endpoint = new URL('api/harnessdock/pair', this.gateway)
     const response = await this.fetchImpl(endpoint.toString(), {
       method: 'POST',
@@ -134,6 +167,9 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
       throw new Error(`Gateway pairing failed (${response.status})${detail ? `: ${detail}` : ''}`)
     }
     const pair = assertPairResponse(await response.json(), this.gateway)
+    if (this.disconnectRequested) {
+      throw new Error('Remote runtime connection cancelled by disconnect request.')
+    }
     this.session = {
       provider: 'remote',
       appUrl: pair.connectUrl,
@@ -151,7 +187,7 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
       if (!response.ok) {
         return { ok: false, provider: 'remote', message: `Gateway health returned ${response.status}.` }
       }
-      const body = (await response.json()) as HealthResponse
+      const body = assertGatewayHealthPayload(this.gateway, await response.json()) as HealthResponse
       return {
         ok: body.ok !== false,
         provider: 'remote',
@@ -169,6 +205,18 @@ export class RemoteRuntimeProvider implements RuntimeProvider {
   }
 
   async disconnect(): Promise<void> {
-    this.session = undefined
+    if (this.disconnectPromise) return this.disconnectPromise
+    this.disconnectRequested = true
+    const connecting = this.connectPromise
+    const operation = (async (): Promise<void> => {
+      await connecting?.catch(() => undefined)
+      this.session = undefined
+    })()
+    this.disconnectPromise = operation
+    try {
+      await operation
+    } finally {
+      if (this.disconnectPromise === operation) this.disconnectPromise = undefined
+    }
   }
 }

@@ -3,7 +3,7 @@
  *
  * No `vscode` imports here on purpose: every decision the extension makes about
  * whether to start, reuse, or stop the shared runtime is computed in this
- * module so it can be unit-tested without an Electron / VS Code runtime.
+ * module so it can be unit-tested without a VS Code runtime.
  *
  * Model:
  *   - the extension hosts a single shared runtime; every webview panel embeds
