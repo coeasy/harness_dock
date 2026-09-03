@@ -10,6 +10,7 @@ mod platform;
 mod plugin_quarantine;
 mod process;
 mod runtime;
+mod runtime_actor;
 mod service;
 #[cfg(not(mobile))]
 mod startup;
@@ -48,7 +49,9 @@ pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_manag
 /// These implementation details live in `desktop.rs`, `state.rs`,
 /// `service/workflow.rs` and `supervisor.rs`; this root contains no Runtime or
 /// Gateway procedure sequencing. `host_protocol.rs` is the v2 typed contract
-/// boundary used by native adapters during Round 1.
+/// boundary used by native adapters during Round 1. `runtime_actor.rs` is the
+/// Round-2 lifecycle source of truth that will replace the temporary AtomicBool
+/// runtime guards as process ownership migrates behind the actor boundary.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(mobile))]
