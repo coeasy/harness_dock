@@ -57,6 +57,8 @@ pub enum Capability {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum HostCommand {
+    #[serde(rename = "activate-primary")]
+    ActivatePrimary,
     #[serde(rename = "refresh-harness")]
     RefreshHarness,
     #[serde(rename = "restart-runtime")]
@@ -78,6 +80,7 @@ pub enum HostCommand {
 impl HostCommand {
     pub const fn capability(&self) -> Capability {
         match self {
+            Self::ActivatePrimary => Capability::WindowControl,
             Self::RefreshHarness => Capability::WebReload,
             Self::RestartRuntime => Capability::RuntimeRestart,
             Self::StartSafeMode => Capability::RuntimeSafeMode,
