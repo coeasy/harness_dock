@@ -59,6 +59,18 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
     runtime::stop_managed(&state.runtime);
 }
 
+/// Runtime ownership is upstream of Gateway ownership. A public Runtime stop
+/// must therefore invalidate both an already-running Gateway and any Gateway
+/// start that is still waiting for its ready file. Keeping this invariant in
+/// the native command prevents renderer ordering from becoming a correctness
+/// requirement.
+#[tauri::command]
+fn runtime_stop(state: tauri::State<'_, AppState>) -> Result<runtime::RuntimeStatus, String> {
+    state.gateway_generation.fetch_add(1, Ordering::AcqRel);
+    gateway_host::stop_managed(&state.gateway);
+    runtime::runtime_stop(state)
+}
+
 #[cfg(not(mobile))]
 pub(crate) fn report_shell_error(app: &tauri::AppHandle, error: &str) {
     eprintln!("HarnessDock shell action failed: {error}");
@@ -214,7 +226,7 @@ pub fn run() {
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_restart,
-            runtime::runtime_stop,
+            runtime_stop,
             runtime::runtime_clear_plugin_quarantine,
             update::update_check,
             update::update_install,
