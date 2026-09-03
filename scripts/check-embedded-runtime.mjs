@@ -13,6 +13,10 @@ const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
 const runtimePackage = readJson('packages/client-runtime/package.json')
 const prepare = read('packages/client-runtime/src/prepare-cli.ts')
 const nodePrune = read('packages/client-runtime/src/node-runtime-prune.ts')
+const finalPrune = read('packages/client-runtime/src/prune-node-cli.ts')
+const imageIdentity = read('packages/client-runtime/src/image-identity.ts')
+const smoke = read('packages/client-runtime/src/smoke-cli.ts')
+const runtimeBundle = read('packages/client-runtime/src/runtime-bundle.ts')
 const pnpmTool = read('packages/client-runtime/src/pnpm-tool.ts')
 const pnpmEnsure = read('packages/client-runtime/src/ensure-pnpm-cli.ts')
 
@@ -70,6 +74,29 @@ if (
 ) {
   fail('compact Node pruning must remove bundled npm/corepack payloads without deleting dsh')
 }
+if (!imageIdentity.includes("IDENTITY_ALGORITHM = 'sha256-v1'")) {
+  fail('Runtime image identity must use the frozen deterministic SHA-256 v1 contract')
+}
+if (!finalPrune.includes('computeRuntimeImageIdentity(dest)')) {
+  fail('the final Runtime build pass must seal the exact post-pruning image identity')
+}
+for (const [source, name] of [
+  [smoke, 'smoke gate'],
+  [runtimeBundle, 'runtime bundle installer'],
+]) {
+  if (!source.includes('assertRuntimeImageIdentity')) {
+    fail(`${name} must reject a Runtime whose sealed image identity no longer matches`)
+  }
+}
+if (!finalPrune.includes('firstLaunchRuntimeDownloadRequired = false')) {
+  fail('sealed Runtime manifest must explicitly prohibit first-launch Runtime download')
+}
+if (!finalPrune.includes('productionClosurePrunedBytes')) {
+  fail('sealed Runtime manifest must retain production-closure pruning accounting')
+}
+if (!finalPrune.includes('buildCommit')) {
+  fail('sealed Runtime manifest must bind the image to the HarnessDock build commit')
+}
 if (!pnpmTool.includes("PNPM_BUNDLE_VERSION = '11.7.0'")) {
   fail('bundled pnpm must match the pinned DeepSeek Harness package-manager version')
 }
@@ -92,4 +119,4 @@ if (runtime.includes('download Node') || runtime.includes('download dsh')) {
   fail('native first-launch Runtime startup must not download Node or dsh')
 }
 
-console.log('[embedded-runtime] self-contained Full Runtime + plugin-tool contract OK')
+console.log('[embedded-runtime] self-contained sealed Full Runtime + plugin-tool contract OK')
