@@ -38,6 +38,19 @@ describe('v0.2.10 Tauri convergence gates', () => {
     expect(gateway).toContain('runtime_still_matches')
   })
 
+  it('invalidates Gateway ownership whenever the public Runtime stop command runs', () => {
+    const host = read('apps/tauri/src-tauri/src/lib.rs')
+    const start = host.indexOf('fn runtime_stop(')
+    const end = host.indexOf('#[cfg(not(mobile))]', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const command = host.slice(start, end)
+    expect(command).toContain('gateway_generation.fetch_add')
+    expect(command).toContain('gateway_host::stop_managed(&state.gateway)')
+    expect(command).toContain('runtime::runtime_stop(state)')
+    expect(host).toContain('runtime_stop,')
+  })
+
   it('detects dead Gateway children and binds ready metadata to the managed PID', () => {
     const gateway = read('apps/tauri/src-tauri/src/gateway_host.rs')
     expect(gateway).toContain('fn is_alive(&mut self) -> bool')
