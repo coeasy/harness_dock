@@ -15,6 +15,7 @@ const state = read('apps/tauri/src-tauri/src/state.rs')
 const processControl = read('apps/tauri/src-tauri/src/process.rs')
 const gatewayHost = read('apps/tauri/src-tauri/src/gateway_host.rs')
 const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
+const platform = read('apps/tauri/src-tauri/src/platform.rs')
 const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
 const embeddedReadyProducer = read('packages/plugin-embedded-client/src/index.ts')
 const shellCapability = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
@@ -86,7 +87,9 @@ for (const marker of [
 ]) {
   requireText(embeddedReadyProducer, marker, `embedded ready producer missing generation binding: ${marker}`)
 }
-forbidText(runtime, 'resolve_system_node', 'formal desktop Runtime must not fall back to a system Node installation')
+for (const forbidden of ['resolve_system_node', 'HARNESSDOCK_USE_SYSTEM_NODE', 'HARNESSDOCK_NODE_BIN']) {
+  forbidText(runtime, forbidden, 'formal desktop Runtime must not fall back to a system Node installation')
+}
 forbidText(runtime, 'first-run Runtime download', 'native first-launch Runtime startup must not contain a Runtime download path')
 
 // RuntimeActor is the lifecycle source of truth. Transitional booleans may not
@@ -153,7 +156,21 @@ requireText(pnpmTool, "PNPM_BUNDLE_VERSION = '11.7.0'", 'bundled pnpm must match
 requireText(pnpmTool, 'deafa7ec98a1218b6a047289b92fbe2395c1e22d3495bb711653013218ee15ee', 'bundled pnpm tarball must be pinned by SHA-256')
 requireText(pnpmEnsure, 'PNPM_BUNDLE_SHA256', 'pnpm preparation must verify the pinned tarball digest before extraction')
 requireText(pnpmEnsure, 'pluginManagementReady = true', 'bundled Runtime manifest must record that plugin management tooling is ready')
-requireText(desktop, 'configure_embedded_runtime_tool_path', 'desktop adapter must expose embedded Runtime tools to dsh child processes')
-requireText(desktop, 'runtime.join("tools").join("bin")', 'desktop adapter must prepend the embedded pnpm shim directory to PATH')
+
+// ExecEnvironment is explicit and child-scoped. The Host process PATH is not a
+// Runtime integration surface, and production may not rediscover system Node.
+forbidText(desktop, 'set_var("PATH"', 'desktop Host adapter must never mutate the process PATH')
+forbidText(desktop, 'configure_embedded_runtime_tool_path', 'desktop Host adapter must not install a global Runtime tool PATH')
+for (const marker of [
+  'configure_embedded_runtime_environment',
+  'command.get_program()',
+  'root.join("tools").join("bin")',
+  'command.env("PATH", joined)',
+]) {
+  requireText(platform, marker, `managed Runtime child ExecEnvironment missing ${marker}`)
+}
+for (const forbidden of ['HARNESSDOCK_USE_SYSTEM_NODE', 'HARNESSDOCK_NODE_BIN', 'find_usable_system_node', 'resolve_node']) {
+  forbidText(platform, forbidden, 'formal desktop Runtime must not contain a production system Node fallback')
+}
 
 console.log('[embedded-runtime] Native Host + sealed Full Runtime invariants OK')
