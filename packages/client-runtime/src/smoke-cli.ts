@@ -8,6 +8,7 @@ import { DshRuntime } from './runtime.ts'
 import { redactWebAuthTokens } from './output.ts'
 import { openWebUiSession, probeWebUiSession } from './web-auth.ts'
 import { assertBundledRuntimeIntegrity, repairKnownRuntimeAssets } from './integrity.ts'
+import { assertRuntimeImageIdentity } from './image-identity.ts'
 
 const cliArgs = process.argv.slice(2)
 if (cliArgs[0] === '--') cliArgs.shift()
@@ -39,10 +40,15 @@ const compatibilityPath = path.join(
 )
 const manifest = JSON.parse(
   await readFile(path.join(runtimeDir, 'manifest.json'), 'utf8'),
-) as { dshVersion?: unknown; platform?: unknown; arch?: unknown }
+) as Record<string, unknown> & { dshVersion?: unknown; platform?: unknown; arch?: unknown }
+
+// Image identity is platform-independent and must be checked even for a
+// cross-target Runtime that cannot be executed on this runner.
+await assertRuntimeImageIdentity(runtimeDir, manifest)
+
 if (manifest.platform !== process.platform || manifest.arch !== process.arch) {
   console.log(
-    `[smoke] skipped executable boot: target=${manifest.platform}/${manifest.arch} host=${process.platform}/${process.arch}`,
+    `[smoke] sealed image verified; skipped executable boot: target=${manifest.platform}/${manifest.arch} host=${process.platform}/${process.arch}`,
   )
   process.exit(0)
 }
@@ -64,6 +70,7 @@ if (repaired.length > 0) {
   console.log(`[smoke] repaired artifact assets: ${repaired.join(', ')}`)
 }
 await assertBundledRuntimeIntegrity(runtimeDir, process.platform, process.arch)
+await assertRuntimeImageIdentity(runtimeDir, manifest)
 
 const home = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-home-'))
 const work = await mkdtemp(path.join(os.tmpdir(), 'harnessdock-smoke-work-'))
