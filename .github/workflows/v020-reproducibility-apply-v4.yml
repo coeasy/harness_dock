@@ -1,0 +1,84 @@
+name: v020-reproducibility-apply-v4
+
+on:
+  push:
+    branches:
+      - refactor/v0.2.0-shell-first
+    paths:
+      - '.github/workflows/v020-reproducibility-apply-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install Linux Tauri dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+      - name: Fix stale runtime-origin test and freeze dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('apps/tauri/src-tauri/src/harness_window.rs')
+          text = p.read_text()
+          old = '        assert!(validated_runtime_url("https://localhost:4321/").is_ok());\n'
+          new = (
+              '        assert!(validated_runtime_url("https://localhost:4321/").is_err());\n'
+              '        assert!(validated_runtime_url("http://localhost:4321/").is_err());\n'
+              '        assert!(validated_runtime_url("https://127.0.0.1:4321/").is_err());\n'
+          )
+          if text.count(old) != 1:
+              raise SystemExit(f'stale runtime-origin test anchor count: {text.count(old)}')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          cargo generate-lockfile --manifest-path apps/tauri/src-tauri/Cargo.toml
+          test -s apps/tauri/src-tauri/Cargo.lock
+          python scripts/_apply-v020-reproducibility.py
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Rebuild and verify publishable Harness Shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @dsh/plugin-harness-shell build
+          node scripts/check-shell-package.mjs
+      - name: Rebuild Gateway sidecar
+        run: pnpm --filter @dsh/tauri bundle:sidecar
+      - name: Validate frozen v0.2.0 release contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm check:versions
+          pnpm check:release
+          pnpm test
+          cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml -- --check
+          cargo metadata --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --format-version 1 > /dev/null
+          cargo check --locked --manifest-path apps/tauri/src-tauri/Cargo.toml
+          cargo test --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --lib
+      - name: Commit only fully validated round-one fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'coeasy'
+          git config user.email 'mdonetwo@yeah.net'
+          git add rust-toolchain.toml package.json apps/tauri/package.json apps/tauri/src-tauri/Cargo.lock apps/tauri/src-tauri/src/harness_window.rs scripts/check-versions.mjs scripts/check-shell-package.mjs tests/parity/reproducible-release-contract.test.ts .github/workflows/ci.yml .github/workflows/tauri-ci.yml .github/workflows/tauri-candidate.yml
+          git diff --cached --quiet && { echo 'No validated round-one changes to commit.'; exit 1; }
+          git commit -m 'build: freeze Tauri toolchain and runtime origin tests'
+          git push origin HEAD:refactor/v0.2.0-shell-first
