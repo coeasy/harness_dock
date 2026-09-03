@@ -19,6 +19,16 @@ export function apply(ctx: PluginCtx): void {
   const readyFile = process.env.DSH_EMBEDDED_READY_FILE
   if (!readyFile) return
 
+  const generation = Number.parseInt(process.env.HARNESSDOCK_RUNTIME_GENERATION ?? '', 10)
+  const nonce = process.env.HARNESSDOCK_RUNTIME_NONCE ?? ''
+  const imageIdentity = process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY ?? ''
+  if (!Number.isSafeInteger(generation) || generation <= 0 || !nonce || !imageIdentity) {
+    // A packaged Runtime must never publish an unbound ready file. Refusing to
+    // write here makes the native host fail closed instead of accepting stale
+    // readiness from another process/generation.
+    return
+  }
+
   let written = false
   let checking = false
   let disposed = false
@@ -44,6 +54,9 @@ export function apply(ctx: PluginCtx): void {
           port: addr.port,
           pid: process.pid,
           dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'unknown',
+          generation,
+          nonce,
+          imageIdentity,
         }
         writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, {
           encoding: 'utf8',
