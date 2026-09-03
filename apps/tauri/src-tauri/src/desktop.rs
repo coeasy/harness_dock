@@ -4,7 +4,7 @@
 //! native UI events into typed intents; Runtime/Gateway/Update procedure order
 //! belongs exclusively to the Reconciler and Resource Actors.
 
-use std::{env, sync::atomic::Ordering};
+use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
 use crate::{service::workflow, AppState};
@@ -64,31 +64,6 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(mobile))]
-fn configure_embedded_runtime_tool_path(app: &tauri::App) -> Result<(), String> {
-    let resources = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("无法解析 HarnessDock resource 目录: {error}"))?;
-    let runtime = resources.join("dsh-runtime");
-    let tool_bin = runtime.join("tools").join("bin");
-    if !tool_bin.is_dir() {
-        return Ok(());
-    }
-    let node_bin = if cfg!(windows) {
-        runtime
-    } else {
-        runtime.join("bin")
-    };
-    let current = env::var_os("PATH").unwrap_or_default();
-    let mut entries = vec![tool_bin, node_bin];
-    entries.extend(env::split_paths(&current));
-    let joined = env::join_paths(entries)
-        .map_err(|error| format!("无法配置内置 Runtime 工具 PATH: {error}"))?;
-    env::set_var("PATH", joined);
-    Ok(())
-}
-
 fn visible_webview(app: &tauri::AppHandle, label: &str) -> bool {
     app.get_webview_window(label)
         .and_then(|window| window.is_visible().ok())
@@ -109,11 +84,6 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(mobile))]
     {
-        if let Err(error) = configure_embedded_runtime_tool_path(app) {
-            eprintln!(
-                "HarnessDock bundled plugin-management tools unavailable; Harness Web will continue: {error}"
-            );
-        }
         match crate::tray::create_tray(&app.handle()) {
             Ok(()) => app
                 .state::<AppState>()
@@ -169,9 +139,6 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
             event: tauri::WindowEvent::Destroyed,
             ..
         } if label == "control" && !has_primary_surface(app_handle) => {
-            // Recovery is an on-demand surface, not a permanent hidden owner.
-            // If the user closes the last visible recovery surface and there is
-            // no tray/primary surface, exit through the supervised path.
             if !app_handle
                 .state::<AppState>()
                 .tray_available
