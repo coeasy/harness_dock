@@ -20,6 +20,12 @@ mod update;
 pub(crate) use state::AppState;
 pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
 
+// Host Core ownership map: `state.rs` owns lifecycle admissions such as
+// runtime_starting, web_action and harness_loading; `supervisor.rs` owns the
+// spawn_blocking shutdown drain and starting_processes_empty convergence check.
+// Keeping those details out of this composition root prevents duplicated
+// lifecycle policy while leaving their architecture discoverable from lib.rs.
+
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
