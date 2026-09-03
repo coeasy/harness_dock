@@ -8,12 +8,15 @@ const readJson = (relative) => JSON.parse(read(relative))
 
 const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
 const candidate = read('.github/workflows/tauri-candidate.yml')
+const tauriPackage = readJson('apps/tauri/package.json')
 const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
 const runtimeActor = read('apps/tauri/src-tauri/src/runtime_actor.rs')
 const state = read('apps/tauri/src-tauri/src/state.rs')
 const processControl = read('apps/tauri/src-tauri/src/process.rs')
 const gatewayHost = read('apps/tauri/src-tauri/src/gateway_host.rs')
 const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
+const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
+const embeddedReadyProducer = read('packages/plugin-embedded-client/src/index.ts')
 const shellCapability = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
 const runtimePackage = readJson('packages/client-runtime/package.json')
 const prepare = read('packages/client-runtime/src/prepare-cli.ts')
@@ -46,8 +49,15 @@ for (const [marker, message] of [
   ['name: tauri-runtime-${{ matrix.artifact }}', 'candidate must publish a target-specific prepared Runtime artifact'],
   ['path: apps/tauri/src-tauri/resources/dsh-runtime', 'candidate must place the prepared Runtime under Tauri resources'],
   ['pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime', 'candidate must smoke-verify the exact Runtime copied into Tauri resources'],
+  ['check-tauri-size-budget.mjs', 'candidate must enforce desktop package size budgets'],
 ]) {
   requireText(candidate, marker, message)
+}
+for (const forbidden of ['gateway-sidecar', 'bundle:sidecar', 'Bundle Gateway sidecar']) {
+  forbidText(candidate, forbidden, 'candidate workflow must not package the removed Node Gateway sidecar')
+}
+if (Object.prototype.hasOwnProperty.call(tauriPackage.scripts || {}, 'bundle:sidecar')) {
+  fail('Tauri package scripts must not expose the removed Node Gateway sidecar build')
 }
 
 // Native startup must resolve the sealed image from application resources. Do
@@ -57,9 +67,25 @@ if (!/resource_path\(\s*&?app\s*,\s*"dsh-runtime"\s*\)/.test(runtime)) {
 }
 requireText(runtime, 'first_launch_runtime_download_required', 'native Runtime must verify the zero-download manifest contract')
 requireText(runtime, 'image_identity_algorithm', 'native Runtime must verify the sealed image identity algorithm')
-requireText(runtime, 'ready.nonce != expected_generation.nonce', 'Runtime ready handshake must bind the current generation nonce')
-requireText(runtime, 'ready.pid != expected_pid', 'Runtime ready handshake must bind the owned child PID')
-requireText(runtime, 'ready.host != "127.0.0.1"', 'Runtime ready handshake must require loopback')
+for (const marker of [
+  'ready.generation != expected_generation.id',
+  'ready.nonce != expected_generation.nonce',
+  'ready.image_identity != expected_generation.image_identity',
+  'ready.pid != expected_pid',
+  'ready.host != "127.0.0.1"',
+]) {
+  requireText(runtime, marker, `Runtime ready handshake missing required binding: ${marker}`)
+}
+for (const marker of [
+  'HARNESSDOCK_RUNTIME_GENERATION',
+  'HARNESSDOCK_RUNTIME_NONCE',
+  'HARNESSDOCK_RUNTIME_IMAGE_IDENTITY',
+  'generation,',
+  'nonce,',
+  'imageIdentity,',
+]) {
+  requireText(embeddedReadyProducer, marker, `embedded ready producer missing generation binding: ${marker}`)
+}
 forbidText(runtime, 'resolve_system_node', 'formal desktop Runtime must not fall back to a system Node installation')
 forbidText(runtime, 'first-run Runtime download', 'native first-launch Runtime startup must not contain a Runtime download path')
 
@@ -100,6 +126,8 @@ if (!remotePermissions.has('host-protocol') || !remotePermissions.has('harness-s
 for (const forbidden of ['runtime-start', 'runtime-stop', 'runtime-maintenance', 'update-install', 'update-check', 'gateway-host', 'harness-window']) {
   if (remotePermissions.has(forbidden)) fail(`Harness Web must not receive direct privileged permission ${forbidden}`)
 }
+requireText(bridge, 'trusted_subject(&app, &window, envelope.subject)', 'Host Protocol execution must re-derive caller identity from the real WebView')
+requireText(bridge, 'allowed_capabilities(', 'Host snapshot must return Capability Broker-filtered authority')
 
 // Runtime tooling remains self-contained: dsh plugin/profile operations may not
 // depend on a user-installed package manager.
