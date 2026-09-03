@@ -43,6 +43,27 @@ jobs:
           components: rustfmt
       - name: Apply round-two public diagnostics boundary
         run: python scripts/_apply-v020-round2.py
+      - name: Align canonical icon parity contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/parity/tauri-host.test.ts')
+          text = path.read_text()
+          old = """    expect(candidate).toContain('cargo tauri icon src-tauri/icons/app-icon.png')
+              expect(candidate).toContain('Verify Windows installer uses HarnessDock icon')
+              expect(candidate).toContain('Replace default Android launcher icons with HarnessDock')
+              expect(candidate).toContain('Replace default iOS app icons with HarnessDock')"""
+          new = """    expect(candidate).toContain('run: pnpm prepare:icons')
+              expect(candidate).not.toContain('cargo tauri icon src-tauri/icons/app-icon.png')
+              expect(candidate).toContain('Verify Windows installer uses HarnessDock icon')
+              expect(candidate).toContain('Prepare canonical HarnessDock launcher icons')
+              expect(candidate).toContain('Prepare canonical HarnessDock app icons')"""
+          if old not in text:
+              raise SystemExit('stale icon contract block not found')
+          path.write_text(text.replace(old, new))
+          PY
       - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Rebuild Shell and Gateway
         shell: bash
@@ -68,7 +89,7 @@ jobs:
           set -euo pipefail
           git config user.name 'coeasy'
           git config user.email 'mdonetwo@yeah.net'
-          git add apps/tauri/web/app.js packages/plugin-harness-shell/web/shell.js tests/parity/public-diagnostics-redaction.test.ts
+          git add apps/tauri/web/app.js packages/plugin-harness-shell/web/shell.js tests/parity/public-diagnostics-redaction.test.ts tests/parity/tauri-host.test.ts
           git diff --cached --quiet && { echo 'No round-two changes to commit.'; exit 1; }
           git commit -m 'security: redact public runtime diagnostics'
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
