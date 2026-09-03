@@ -1,4 +1,4 @@
-use crate::harness_window;
+use crate::{desktop, service::workflow};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -80,74 +80,25 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .tooltip("HarnessDock")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "tray-open" => show_primary(app),
-            "tray-settings" => {
-                let handle = app.clone();
-                let report_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = harness_window::shell_settings_show(handle).await {
-                        crate::report_shell_error(&report_handle, &error);
-                    }
-                });
-            }
-            "tray-gateway" => {
-                if let Err(error) = harness_window::control_show(app.clone()) {
-                    crate::report_shell_error(app, &error);
+        .on_menu_event(|app, event| {
+            let intent = match event.id.as_ref() {
+                "tray-open" => {
+                    show_primary(app);
+                    None
                 }
+                "tray-settings" => Some(workflow::HostIntent::ShowDiagnostics),
+                "tray-gateway" => Some(workflow::HostIntent::ShowGateway),
+                "tray-refresh" => Some(workflow::HostIntent::RefreshHarness),
+                "tray-restart" => Some(workflow::HostIntent::RestartRuntime),
+                "tray-safe-mode" => Some(workflow::HostIntent::StartSafeMode),
+                "tray-clear-quarantine" => Some(workflow::HostIntent::ClearQuarantine),
+                "tray-update" => Some(workflow::HostIntent::InstallUpdate),
+                "tray-quit" => Some(workflow::HostIntent::Quit),
+                _ => None,
+            };
+            if let Some(intent) = intent {
+                desktop::spawn_intent(app, intent);
             }
-            "tray-refresh" => {
-                let handle = app.clone();
-                let report_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = harness_window::harness_reload_web(handle).await {
-                        crate::report_shell_error(&report_handle, &error);
-                    }
-                });
-            }
-            "tray-restart" => {
-                let handle = app.clone();
-                let report_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    match harness_window::harness_restart_web(handle).await {
-                        Ok(_) => {}
-                        Err(error) => crate::report_shell_error(&report_handle, &error),
-                    }
-                });
-            }
-            "tray-safe-mode" => {
-                let handle = app.clone();
-                let report_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = harness_window::harness_safe_mode_restart(handle).await {
-                        crate::report_shell_error(&report_handle, &error);
-                    }
-                });
-            }
-            "tray-clear-quarantine" => {
-                let handle = app.clone();
-                let report_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) =
-                        harness_window::harness_clear_quarantine_restart(handle).await
-                    {
-                        crate::report_shell_error(&report_handle, &error);
-                    }
-                });
-            }
-            "tray-update" => {
-                let handle = app.clone();
-                let report_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = crate::update::update_install(handle.clone()).await {
-                        crate::report_shell_error(&report_handle, &error);
-                    }
-                });
-            }
-            "tray-quit" => {
-                crate::request_exit(app);
-            }
-            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {

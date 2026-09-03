@@ -20,15 +20,21 @@ mod supervisor;
 mod tray;
 mod update;
 
+pub(crate) use desktop::report_shell_error;
 pub(crate) use state::AppState;
 pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
 
-/// Tauri composition root.
+/// Round-1 architecture index.
 ///
-/// The desktop adapter owns native shell/event integration, `bridge` owns the
-/// IPC surface and `service::workflow` owns application sequencing. Runtime,
-/// Gateway and WebView modules are implementation services and are never
-/// registered directly as public Tauri commands.
+/// Native adapter details such as `tray::create_tray` and
+/// `RunEvent::WindowEvent` live in `desktop.rs`; transition admissions such as
+/// `runtime_starting`, `web_action` and `harness_loading` remain temporarily in
+/// `state.rs`; `harness_safe_mode_restart` is reached through HostIntent;
+/// `spawn_blocking` shutdown drain and `starting_processes_empty` convergence
+/// live in `supervisor.rs`. `report_shell_error` is re-exported above for the
+/// existing shell boundary while Host Protocol v2 is introduced in later
+/// Round-1 commits. This composition root intentionally contains no Runtime or
+/// Gateway procedure sequencing.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(mobile))]
@@ -37,7 +43,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(AppState::default())
         .setup(desktop::setup)
-        .invoke_handler(bridge::handler())
+        .invoke_handler(bridge::handler!())
         .build(tauri::generate_context!())
         .expect("failed to build HarnessDock Tauri application");
 
