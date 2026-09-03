@@ -13,6 +13,9 @@
   ]
   const state = { busy: false, maximized: false, mounted: false }
 
+  // Shell errors can originate in native IPC or third-party hosts. Never put a
+  // reusable launch token, Authorization value, password or query string into
+  // the Harness document even though textContent already prevents HTML injection.
   const publicText = (value) => {
     const raw = value && typeof value === 'object' && 'message' in value
       ? String(value.message || '')
