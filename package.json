@@ -28,7 +28,8 @@
     "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
     "parity": "pnpm --filter @dsh/parity-tests test",
     "dev:dsh": "node --import tsx scripts/dev-dsh.mjs",
-    "start:desktop": "pnpm tauri:dev"
+    "start:desktop": "pnpm tauri:dev",
+    "check:shell-package": "pnpm --filter @dsh/plugin-harness-shell build && node scripts/check-shell-package.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

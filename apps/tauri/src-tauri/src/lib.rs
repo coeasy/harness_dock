@@ -8,9 +8,9 @@ mod process;
 mod runtime;
 #[cfg(not(mobile))]
 mod startup;
-mod update;
 #[cfg(not(mobile))]
 mod tray;
+mod update;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -133,9 +133,10 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         .item(&shell)
         .build()
         .map_err(|error| format!("无法创建 HarnessDock 菜单: {error}"))?;
-    app.set_menu(menu).map_err(|error| format!("无法安装 HarnessDock 菜单: {error}"))?;
-    app.on_menu_event(|app_handle: &tauri::AppHandle, event| {
-        match event.id().0.as_str() {
+    app.set_menu(menu)
+        .map_err(|error| format!("无法安装 HarnessDock 菜单: {error}"))?;
+    app.on_menu_event(
+        |app_handle: &tauri::AppHandle, event| match event.id().0.as_str() {
             "shell-refresh-web" => {
                 let handle = app_handle.clone();
                 let report_handle = app_handle.clone();
@@ -181,7 +182,9 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
                 let handle = app_handle.clone();
                 let report_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(error) = harness_window::harness_clear_quarantine_restart(handle).await {
+                    if let Err(error) =
+                        harness_window::harness_clear_quarantine_restart(handle).await
+                    {
                         report_shell_error(&report_handle, &error);
                     }
                 });
@@ -196,8 +199,8 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
                 });
             }
             _ => {}
-        }
-    });
+        },
+    );
     Ok(())
 }
 

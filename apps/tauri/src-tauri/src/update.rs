@@ -5,11 +5,11 @@ use std::cmp::Ordering as VersionOrdering;
 use std::time::Duration;
 
 #[cfg(not(mobile))]
-use tauri_plugin_updater::UpdaterExt;
-#[cfg(not(mobile))]
 use std::sync::atomic::Ordering;
 #[cfg(not(mobile))]
 use tauri::Manager;
+#[cfg(not(mobile))]
+use tauri_plugin_updater::UpdaterExt;
 
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/coeasy/harness_dock/releases/latest";
 const UPDATER_ENDPOINT: &str =
@@ -137,7 +137,9 @@ fn semantic_version(value: &str) -> Option<SemanticVersion> {
                     return None;
                 }
                 if value.bytes().all(|byte| byte.is_ascii_digit()) {
-                    identifiers.push(PrereleaseIdentifier::Numeric(parse_numeric_identifier(value)?));
+                    identifiers.push(PrereleaseIdentifier::Numeric(parse_numeric_identifier(
+                        value,
+                    )?));
                 } else {
                     // SemVer prerelease identifiers are compared using ASCII
                     // lexical order and are case-sensitive. Do not normalize
@@ -155,7 +157,10 @@ fn semantic_version(value: &str) -> Option<SemanticVersion> {
     })
 }
 
-fn compare_prerelease(left: &[PrereleaseIdentifier], right: &[PrereleaseIdentifier]) -> VersionOrdering {
+fn compare_prerelease(
+    left: &[PrereleaseIdentifier],
+    right: &[PrereleaseIdentifier],
+) -> VersionOrdering {
     if left.is_empty() && right.is_empty() {
         return VersionOrdering::Equal;
     }
@@ -168,10 +173,18 @@ fn compare_prerelease(left: &[PrereleaseIdentifier], right: &[PrereleaseIdentifi
 
     for (left, right) in left.iter().zip(right.iter()) {
         let ordering = match (left, right) {
-            (PrereleaseIdentifier::Numeric(left), PrereleaseIdentifier::Numeric(right)) => left.cmp(right),
-            (PrereleaseIdentifier::Numeric(_), PrereleaseIdentifier::Text(_)) => VersionOrdering::Less,
-            (PrereleaseIdentifier::Text(_), PrereleaseIdentifier::Numeric(_)) => VersionOrdering::Greater,
-            (PrereleaseIdentifier::Text(left), PrereleaseIdentifier::Text(right)) => left.cmp(right),
+            (PrereleaseIdentifier::Numeric(left), PrereleaseIdentifier::Numeric(right)) => {
+                left.cmp(right)
+            }
+            (PrereleaseIdentifier::Numeric(_), PrereleaseIdentifier::Text(_)) => {
+                VersionOrdering::Less
+            }
+            (PrereleaseIdentifier::Text(_), PrereleaseIdentifier::Numeric(_)) => {
+                VersionOrdering::Greater
+            }
+            (PrereleaseIdentifier::Text(left), PrereleaseIdentifier::Text(right)) => {
+                left.cmp(right)
+            }
         };
         if ordering != VersionOrdering::Equal {
             return ordering;
@@ -217,7 +230,10 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         .json::<GithubRelease>()
         .await
         .map_err(|error| format!("更新信息格式无效: {error}"))?;
-    if !release.html_url.starts_with("https://github.com/coeasy/harness_dock/releases/") {
+    if !release
+        .html_url
+        .starts_with("https://github.com/coeasy/harness_dock/releases/")
+    {
         return Err("更新服务返回了非 HarnessDock 发布地址，已拒绝。".into());
     }
     if release.draft || release.prerelease {
@@ -232,7 +248,11 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         });
     }
 
-    let latest_version = release.tag_name.trim_start_matches(['v', 'V']).trim().to_string();
+    let latest_version = release
+        .tag_name
+        .trim_start_matches(['v', 'V'])
+        .trim()
+        .to_string();
     let parsed_latest = semantic_version(&latest_version)
         .ok_or_else(|| "更新服务返回了无效的 HarnessDock 版本号，已拒绝。".to_string())?;
     if !parsed_latest.prerelease.is_empty() {
@@ -243,7 +263,9 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
         current_version,
         latest_version,
         release_url: release.html_url,
-        title: release.name.unwrap_or_else(|| "HarnessDock 最新版本".into()),
+        title: release
+            .name
+            .unwrap_or_else(|| "HarnessDock 最新版本".into()),
         notes: release.body.unwrap_or_default(),
         published_at: release.published_at,
     })
@@ -256,9 +278,7 @@ pub async fn update_check() -> Result<UpdateInfo, String> {
 /// returns an explicit, actionable error instead of downloading an unsigned
 /// installer or pretending that a manual release page is an automatic update.
 #[tauri::command]
-pub async fn update_install(
-    app: tauri::AppHandle,
-) -> Result<UpdateInstallResult, String> {
+pub async fn update_install(app: tauri::AppHandle) -> Result<UpdateInstallResult, String> {
     #[cfg(mobile)]
     {
         let _ = app;
@@ -288,8 +308,8 @@ pub async fn update_install(
             });
         }
 
-        let Some(public_key) = option_env!("HARNESSDOCK_UPDATER_PUBLIC_KEY")
-            .filter(|value| !value.trim().is_empty())
+        let Some(public_key) =
+            option_env!("HARNESSDOCK_UPDATER_PUBLIC_KEY").filter(|value| !value.trim().is_empty())
         else {
             crate::harness_window::hide_splash(&app);
             return Err(format!(
@@ -299,12 +319,10 @@ pub async fn update_install(
         };
 
         crate::harness_window::show_splash(&app, "正在准备签名更新…");
-        let endpoint = UPDATER_ENDPOINT
-            .parse()
-            .map_err(|error| {
-                crate::harness_window::hide_splash(&app);
-                format!("自动更新地址无效: {error}")
-            })?;
+        let endpoint = UPDATER_ENDPOINT.parse().map_err(|error| {
+            crate::harness_window::hide_splash(&app);
+            format!("自动更新地址无效: {error}")
+        })?;
         let updater = app
             .updater_builder()
             .pubkey(public_key)
@@ -324,13 +342,10 @@ pub async fn update_install(
                 format!("无法初始化安全更新服务: {error}")
             })?;
 
-        let Some(update) = updater
-            .check()
-            .await
-            .map_err(|error| {
-                crate::harness_window::hide_splash(&app);
-                format!("安全更新检查失败: {error}")
-            })?
+        let Some(update) = updater.check().await.map_err(|error| {
+            crate::harness_window::hide_splash(&app);
+            format!("安全更新检查失败: {error}")
+        })?
         else {
             crate::harness_window::hide_splash(&app);
             return Err(format!(

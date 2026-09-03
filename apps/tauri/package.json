@@ -11,7 +11,7 @@
     "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
     "tauri:dev": "pnpm prepare:plugins && pnpm bundle:sidecar && cargo tauri dev",
     "tauri:build": "pnpm prepare:plugins && pnpm bundle:sidecar && cargo tauri build",
-    "tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml"
+    "tauri:check": "cargo check --locked --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
     "esbuild": "^0.25.9"

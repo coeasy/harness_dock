@@ -58,7 +58,11 @@ fn command_output(command: &Path, args: &[&str]) -> Option<Vec<u8>> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     configure_child_command(&mut child);
-    child.output().ok().filter(|output| output.status.success()).map(|output| output.stdout)
+    child
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| output.stdout)
 }
 
 fn is_usable_node(candidate: &Path) -> bool {

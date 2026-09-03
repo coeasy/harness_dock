@@ -54,6 +54,23 @@ for (const [relativePath, readVersion] of versionedFiles) {
   }
 }
 
+const rustToolchainPath = path.join(repoRoot, 'rust-toolchain.toml')
+if (!existsSync(rustToolchainPath)) {
+  mismatches.push('rust-toolchain.toml: file is missing; v0.2.0 Rust toolchain must be frozen')
+} else {
+  const rustToolchain = readFileSync(rustToolchainPath, 'utf8')
+  if (!rustToolchain.includes('channel = "1.98.0"')) mismatches.push('rust-toolchain.toml: expected Rust 1.98.0')
+}
+
+const cargoLockPath = path.join(repoRoot, 'apps', 'tauri', 'src-tauri', 'Cargo.lock')
+if (!existsSync(cargoLockPath)) {
+  mismatches.push('apps/tauri/src-tauri/Cargo.lock: file is missing; Tauri dependency resolution must be frozen')
+} else {
+  const cargoLock = readFileSync(cargoLockPath, 'utf8')
+  const appPackage = cargoLock.match(/\[\[package\]\]\s+name = "harnessdock-tauri"\s+version = "([^"]+)"/m)?.[1]
+  if (appPackage !== rootVersion) mismatches.push(`apps/tauri/src-tauri/Cargo.lock harnessdock-tauri: ${appPackage} (root: ${rootVersion})`)
+}
+
 const cargoPath = path.join(repoRoot, 'apps', 'tauri', 'src-tauri', 'Cargo.toml')
 if (existsSync(cargoPath)) {
   const cargo = readFileSync(cargoPath, 'utf8')

@@ -113,12 +113,16 @@ pub(crate) fn stop_process_tree(pid: u32) {
         let group = format!("-{pid}");
         let term = Command::new("kill").args(["-TERM", &group]).status();
         if term.map(|status| !status.success()).unwrap_or(true) {
-            let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+            let _ = Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
         }
         thread::sleep(Duration::from_millis(120));
         let force = Command::new("kill").args(["-KILL", &group]).status();
         if force.map(|status| !status.success()).unwrap_or(true) {
-            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status();
         }
     }
 }

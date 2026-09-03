@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
 
@@ -135,7 +139,8 @@ mod tests {
             vec!["legacy-a".into(), "legacy-b".into()],
             vec!["legacy-a".into()],
             "diagnostic-match",
-        ).unwrap();
+        )
+        .unwrap();
         assert!(read(&file, "new").is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
@@ -153,14 +158,16 @@ mod tests {
             vec!["plugin-a".into()],
             vec!["plugin-a".into()],
             "diagnostic-match",
-        ).unwrap();
+        )
+        .unwrap();
         let second = write(
             &file,
             "same",
             vec!["plugin-b".into()],
             vec!["plugin-b".into()],
             "ambiguous",
-        ).unwrap();
+        )
+        .unwrap();
         let persisted = read(&file, "same").expect("replacement quarantine should be readable");
         assert_eq!(persisted.isolated_plugins, vec!["plugin-b"]);
         assert_eq!(persisted.reason, "ambiguous");

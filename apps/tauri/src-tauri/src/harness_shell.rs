@@ -7,7 +7,8 @@
 
 use tauri::Manager;
 
-const SHELL_WEB_SCRIPT: &str = include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
+const SHELL_WEB_SCRIPT: &str =
+    include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
 const BRIDGE_SCRIPT: &str = r#"
 (() => {

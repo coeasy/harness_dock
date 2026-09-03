@@ -1014,7 +1014,9 @@ mod tests {
     #[test]
     fn runtime_url_matches_the_tauri_shell_capability_boundary() {
         assert!(validated_runtime_url("http://127.0.0.1:4321/").is_ok());
-        assert!(validated_runtime_url("https://localhost:4321/").is_ok());
+        assert!(validated_runtime_url("https://localhost:4321/").is_err());
+        assert!(validated_runtime_url("http://localhost:4321/").is_err());
+        assert!(validated_runtime_url("https://127.0.0.1:4321/").is_err());
         assert!(validated_runtime_url("http://127.0.0.2:4321/").is_err());
         assert!(validated_runtime_url("http://[::1]:4321/").is_err());
         assert!(validated_runtime_url("http://example.com:4321/").is_err());
