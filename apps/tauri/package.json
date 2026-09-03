@@ -3,14 +3,13 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Tauri-only HarnessDock host tooling",
+  "description": "Tauri-only HarnessDock Native Host tooling",
   "scripts": {
     "prepare:plugins": "pnpm --filter @dsh/plugin-embedded-client build && pnpm --filter @dsh/plugin-harness-shell build",
     "prepare:icons": "node scripts/normalize-icon.mjs src-tauri/icons/app-icon.png src-tauri/icons/.app-icon-normalized.png && cargo tauri icon src-tauri/icons/.app-icon-normalized.png && node scripts/verify-small-icon.mjs src-tauri/icons/32x32.png 0.90",
-    "build": "pnpm prepare:plugins && pnpm bundle:sidecar",
-    "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
-    "tauri:dev": "pnpm prepare:plugins && pnpm bundle:sidecar && cargo tauri dev",
-    "tauri:build": "pnpm prepare:plugins && pnpm bundle:sidecar && cargo tauri build",
+    "build": "pnpm prepare:plugins",
+    "tauri:dev": "pnpm prepare:plugins && cargo tauri dev",
+    "tauri:build": "pnpm prepare:plugins && cargo tauri build",
     "tauri:check": "cargo check --locked --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
