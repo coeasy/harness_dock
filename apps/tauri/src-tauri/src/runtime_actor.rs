@@ -1,4 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+use crate::runtime::RuntimeProcess;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -14,108 +20,362 @@ pub enum RuntimePhase {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeIntent {
-    Start,
-    Restart,
-    Stop,
-    MarkProbing,
-    MarkReady,
-    MarkDegraded,
-    MarkFailed,
-    Cancel,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeMode {
+    Normal,
+    Safe,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuntimeActorState {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeGeneration {
+    pub id: u64,
+    pub nonce: String,
+    pub image_identity: String,
+    pub mode: RuntimeMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeLease {
+    pub generation: RuntimeGeneration,
+    pub pid: u32,
+    pub origin: String,
+    pub launch_url: String,
+    pub dsh_version: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct CancellationToken(Arc<AtomicBool>);
+
+impl CancellationToken {
+    fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeActorState {
     phase: RuntimePhase,
-    generation: u64,
+    generation: Option<RuntimeGeneration>,
+    desired_generation: u64,
+    last_error: Option<String>,
 }
 
 impl Default for RuntimeActorState {
     fn default() -> Self {
         Self {
             phase: RuntimePhase::Stopped,
-            generation: 0,
+            generation: None,
+            desired_generation: 0,
+            last_error: None,
         }
     }
 }
 
 impl RuntimeActorState {
-    pub fn phase(&self) -> RuntimePhase {
+    pub(crate) fn phase(&self) -> RuntimePhase {
         self.phase
     }
 
-    pub fn generation(&self) -> u64 {
-        self.generation
+    pub(crate) fn generation(&self) -> Option<&RuntimeGeneration> {
+        self.generation.as_ref()
     }
 
-    pub fn apply(&mut self, intent: RuntimeIntent) -> Result<(), &'static str> {
-        use RuntimeIntent::*;
-        use RuntimePhase::*;
+    pub(crate) fn desired_generation(&self) -> u64 {
+        self.desired_generation
+    }
 
-        let next = match (self.phase, intent) {
-            (Stopped, Start) | (Failed, Start) => {
-                self.generation = self.generation.saturating_add(1);
-                Preparing
-            }
-            (Ready, Restart) | (Degraded, Restart) | (Failed, Restart) => {
-                self.generation = self.generation.saturating_add(1);
-                Stopping
-            }
-            (Preparing, MarkProbing) | (Starting, MarkProbing) => Probing,
-            (Preparing, MarkReady) | (Starting, MarkReady) | (Probing, MarkReady) => Ready,
-            (Ready, MarkDegraded) | (Probing, MarkDegraded) => Degraded,
-            (Preparing, MarkFailed)
-            | (Starting, MarkFailed)
-            | (Probing, MarkFailed)
-            | (Stopping, MarkFailed)
-            | (Cancelling, MarkFailed) => Failed,
-            (Preparing, Cancel) | (Starting, Cancel) | (Probing, Cancel) => Cancelling,
-            (Preparing, Stop)
-            | (Starting, Stop)
-            | (Probing, Stop)
-            | (Ready, Stop)
-            | (Degraded, Stop)
-            | (Failed, Stop) => Stopping,
-            (Stopping, Start) | (Cancelling, Start) => {
-                return Err("runtime lifecycle transition is still settling")
-            }
-            (Stopped, Stop) => Stopped,
-            (Stopping, MarkReady) | (Cancelling, MarkReady) => {
-                return Err("stale ready signal for a stopping runtime generation")
-            }
-            (Stopped, MarkReady) | (Failed, MarkReady) => {
-                return Err("ready signal without an active runtime generation")
-            }
-            (Stopped, Restart) => {
-                self.generation = self.generation.saturating_add(1);
-                Preparing
-            }
-            (Stopping, Cancel) | (Cancelling, Cancel) => Cancelling,
-            (Stopping, Stop) | (Cancelling, Stop) => self.phase,
-            (Ready, Start) | (Degraded, Start) => self.phase,
-            (Failed, MarkFailed) | (Stopped, MarkFailed) => Failed,
-            _ => return Err("invalid runtime lifecycle transition"),
+    pub(crate) fn is_transitioning(&self) -> bool {
+        matches!(
+            self.phase,
+            RuntimePhase::Preparing
+                | RuntimePhase::Starting
+                | RuntimePhase::Probing
+                | RuntimePhase::Stopping
+                | RuntimePhase::Cancelling
+        )
+    }
+
+    fn begin(&mut self, mode: RuntimeMode) -> RuntimeGeneration {
+        self.desired_generation = self.desired_generation.saturating_add(1);
+        let id = self.desired_generation;
+        let generation = RuntimeGeneration {
+            id,
+            nonce: generation_nonce(id),
+            image_identity: "unverified".into(),
+            mode,
         };
+        self.phase = RuntimePhase::Preparing;
+        self.generation = Some(generation.clone());
+        self.last_error = None;
+        generation
+    }
 
-        self.phase = next;
+    fn bind_image(&mut self, generation: u64, image_identity: String) -> Result<(), String> {
+        let Some(current) = self.generation.as_mut() else {
+            return Err("Runtime generation disappeared before image verification".into());
+        };
+        if current.id != generation || self.phase != RuntimePhase::Preparing {
+            return Err("stale Runtime image verification result".into());
+        }
+        current.image_identity = image_identity;
         Ok(())
     }
 
-    pub fn settle_stopped(&mut self) {
-        self.phase = RuntimePhase::Stopped;
+    fn mark_starting(&mut self, generation: u64) -> Result<(), String> {
+        self.transition(generation, RuntimePhase::Preparing, RuntimePhase::Starting)
     }
 
-    pub fn mark_starting(&mut self) -> Result<(), &'static str> {
-        match self.phase {
-            RuntimePhase::Preparing => {
-                self.phase = RuntimePhase::Starting;
-                Ok(())
-            }
-            _ => Err("runtime can only enter starting from preparing"),
+    fn mark_probing(&mut self, generation: u64) -> Result<(), String> {
+        if !matches!(self.phase, RuntimePhase::Starting | RuntimePhase::Preparing) {
+            return Err("Runtime can probe only after prepare/start".into());
+        }
+        self.ensure_generation(generation)?;
+        self.phase = RuntimePhase::Probing;
+        Ok(())
+    }
+
+    fn mark_ready(&mut self, generation: u64, degraded: bool) -> Result<(), String> {
+        if !matches!(
+            self.phase,
+            RuntimePhase::Preparing | RuntimePhase::Starting | RuntimePhase::Probing
+        ) {
+            return Err("stale Runtime ready result".into());
+        }
+        self.ensure_generation(generation)?;
+        self.phase = if degraded {
+            RuntimePhase::Degraded
+        } else {
+            RuntimePhase::Ready
+        };
+        Ok(())
+    }
+
+    fn mark_failed(&mut self, generation: u64, message: String) {
+        if self
+            .generation
+            .as_ref()
+            .is_some_and(|current| current.id == generation)
+        {
+            self.phase = RuntimePhase::Failed;
+            self.last_error = Some(message);
         }
     }
+
+    fn begin_stop(&mut self) {
+        self.phase = if matches!(
+            self.phase,
+            RuntimePhase::Preparing | RuntimePhase::Starting | RuntimePhase::Probing
+        ) {
+            RuntimePhase::Cancelling
+        } else if self.phase == RuntimePhase::Stopped {
+            RuntimePhase::Stopped
+        } else {
+            RuntimePhase::Stopping
+        };
+    }
+
+    fn settle_stopped(&mut self) {
+        self.phase = RuntimePhase::Stopped;
+        self.generation = None;
+        self.last_error = None;
+    }
+
+    fn ensure_generation(&self, generation: u64) -> Result<(), String> {
+        if self
+            .generation
+            .as_ref()
+            .is_some_and(|current| current.id == generation)
+        {
+            Ok(())
+        } else {
+            Err("stale Runtime generation".into())
+        }
+    }
+
+    fn transition(
+        &mut self,
+        generation: u64,
+        expected: RuntimePhase,
+        next: RuntimePhase,
+    ) -> Result<(), String> {
+        self.ensure_generation(generation)?;
+        if self.phase != expected {
+            return Err("invalid Runtime lifecycle transition".into());
+        }
+        self.phase = next;
+        Ok(())
+    }
+}
+
+pub(crate) struct RuntimeActor {
+    state: RuntimeActorState,
+    process: Option<RuntimeProcess>,
+    lease: Option<RuntimeLease>,
+    cancellation: Option<(u64, CancellationToken)>,
+}
+
+impl Default for RuntimeActor {
+    fn default() -> Self {
+        Self {
+            state: RuntimeActorState::default(),
+            process: None,
+            lease: None,
+            cancellation: None,
+        }
+    }
+}
+
+impl RuntimeActor {
+    pub(crate) fn state(&self) -> &RuntimeActorState {
+        &self.state
+    }
+
+    pub(crate) fn phase(&self) -> RuntimePhase {
+        self.state.phase()
+    }
+
+    pub(crate) fn generation_id(&self) -> Option<u64> {
+        self.state.generation().map(|generation| generation.id)
+    }
+
+    pub(crate) fn lease(&self) -> Option<RuntimeLease> {
+        self.lease.clone()
+    }
+
+    pub(crate) fn process(&self) -> Option<&RuntimeProcess> {
+        self.process.as_ref()
+    }
+
+    pub(crate) fn process_mut(&mut self) -> Option<&mut RuntimeProcess> {
+        self.process.as_mut()
+    }
+
+    pub(crate) fn begin_start(
+        &mut self,
+        mode: RuntimeMode,
+    ) -> Result<(RuntimeGeneration, CancellationToken), String> {
+        if self.state.is_transitioning() {
+            return Err("Runtime 正在处理另一个生命周期操作，请稍候再试。".into());
+        }
+        if matches!(self.state.phase(), RuntimePhase::Ready | RuntimePhase::Degraded)
+            && self.process.is_some()
+        {
+            return Err("Runtime 已经处于可用状态。".into());
+        }
+        let generation = self.state.begin(mode);
+        let cancellation = CancellationToken::new();
+        self.cancellation = Some((generation.id, cancellation.clone()));
+        self.lease = None;
+        Ok((generation, cancellation))
+    }
+
+    pub(crate) fn bind_image(
+        &mut self,
+        generation: u64,
+        image_identity: String,
+    ) -> Result<RuntimeGeneration, String> {
+        self.state.bind_image(generation, image_identity)?;
+        Ok(self
+            .state
+            .generation()
+            .expect("generation must exist after image binding")
+            .clone())
+    }
+
+    pub(crate) fn mark_starting(&mut self, generation: u64) -> Result<(), String> {
+        self.state.mark_starting(generation)
+    }
+
+    pub(crate) fn mark_probing(&mut self, generation: u64) -> Result<(), String> {
+        self.state.mark_probing(generation)
+    }
+
+    pub(crate) fn publish_ready(
+        &mut self,
+        generation: u64,
+        process: RuntimeProcess,
+        lease: RuntimeLease,
+        degraded: bool,
+    ) -> Result<(), RuntimeProcess> {
+        let cancelled = self
+            .cancellation
+            .as_ref()
+            .is_some_and(|(id, token)| *id != generation || token.is_cancelled());
+        if cancelled
+            || self.state.mark_ready(generation, degraded).is_err()
+            || lease.generation.id != generation
+        {
+            return Err(process);
+        }
+        self.process = Some(process);
+        self.lease = Some(lease);
+        self.cancellation = None;
+        Ok(())
+    }
+
+    pub(crate) fn mark_failed(&mut self, generation: u64, message: String) {
+        self.state.mark_failed(generation, message);
+        if self.generation_id() == Some(generation) {
+            self.cancellation = None;
+            self.lease = None;
+        }
+    }
+
+    pub(crate) fn begin_stop(&mut self) -> Option<RuntimeProcess> {
+        self.state.begin_stop();
+        if let Some((_, cancellation)) = self.cancellation.as_ref() {
+            cancellation.cancel();
+        }
+        self.lease = None;
+        self.process.take()
+    }
+
+    pub(crate) fn settle_stopped(&mut self) {
+        self.process = None;
+        self.lease = None;
+        self.cancellation = None;
+        self.state.settle_stopped();
+    }
+
+    pub(crate) fn invalidate_dead_process(&mut self) -> Option<RuntimeProcess> {
+        self.lease = None;
+        self.cancellation = None;
+        self.state.settle_stopped();
+        self.process.take()
+    }
+
+    pub(crate) fn lease_is_current(&self, generation: u64) -> bool {
+        self.lease
+            .as_ref()
+            .is_some_and(|lease| lease.generation.id == generation)
+            && matches!(self.state.phase(), RuntimePhase::Ready | RuntimePhase::Degraded)
+    }
+}
+
+fn generation_nonce(generation: u64) -> String {
+    use std::hash::{Hash, Hasher};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    generation.hash(&mut hasher);
+    std::process::id().hash(&mut hasher);
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 #[cfg(test)]
@@ -125,40 +385,33 @@ mod tests {
     #[test]
     fn start_allocates_a_new_generation() {
         let mut state = RuntimeActorState::default();
-        state.apply(RuntimeIntent::Start).unwrap();
+        let first = state.begin(RuntimeMode::Normal);
+        assert_eq!(first.id, 1);
         assert_eq!(state.phase(), RuntimePhase::Preparing);
-        assert_eq!(state.generation(), 1);
+        state.settle_stopped();
+        let second = state.begin(RuntimeMode::Safe);
+        assert_eq!(second.id, 2);
+        assert_eq!(second.mode, RuntimeMode::Safe);
     }
 
     #[test]
-    fn restart_is_a_generation_change_not_a_boolean_flag() {
+    fn stale_generation_cannot_mark_current_runtime_ready() {
         let mut state = RuntimeActorState::default();
-        state.apply(RuntimeIntent::Start).unwrap();
-        state.mark_starting().unwrap();
-        state.apply(RuntimeIntent::MarkReady).unwrap();
-        assert_eq!(state.generation(), 1);
-
-        state.apply(RuntimeIntent::Restart).unwrap();
-        assert_eq!(state.phase(), RuntimePhase::Stopping);
-        assert_eq!(state.generation(), 2);
+        let first = state.begin(RuntimeMode::Normal);
+        state.settle_stopped();
+        let second = state.begin(RuntimeMode::Normal);
+        state.mark_starting(second.id).unwrap();
+        assert!(state.mark_ready(first.id, false).is_err());
+        assert_eq!(state.phase(), RuntimePhase::Starting);
     }
 
     #[test]
-    fn stale_ready_is_rejected_while_stopping() {
+    fn stop_during_probe_enters_explicit_cancellation() {
         let mut state = RuntimeActorState::default();
-        state.apply(RuntimeIntent::Start).unwrap();
-        state.mark_starting().unwrap();
-        state.apply(RuntimeIntent::Stop).unwrap();
-        let error = state.apply(RuntimeIntent::MarkReady).unwrap_err();
-        assert!(error.contains("stale ready"));
-    }
-
-    #[test]
-    fn cancellation_is_explicit_lifecycle_state() {
-        let mut state = RuntimeActorState::default();
-        state.apply(RuntimeIntent::Start).unwrap();
-        state.mark_starting().unwrap();
-        state.apply(RuntimeIntent::Cancel).unwrap();
+        let generation = state.begin(RuntimeMode::Normal);
+        state.mark_starting(generation.id).unwrap();
+        state.mark_probing(generation.id).unwrap();
+        state.begin_stop();
         assert_eq!(state.phase(), RuntimePhase::Cancelling);
         state.settle_stopped();
         assert_eq!(state.phase(), RuntimePhase::Stopped);

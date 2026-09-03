@@ -1,4 +1,6 @@
+#[macro_use]
 mod bridge;
+mod capability_broker;
 mod desktop;
 mod gateway;
 mod gateway_host;
@@ -9,60 +11,37 @@ mod lifecycle;
 mod platform;
 mod plugin_quarantine;
 mod process;
+mod reconciler;
 mod runtime;
 mod runtime_actor;
 mod service;
-#[cfg(not(mobile))]
 mod startup;
-#[cfg(not(mobile))]
 mod startup_trace;
 mod state;
 mod supervisor;
-#[cfg(not(mobile))]
+mod surface_actor;
 mod tray;
 mod update;
+mod update_actor;
 
-pub(crate) use desktop::report_shell_error;
 pub(crate) use state::AppState;
 pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
 
-/// Round-1 architecture ownership index.
+/// HarnessDock v0.2.0 Native Host ownership map:
 ///
-/// The legacy parity suite still searches this composition root for ownership
-/// landmarks while implementation is moved out of `lib.rs`. These are locators,
-/// not duplicated behavior:
+/// Tauri Adapter -> Host Protocol v2 -> Capability Broker -> Reconciler
+/// -> RuntimeActor / SurfaceActor / GatewayActor / UpdateActor -> RuntimeLease.
 ///
-/// - desktop adapter: `match tray::create_tray(&app.handle())`, `tray_available`,
-///   `tauri_plugin_updater::Builder`, `continuing without automatic install`,
-///   `continuing with Harness Web`, `startup::spawn(app.handle().clone())`;
-/// - run loop: `RunEvent::WindowEvent`, `RunEvent::ExitRequested`, `quitting`,
-///   `api.prevent_exit()`, `if !tray_available`, `if label == "harness"`,
-///   `if label == "main" && !has_primary_surface(app_handle)`,
-///   `visible_webview(app, "harness") || visible_webview(app, "splash")`,
-///   `request_exit(app_handle)`. Closing them must never terminate a healthy
-///   primary Harness surface accidentally;
-/// - native menu adapter: `"shell-safe-mode", "隔离插件启动"`,
-///   `"shell-gateway", "移动设备 / Gateway"`, `"shell-update", "自动更新"`;
-/// - state/supervisor: `runtime_starting`, `web_action`, `harness_loading`,
-///   `harness_safe_mode_restart`, `spawn_blocking`, `starting_processes_empty`.
-///
-/// These implementation details live in `desktop.rs`, `state.rs`,
-/// `service/workflow.rs` and `supervisor.rs`; this root contains no Runtime or
-/// Gateway procedure sequencing. `host_protocol.rs` is the v2 typed contract
-/// boundary used by native adapters during Round 1. `runtime_actor.rs` is the
-/// Round-2 lifecycle source of truth that will replace the temporary AtomicBool
-/// runtime guards as process ownership migrates behind the actor boundary.
+/// Long-lived native resources are owned by their actor state. Renderers submit
+/// typed intent only; normal startup has no permanent hidden control renderer.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg(not(mobile))]
     startup_trace::mark(startup_trace::StartupPhase::ProcessStarted);
-
-    let app = tauri::Builder::default()
+    tauri::Builder::default()
         .manage(AppState::default())
         .setup(desktop::setup)
         .invoke_handler(bridge::handler!())
         .build(tauri::generate_context!())
-        .expect("failed to build HarnessDock Tauri application");
-
-    app.run(desktop::handle_run_event);
+        .expect("error while building HarnessDock")
+        .run(desktop::handle_run_event);
 }

@@ -9,6 +9,7 @@ pub const HOST_PROTOCOL_VERSION: u16 = 2;
 #[serde(rename_all = "kebab-case")]
 pub enum SubjectKind {
     DesktopShell,
+    HarnessWeb,
     NativeMenu,
     Tray,
     Diagnostics,
@@ -70,6 +71,14 @@ impl CommandEnvelope {
                 "REQUEST_ID_REQUIRED",
                 ErrorScope::Protocol,
                 "requestId must not be empty",
+                false,
+            ));
+        }
+        if self.request_id.len() > 128 {
+            return Err(HostError::new(
+                "REQUEST_ID_TOO_LONG",
+                ErrorScope::Protocol,
+                "requestId must be at most 128 bytes",
                 false,
             ));
         }
@@ -161,14 +170,15 @@ mod tests {
     }
 
     #[test]
-    fn accepts_v2_command_envelope() {
+    fn protocol_subject_has_explicit_untrusted_harness_web_identity() {
         let envelope = CommandEnvelope {
             protocol_version: HOST_PROTOCOL_VERSION,
             request_id: "req-2".into(),
-            subject: SubjectKind::Tray,
+            subject: SubjectKind::HarnessWeb,
             command: HostCommand::RestartRuntime,
         };
         assert!(envelope.validate().is_ok());
+        assert_eq!(serde_json::to_value(envelope.subject).unwrap(), "harness-web");
     }
 
     #[test]

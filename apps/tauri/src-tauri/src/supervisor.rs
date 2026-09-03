@@ -5,14 +5,17 @@ use tauri::Manager;
 
 use crate::{gateway_host, lifecycle, process, runtime, AppState};
 
-/// Synchronous, idempotent child cleanup used by normal shutdown and updater
-/// handoff. Runtime/Gateway remain the owners of their child handles; the
-/// supervisor only coordinates the cross-service shutdown order.
+/// Synchronous, idempotent cleanup coordinated across Resource Actors. Runtime
+/// and Gateway remain the only owners of their long-lived native resources.
 pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     process::stop_starting_processes(&state.starting_processes);
     gateway_host::stop_managed(&state.gateway);
-    runtime::stop_managed(&state.runtime);
+    runtime::stop_managed(&state.runtime_actor);
+    if let Ok(mut surface) = state.surface_actor.lock() {
+        surface.cancel_navigation();
+        surface.end_operation();
+    }
 }
 
 pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
@@ -29,14 +32,12 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
             }
             if std::time::Instant::now() >= deadline {
                 eprintln!(
-                    "HarnessDock shutdown timed out while waiting for lifecycle operations; forcing process exit."
+                    "HarnessDock shutdown timed out while waiting for actor lifecycle operations; forcing process exit."
                 );
                 break;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        // One final idempotent pass covers a startup task that published its
-        // Child just as the last registry/lifecycle observation completed.
         stop_managed_processes(&app);
     })
     .await;
@@ -47,10 +48,10 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
     if state.quitting.swap(true, Ordering::SeqCst) {
         return;
     }
-
-    // Do not terminate Tauri until every admitted Runtime/Gateway lifecycle
-    // operation has returned to idle. This closes shutdown races not only with
-    // startup, but also with an in-flight managed restart/stop transition.
+    if let Ok(mut desired) = state.desired.lock() {
+        desired.app = crate::reconciler::AppDesiredState::Exiting;
+        desired.revision = desired.revision.saturating_add(1);
+    }
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         wait_for_managed_processes(handle.clone()).await;

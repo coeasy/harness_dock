@@ -1,8 +1,8 @@
 //! Native desktop adapter.
 //!
 //! Window/menu/tray/run-loop integration belongs here. The adapter translates
-//! native UI events into application intents and must not own Runtime process
-//! handles or cross-service lifecycle policy.
+//! native UI events into typed intents; Runtime/Gateway/Update procedure order
+//! belongs exclusively to the Reconciler and Resource Actors.
 
 use std::{env, sync::atomic::Ordering};
 use tauri::{Emitter, Manager};
@@ -46,7 +46,6 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         .map_err(|error| format!("无法创建 HarnessDock 菜单: {error}"))?;
     app.set_menu(menu)
         .map_err(|error| format!("无法安装 HarnessDock 菜单: {error}"))?;
-
     app.on_menu_event(|app_handle: &tauri::AppHandle, event| {
         let intent = match event.id().0.as_str() {
             "shell-refresh-web" => Some(workflow::HostIntent::RefreshHarness),
@@ -73,14 +72,9 @@ fn configure_embedded_runtime_tool_path(app: &tauri::App) -> Result<(), String> 
         .map_err(|error| format!("无法解析 HarnessDock resource 目录: {error}"))?;
     let runtime = resources.join("dsh-runtime");
     let tool_bin = runtime.join("tools").join("bin");
-
-    // Source-only/dev launches can intentionally use a developer Runtime and
-    // therefore have no packaged tools directory. A production Candidate is
-    // separately gated to contain the embedded Runtime and bundled pnpm.
     if !tool_bin.is_dir() {
         return Ok(());
     }
-
     let node_bin = if cfg!(windows) {
         runtime
     } else {
@@ -102,12 +96,14 @@ fn visible_webview(app: &tauri::AppHandle, label: &str) -> bool {
 }
 
 fn has_primary_surface(app: &tauri::AppHandle) -> bool {
-    if visible_webview(app, "harness") || visible_webview(app, "splash") {
-        return true;
-    }
-    app.state::<AppState>()
-        .harness_loading
-        .load(Ordering::Acquire)
+    visible_webview(app, "harness")
+        || visible_webview(app, "splash")
+        || app
+            .state::<AppState>()
+            .surface_actor
+            .lock()
+            .map(|actor| actor.primary_visible())
+            .unwrap_or(false)
 }
 
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -118,10 +114,6 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
                 "HarnessDock bundled plugin-management tools unavailable; Harness Web will continue: {error}"
             );
         }
-
-        // Tray, updater and native menu are optional shell enhancements. They
-        // fail open and must never block the bundled Runtime -> Harness Web
-        // startup path.
         match crate::tray::create_tray(&app.handle()) {
             Ok(()) => app
                 .state::<AppState>()
@@ -135,17 +127,11 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             .handle()
             .plugin(tauri_plugin_updater::Builder::new().build())
         {
-            eprintln!(
-                "HarnessDock updater plugin unavailable; continuing without automatic install: {error}"
-            );
+            eprintln!("HarnessDock updater unavailable; continuing without automatic install: {error}");
         }
         if let Err(error) = install_shell_menu(app) {
             eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
         }
-
-        // Startup is native-owned. The currently bundled Runtime is expected
-        // to already exist in application resources; first launch must not
-        // fetch Node or dsh from the network.
         crate::startup::spawn(app.handle().clone());
     }
     Ok(())
@@ -161,39 +147,37 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
             .state::<AppState>()
             .quitting
             .load(Ordering::SeqCst)
-            && (label == "main" || label == "harness" || label == "settings") =>
+            && label == "harness" =>
         {
             api.prevent_close();
+            crate::harness_window::cancel_harness_load(app_handle);
+            crate::harness_window::hide_splash(app_handle);
             let tray_available = app_handle
                 .state::<AppState>()
                 .tray_available
                 .load(Ordering::Acquire);
-
-            if !tray_available {
-                if label == "harness" {
-                    crate::harness_window::cancel_harness_load(app_handle);
-                    crate::harness_window::hide_splash(app_handle);
-                    crate::supervisor::request_exit(app_handle);
-                    return;
-                }
-
-                if label == "main" && !has_primary_surface(app_handle) {
-                    crate::supervisor::request_exit(app_handle);
-                    return;
-                }
-
-                if let Some(window) = app_handle.get_webview_window(&label) {
+            if tray_available {
+                if let Some(window) = app_handle.get_webview_window("harness") {
                     let _ = window.hide();
                 }
-                return;
+            } else {
+                crate::supervisor::request_exit(app_handle);
             }
-
-            if label == "harness" {
-                crate::harness_window::cancel_harness_load(app_handle);
-                crate::harness_window::hide_splash(app_handle);
-            }
-            if let Some(window) = app_handle.get_webview_window(&label) {
-                let _ = window.hide();
+        }
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Destroyed,
+            ..
+        } if label == "control" && !has_primary_surface(app_handle) => {
+            // Recovery is an on-demand surface, not a permanent hidden owner.
+            // If the user closes the last visible recovery surface and there is
+            // no tray/primary surface, exit through the supervised path.
+            if !app_handle
+                .state::<AppState>()
+                .tray_available
+                .load(Ordering::Acquire)
+            {
+                crate::supervisor::request_exit(app_handle);
             }
         }
         tauri::RunEvent::Exit => {
@@ -205,9 +189,6 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
                 .quitting
                 .load(Ordering::SeqCst) =>
         {
-            // Tauri may request an automatic exit while all windows are hidden
-            // during navigation. Only the explicit supervisor may terminate
-            // the process so in-flight Runtime cleanup cannot be bypassed.
             api.prevent_exit();
         }
         _ => {}

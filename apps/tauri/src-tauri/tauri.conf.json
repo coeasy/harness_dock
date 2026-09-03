@@ -12,18 +12,6 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "label": "main",
-        "title": "HarnessDock",
-        "visible": false,
-        "width": 1180,
-        "height": 780,
-        "minWidth": 720,
-        "minHeight": 560,
-        "resizable": true,
-        "fullscreen": false,
-        "useHttpsScheme": true
-      },
-      {
         "label": "splash",
         "title": "HarnessDock",
         "url": "splash.html",
@@ -50,7 +38,7 @@
     "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
     "shortDescription": "HarnessDock DeepSeek Harness client",
-    "longDescription": "Full-only Tauri desktop and mobile host for DeepSeek Harness with local desktop runtime and secure mobile gateway pairing.",
+    "longDescription": "Full-only Tauri Native Host for DeepSeek Harness with sealed local Runtime and secure Rust-native mobile Gateway pairing.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
