@@ -70,8 +70,14 @@ if (
 ) {
   fail('compact Node pruning must remove bundled npm/corepack payloads without deleting dsh')
 }
-if (!pnpmTool.includes("PNPM_BUNDLE_VERSION = '10.12.1'")) {
-  fail('bundled pnpm must be pinned to the repository-approved runtime-tool version')
+if (!pnpmTool.includes("PNPM_BUNDLE_VERSION = '11.7.0'")) {
+  fail('bundled pnpm must match the pinned DeepSeek Harness package-manager version')
+}
+if (!pnpmTool.includes('deafa7ec98a1218b6a047289b92fbe2395c1e22d3495bb711653013218ee15ee')) {
+  fail('bundled pnpm tarball must be pinned by SHA-256')
+}
+if (!pnpmEnsure.includes('PNPM_BUNDLE_SHA256')) {
+  fail('pnpm preparation must verify the pinned tarball digest before extraction')
 }
 if (!pnpmEnsure.includes('pluginManagementReady = true')) {
   fail('bundled Runtime manifest must record that plugin management tooling is ready')
