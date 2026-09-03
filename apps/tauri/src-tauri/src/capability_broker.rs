@@ -19,6 +19,19 @@ pub(crate) enum Decision {
     Deny(&'static str),
 }
 
+pub(crate) const ALL_CAPABILITIES: [Capability; 10] = [
+    Capability::WindowControl,
+    Capability::WebReload,
+    Capability::RuntimeRestart,
+    Capability::RuntimeSafeMode,
+    Capability::RuntimeClearQuarantine,
+    Capability::GatewayManage,
+    Capability::DiagnosticsRead,
+    Capability::UpdateCheck,
+    Capability::UpdateInstall,
+    Capability::AppQuit,
+];
+
 pub(crate) fn capability_for(command: &HostCommand) -> Capability {
     match command {
         HostCommand::RefreshHarness => Capability::WebReload,
@@ -66,7 +79,9 @@ pub(crate) fn authorize(request: &AuthorizationRequest<'_>, lease: Option<&Runti
             Capability::DiagnosticsRead
             | Capability::RuntimeRestart
             | Capability::RuntimeSafeMode
-            | Capability::RuntimeClearQuarantine => Decision::Allow,
+            | Capability::RuntimeClearQuarantine
+            | Capability::UpdateCheck
+            | Capability::UpdateInstall => Decision::Allow,
             _ => Decision::Deny("diagnostics-surface-capability-denied"),
         },
         SubjectKind::Mobile => match request.capability {
@@ -75,6 +90,30 @@ pub(crate) fn authorize(request: &AuthorizationRequest<'_>, lease: Option<&Runti
         },
         SubjectKind::HarnessWeb => unreachable!("handled above"),
     }
+}
+
+pub(crate) fn allowed_capabilities(
+    subject: SubjectKind,
+    surface: SurfaceKind,
+    origin: Option<&str>,
+    runtime_generation: Option<u64>,
+    lease: Option<&RuntimeLease>,
+) -> Vec<Capability> {
+    ALL_CAPABILITIES
+        .into_iter()
+        .filter(|capability| {
+            authorize(
+                &AuthorizationRequest {
+                    subject,
+                    surface,
+                    origin,
+                    runtime_generation,
+                    capability: *capability,
+                },
+                lease,
+            ) == Decision::Allow
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -118,7 +157,7 @@ mod tests {
     #[test]
     fn harness_web_never_gets_update_or_exit_authority() {
         let lease = lease();
-        for capability in [Capability::UpdateInstall, Capability::AppQuit] {
+        for capability in [Capability::UpdateCheck, Capability::UpdateInstall, Capability::AppQuit] {
             let request = AuthorizationRequest {
                 subject: SubjectKind::HarnessWeb,
                 surface: SurfaceKind::Harness,
@@ -128,5 +167,27 @@ mod tests {
             };
             assert!(matches!(authorize(&request, Some(&lease)), Decision::Deny(_)));
         }
+        let allowed = allowed_capabilities(
+            SubjectKind::HarnessWeb,
+            SurfaceKind::Harness,
+            Some(&lease.origin),
+            Some(lease.generation.id),
+            Some(&lease),
+        );
+        assert!(!allowed.contains(&Capability::UpdateInstall));
+        assert!(!allowed.contains(&Capability::AppQuit));
+    }
+
+    #[test]
+    fn local_diagnostics_can_manage_signed_updates_but_cannot_exit_host() {
+        let allowed = allowed_capabilities(
+            SubjectKind::Diagnostics,
+            SurfaceKind::Diagnostics,
+            None,
+            None,
+            None,
+        );
+        assert!(allowed.contains(&Capability::UpdateInstall));
+        assert!(!allowed.contains(&Capability::AppQuit));
     }
 }
