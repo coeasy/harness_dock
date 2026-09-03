@@ -2,23 +2,17 @@
   'use strict'
 
   const bridge = window.__DSH_SHELL_BRIDGE__
-  const compatibleBridge = bridge?.apiVersion === 1 && bridge?.pluginId === 'harness-shell'
+  const compatibleBridge = bridge?.apiVersion === 2 && bridge?.pluginId === 'harness-shell'
   const commands = [
     ['web.reload', '刷新 Harness Web'],
     ['web.restart', '重启 Harness Web'],
     ['runtime.safe-mode', '隔离插件启动'],
     ['runtime.clear-quarantine', '清除隔离并重启'],
     ['gateway.manage', '移动设备 / Gateway'],
-    ['diagnostics.open', '打开诊断与恢复'],
-    ['app.update.check', '检查 GitHub 更新'],
-    ['app.update.install', '安装 GitHub 更新'],
-    ['app.quit', '退出 HarnessDock'],
+    ['diagnostics.open', 'GitHub 更新 / 诊断与恢复'],
   ]
   const state = { busy: false, maximized: false, mounted: false }
 
-  // Shell errors can originate in native IPC or third-party hosts. Never put a
-  // reusable launch token, Authorization value, password or query string into
-  // the Harness document even though textContent already prevents HTML injection.
   const publicText = (value) => {
     const raw = value && typeof value === 'object' && 'message' in value
       ? String(value.message || '')
@@ -136,18 +130,7 @@
           updateMaximizeIcon()
         }
         if (windowCommand) return
-        if (command === 'app.update.check' && result) {
-          if (result.available) {
-            const version = result.latestVersion ? ` v${result.latestVersion}` : ''
-            showToast(`发现 HarnessDock${version} 更新，请选择安装`)
-          } else {
-            showToast(`已是最新版本${result.currentVersion ? ` v${result.currentVersion}` : ''}`)
-          }
-        } else if (command === 'app.update.install' && result?.status === 'latest') {
-          showToast(`已是最新版本${result.version ? ` v${result.version}` : ''}`)
-        } else {
-          showToast(`${label}已执行`)
-        }
+        showToast(`${label}已执行`)
         if (command !== 'web.reload') setStatus('Harness Web')
       } catch (error) {
         const message = error?.message || String(error)
@@ -161,7 +144,7 @@
       }
     }
 
-    const sectionStarts = new Set(['runtime.safe-mode', 'gateway.manage', 'app.update.check'])
+    const sectionStarts = new Set(['runtime.safe-mode', 'gateway.manage'])
     commands.forEach(([command, label]) => {
       if (sectionStarts.has(command)) {
         const separator = document.createElement('div')
