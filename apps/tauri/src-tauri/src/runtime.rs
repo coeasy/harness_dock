@@ -43,9 +43,12 @@ struct ReadyInfo {
     port: u16,
     pid: u32,
     dsh_version: String,
+    generation: u64,
+    nonce: String,
+    image_identity: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OriginInfo {
     dsh_version: String,
@@ -433,7 +436,12 @@ fn recovery_patch(rows: &[ConfigDumpRow]) -> Result<String, String> {
     recovery_patch_ids(&rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>())
 }
 
-fn validated_ready(raw: &str, expected_version: &str, expected_pid: u32) -> Result<ReadyInfo, String> {
+fn validated_ready(
+    raw: &str,
+    expected_version: &str,
+    expected_pid: u32,
+    expected_generation: &RuntimeGeneration,
+) -> Result<ReadyInfo, String> {
     let ready: ReadyInfo =
         serde_json::from_str(raw).map_err(|error| format!("Runtime ready.json 无效: {error}"))?;
     if ready.dsh_version != expected_version {
@@ -441,6 +449,12 @@ fn validated_ready(raw: &str, expected_version: &str, expected_pid: u32) -> Resu
             "Runtime 版本不一致: expected {expected_version}, got {}",
             ready.dsh_version
         ));
+    }
+    if ready.generation != expected_generation.id
+        || ready.nonce != expected_generation.nonce
+        || ready.image_identity != expected_generation.image_identity
+    {
+        return Err("Runtime ready.json generation/nonce/imageIdentity 未通过当前启动代际校验。".into());
     }
     if ready.host != "127.0.0.1" || ready.port == 0 || ready.pid != expected_pid || ready.pid == 0 {
         return Err("Runtime ready.json host/port/PID 未通过受管进程校验。".into());
@@ -555,6 +569,7 @@ fn wait_for_ready(
     ready_file: &Path,
     expected_version: &str,
     expected_pid: u32,
+    expected_generation: &RuntimeGeneration,
     stdout_path: &Path,
     stderr_path: &Path,
     token: &CancellationToken,
@@ -585,7 +600,7 @@ fn wait_for_ready(
             }
         }
         if let Ok(raw) = fs::read_to_string(ready_file) {
-            match validated_ready(&raw, expected_version, expected_pid) {
+            match validated_ready(&raw, expected_version, expected_pid, expected_generation) {
                 Ok(ready) => {
                     thread::sleep(Duration::from_millis(500));
                     if cancelled(token, quitting) {
@@ -765,6 +780,7 @@ fn launch_attempt(
         ready_file,
         &image.origin.dsh_version,
         pid,
+        generation,
         &stdout,
         &stderr,
         token,
@@ -1194,6 +1210,15 @@ mod tests {
 
     const DUMP: &str = "# == @deepseek-ai/dsh-bundle-base\n- id: official-core\n  name: '@deepseek-ai/plugin-core'\n# == third-party-bundle\n- id: old-market-plugin\n  name: '@legacy/old-market-plugin'\n# == /home/me/.dsh/cordis.patch.yml\n- id: user-added\n  name: 'file:///home/me/plugin.js'\n# == /tmp/embedded.patch.yml\n- id: embedded-client\n  name: 'file:///tmp/embedded.js'\n- id: harnessdock-client-runtime-compat\n  name: 'file:///tmp/compat.js'\n- id: harness-shell\n  name: 'file:///tmp/shell.js'\n";
 
+    fn generation() -> RuntimeGeneration {
+        RuntimeGeneration {
+            id: 7,
+            nonce: "nonce-7".into(),
+            image_identity: "sha256:image-7".into(),
+            mode: RuntimeMode::Normal,
+        }
+    }
+
     #[test]
     fn recovery_never_targets_official_or_embedded_rows() {
         let rows = parse_config_dump_rows(DUMP);
@@ -1205,12 +1230,24 @@ mod tests {
     }
 
     #[test]
-    fn ready_file_must_belong_to_spawned_process_and_managed_origin() {
-        let raw = r#"{"url":"http://127.0.0.1:43123/?token=launch","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
-        assert!(validated_ready(raw, "0.1.2-alpha.1", 41).is_err());
-        assert!(validated_ready(raw, "0.1.2-alpha.1", 42).is_ok());
-        let wrong_host = r#"{"url":"http://127.0.0.2:43123/?token=launch","host":"127.0.0.2","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1"}"#;
-        assert!(validated_ready(wrong_host, "0.1.2-alpha.1", 42).is_err());
+    fn ready_file_must_belong_to_spawned_process_managed_origin_and_generation() {
+        let expected = generation();
+        let raw = r#"{"url":"http://127.0.0.1:43123/?token=launch","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1","generation":7,"nonce":"nonce-7","imageIdentity":"sha256:image-7"}"#;
+        assert!(validated_ready(raw, "0.1.2-alpha.1", 41, &expected).is_err());
+        assert!(validated_ready(raw, "0.1.2-alpha.1", 42, &expected).is_ok());
+        let wrong_host = r#"{"url":"http://127.0.0.2:43123/?token=launch","host":"127.0.0.2","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1","generation":7,"nonce":"nonce-7","imageIdentity":"sha256:image-7"}"#;
+        assert!(validated_ready(wrong_host, "0.1.2-alpha.1", 42, &expected).is_err());
+    }
+
+    #[test]
+    fn ready_file_rejects_stale_generation_nonce_or_image() {
+        let expected = generation();
+        let stale_generation = r#"{"url":"http://127.0.0.1:43123/","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1","generation":6,"nonce":"nonce-7","imageIdentity":"sha256:image-7"}"#;
+        let wrong_nonce = r#"{"url":"http://127.0.0.1:43123/","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1","generation":7,"nonce":"wrong","imageIdentity":"sha256:image-7"}"#;
+        let wrong_image = r#"{"url":"http://127.0.0.1:43123/","host":"127.0.0.1","port":43123,"pid":42,"dshVersion":"0.1.2-alpha.1","generation":7,"nonce":"nonce-7","imageIdentity":"sha256:wrong"}"#;
+        for raw in [stale_generation, wrong_nonce, wrong_image] {
+            assert!(validated_ready(raw, "0.1.2-alpha.1", 42, &expected).is_err());
+        }
     }
 
     #[test]
