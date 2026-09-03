@@ -4,7 +4,7 @@
 //! native UI events into application intents and must not own Runtime process
 //! handles or cross-service lifecycle policy.
 
-use std::sync::atomic::Ordering;
+use std::{env, sync::atomic::Ordering};
 use tauri::{Emitter, Manager};
 
 use crate::{service::workflow, AppState};
@@ -65,6 +65,36 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(mobile))]
+fn configure_embedded_runtime_tool_path(app: &tauri::App) -> Result<(), String> {
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("无法解析 HarnessDock resource 目录: {error}"))?;
+    let runtime = resources.join("dsh-runtime");
+    let tool_bin = runtime.join("tools").join("bin");
+
+    // Source-only/dev launches can intentionally use a developer Runtime and
+    // therefore have no packaged tools directory. A production Candidate is
+    // separately gated to contain the embedded Runtime and bundled pnpm.
+    if !tool_bin.is_dir() {
+        return Ok(());
+    }
+
+    let node_bin = if cfg!(windows) {
+        runtime
+    } else {
+        runtime.join("bin")
+    };
+    let current = env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![tool_bin, node_bin];
+    entries.extend(env::split_paths(&current));
+    let joined = env::join_paths(entries)
+        .map_err(|error| format!("无法配置内置 Runtime 工具 PATH: {error}"))?;
+    env::set_var("PATH", joined);
+    Ok(())
+}
+
 fn visible_webview(app: &tauri::AppHandle, label: &str) -> bool {
     app.get_webview_window(label)
         .and_then(|window| window.is_visible().ok())
@@ -83,6 +113,12 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(mobile))]
     {
+        if let Err(error) = configure_embedded_runtime_tool_path(app) {
+            eprintln!(
+                "HarnessDock bundled plugin-management tools unavailable; Harness Web will continue: {error}"
+            );
+        }
+
         // Tray, updater and native menu are optional shell enhancements. They
         // fail open and must never block the bundled Runtime -> Harness Web
         // startup path.
