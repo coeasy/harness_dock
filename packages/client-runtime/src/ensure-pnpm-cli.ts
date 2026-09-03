@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
@@ -10,6 +11,7 @@ import {
   assertBundledPnpm,
   bundledPnpmEntry,
   bundledPnpmPackageDir,
+  PNPM_BUNDLE_SHA256,
   PNPM_BUNDLE_VERSION,
   writeBundledPnpmShim,
 } from './pnpm-tool.ts'
@@ -33,6 +35,34 @@ if (!inspectBundledRuntime(dest, platform)) {
   throw new Error(`cannot embed pnpm: bundled Node+dsh runtime is incomplete under ${dest}`)
 }
 
+async function fetchPinnedPnpm(): Promise<Uint8Array> {
+  const filename = `pnpm-${PNPM_BUNDLE_VERSION}.tgz`
+  const urls = [
+    ...(process.env.DSH_PNPM_MIRROR ? [process.env.DSH_PNPM_MIRROR] : []),
+    `https://registry.npmjs.org/pnpm/-/${filename}`,
+    `https://registry.npmmirror.com/pnpm/-/${filename}`,
+  ]
+  let lastError: unknown
+  for (const raw of urls) {
+    const url = raw.includes(filename) ? raw : `${raw.replace(/\/$/, '')}/${filename}`
+    try {
+      console.log(`[pnpm-runtime] downloading ${url}`)
+      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const digest = createHash('sha256').update(bytes).digest('hex')
+      if (digest !== PNPM_BUNDLE_SHA256) {
+        throw new Error(`sha256 ${digest} != pinned ${PNPM_BUNDLE_SHA256}`)
+      }
+      return bytes
+    } catch (error) {
+      lastError = error
+      console.warn(`[pnpm-runtime] source failed: ${url}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  throw lastError ?? new Error('all pnpm download sources failed')
+}
+
 let ready = false
 try {
   await assertBundledPnpm(dest, platform)
@@ -42,44 +72,19 @@ try {
 }
 
 if (!ready) {
+  const packageDir = bundledPnpmPackageDir(dest)
   const toolRoot = path.join(dest, 'tools', 'pnpm')
+  const tarball = path.join(toolRoot, `pnpm-${PNPM_BUNDLE_VERSION}.tgz`)
+  await rm(packageDir, { recursive: true, force: true })
+  await mkdir(packageDir, { recursive: true })
   await mkdir(toolRoot, { recursive: true })
-  await writeFile(
-    path.join(toolRoot, 'package.json'),
-    `${JSON.stringify({
-      name: 'harnessdock-bundled-pnpm',
-      private: true,
-      version: '0.0.0',
-      dependencies: { pnpm: PNPM_BUNDLE_VERSION },
-    }, null, 2)}\n`,
-    'utf8',
-  )
 
-  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  console.log(`embedding pnpm ${PNPM_BUNDLE_VERSION} for dsh plugin management`)
-  await execFileAsync(
-    npmBin,
-    [
-      'install',
-      '--omit=dev',
-      '--ignore-scripts',
-      '--no-fund',
-      '--no-audit',
-      '--package-lock=false',
-      `--os=${platform}`,
-      `--cpu=${arch}`,
-    ],
-    {
-      cwd: toolRoot,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
-      },
-      shell: process.platform === 'win32',
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  )
+  const bytes = await fetchPinnedPnpm()
+  await writeFile(tarball, bytes)
+  await execFileAsync('tar', ['-xzf', tarball, '-C', packageDir, '--strip-components=1'], {
+    windowsHide: true,
+  })
+  await rm(tarball, { force: true })
   await writeBundledPnpmShim(dest, platform)
 }
 
@@ -96,6 +101,7 @@ const manifestPath = path.join(dest, 'manifest.json')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
 manifest.pnpmEmbedded = true
 manifest.pnpmVersion = PNPM_BUNDLE_VERSION
+manifest.pnpmSha256 = PNPM_BUNDLE_SHA256
 manifest.pluginManagementReady = true
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 
