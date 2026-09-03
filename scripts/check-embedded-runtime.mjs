@@ -9,9 +9,12 @@ const readJson = (relative) => JSON.parse(read(relative))
 const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
 const candidate = read('.github/workflows/tauri-candidate.yml')
 const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
+const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
 const runtimePackage = readJson('packages/client-runtime/package.json')
 const prepare = read('packages/client-runtime/src/prepare-cli.ts')
 const nodePrune = read('packages/client-runtime/src/node-runtime-prune.ts')
+const pnpmTool = read('packages/client-runtime/src/pnpm-tool.ts')
+const pnpmEnsure = read('packages/client-runtime/src/ensure-pnpm-cli.ts')
 
 const fail = (message) => {
   throw new Error(`[embedded-runtime] ${message}`)
@@ -52,6 +55,9 @@ requireCandidateMarker(
 if (!runtime.includes('resource_path(&app, "dsh-runtime")')) {
   fail('native Runtime startup must resolve dsh-runtime from packaged resources')
 }
+if (!runtimePackage.scripts?.['bundle-runtime']?.includes('ensure-pnpm-cli.ts')) {
+  fail('bundled Runtime build must embed pnpm for dsh profile-plugin management')
+}
 if (!runtimePackage.scripts?.['bundle-runtime']?.includes('prune-node-cli.ts')) {
   fail('bundled Runtime build must apply compact Node distribution pruning')
 }
@@ -62,10 +68,22 @@ if (
   !nodePrune.includes("path.join('lib', 'node_modules')") ||
   !nodePrune.includes("path.join('node_modules', 'npm')")
 ) {
-  fail('compact Node pruning must remove bundled package-manager payloads on Unix and Windows')
+  fail('compact Node pruning must remove bundled npm/corepack payloads without deleting dsh')
+}
+if (!pnpmTool.includes("PNPM_BUNDLE_VERSION = '10.12.1'")) {
+  fail('bundled pnpm must be pinned to the repository-approved runtime-tool version')
+}
+if (!pnpmEnsure.includes('pluginManagementReady = true')) {
+  fail('bundled Runtime manifest must record that plugin management tooling is ready')
+}
+if (!desktop.includes('configure_embedded_runtime_tool_path')) {
+  fail('desktop adapter must expose embedded Runtime tools to dsh child processes')
+}
+if (!desktop.includes('runtime.join("tools").join("bin")')) {
+  fail('desktop adapter must prepend the embedded pnpm shim directory to PATH')
 }
 if (runtime.includes('download Node') || runtime.includes('download dsh')) {
   fail('native first-launch Runtime startup must not download Node or dsh')
 }
 
-console.log('[embedded-runtime] self-contained Full Runtime contract OK')
+console.log('[embedded-runtime] self-contained Full Runtime + plugin-tool contract OK')
