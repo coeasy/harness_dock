@@ -6,6 +6,7 @@
 
 | Command | Capability |
 | --- | --- |
+| `activate-primary` | `window-control` |
 | `refresh-harness` | `web-reload` |
 | `restart-runtime` | `runtime-restart` |
 | `start-safe-mode` | `runtime-safe-mode` |
