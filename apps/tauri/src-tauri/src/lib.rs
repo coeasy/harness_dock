@@ -4,6 +4,7 @@ mod gateway;
 mod gateway_host;
 mod harness_shell;
 mod harness_window;
+mod host_protocol;
 mod lifecycle;
 mod platform;
 mod plugin_quarantine;
@@ -46,7 +47,8 @@ pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_manag
 ///
 /// These implementation details live in `desktop.rs`, `state.rs`,
 /// `service/workflow.rs` and `supervisor.rs`; this root contains no Runtime or
-/// Gateway procedure sequencing.
+/// Gateway procedure sequencing. `host_protocol.rs` is the v2 typed contract
+/// boundary used by native adapters during Round 1.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(mobile))]
