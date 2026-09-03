@@ -16,6 +16,7 @@ mod reconciler;
 mod runtime;
 mod runtime_actor;
 mod service;
+mod single_instance;
 mod startup;
 mod startup_trace;
 mod state;
@@ -25,16 +26,11 @@ mod tray;
 mod update;
 mod update_actor;
 
+use tauri::Manager as _;
+
 pub(crate) use state::AppState;
 pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
 
-/// HarnessDock v0.2.0 Native Host ownership map:
-///
-/// Tauri Adapter -> Host Protocol -> HostKernelTask -> Capability Broker
-/// -> Desired State / Reconciler -> Resource Actors -> RuntimeLease.
-///
-/// Long-lived native resources are owned by their actor state. Renderers submit
-/// typed intent only; normal startup has no permanent hidden control renderer.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     startup_trace::mark(startup_trace::StartupPhase::ProcessStarted);
@@ -42,6 +38,19 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
+            #[cfg(not(mobile))]
+            match single_instance::install(app.handle().clone()).map_err(std::io::Error::other)? {
+                single_instance::InstallOutcome::Primary(guard) => {
+                    *app.state::<AppState>()
+                        .single_instance
+                        .lock()
+                        .map_err(|_| std::io::Error::other("single-instance state lock poisoned"))? = Some(guard);
+                }
+                single_instance::InstallOutcome::SecondaryHandedOff => {
+                    app.handle().exit(0);
+                    return Ok(());
+                }
+            }
             desktop::setup(app)
         })
         .invoke_handler(bridge::handler!())
