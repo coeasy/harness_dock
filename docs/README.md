@@ -13,18 +13,23 @@ HarnessDock v0.2.0 的桌面分发策略已经最终确定：
 2. [`plan/v0.2.0-five-round-rebuild-plan.md`](./plan/v0.2.0-five-round-rebuild-plan.md)  
    **唯一实施计划**。定义五轮连续开发、删除项、建设项、审计项、自动化门禁和最终完成条件。
 
+当前有效实施补充：
+
+- [`plan/v0.2.0-embedded-runtime-tooling.md`](./plan/v0.2.0-embedded-runtime-tooling.md)  
+  定义 Full Runtime 的工具层：Node 自带 npm/corepack 可裁剪，但必须内置 pinned pnpm 并通过 Runtime PATH 提供给 `dsh plugin`，从而保持插件安装/更新能力而不依赖用户系统 pnpm。
+
 事实参考：
 
 - [`reference/deepseek-harness-desktop-size-and-feature-analysis.md`](./reference/deepseek-harness-desktop-size-and-feature-analysis.md)  
   解释参考项目为什么安装包小，以及哪些机制可借鉴。注意：参考项目的 first-run Runtime download **不属于 HarnessDock 最终方案**。
 
-如果任何其它文档与上述两份基线冲突，以当前五轮架构基线为准。
+如果任何其它文档与上述基线冲突，以当前五轮架构基线和 Embedded Runtime Tooling Contract 为准。
 
 ## 最终桌面主链
 
 ```text
 Signed Full Installer
-  -> embedded compact Node + pinned dsh
+  -> embedded compact Node + pinned dsh + pinned pnpm tool
   -> Tauri Adapter
   -> Host Protocol v2
   -> Host Kernel
@@ -48,15 +53,16 @@ Round 5  Model/Fault Tests + Performance/Size SLO + Release Graph + Cleanup
 
 ## 当前实施状态
 
-Round 1 已开始：
+Round 1 已开始并已落地：
 
 - `lib.rs` 已恢复 composition-root 方向；
 - `bridge.rs / desktop.rs / service/workflow.rs` 已建立；
-- Tray/Menu 开始统一使用 typed Host intent；
+- Tray/Menu 已统一使用 typed Host intent；
 - Host Protocol v2 typed model 已开始落地；
 - Full Runtime candidate pipeline 保持 Node+dsh 内置；
-- 新增 Node 官方发行包瘦身；
-- 正在把 embedded-runtime contract 固化为 CI 门禁。
+- Node 官方发行包开始瘦身；
+- pinned pnpm 作为独立 Runtime Tool 内置，避免 `dsh plugin` 依赖系统 pnpm；
+- embedded-runtime contract 已接入 CI，正在按当前 head 验证。
 
 ## 历史文档
 
