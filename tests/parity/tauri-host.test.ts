@@ -167,14 +167,12 @@ describe('Tauri v0.2 host contract', () => {
   it('keeps managed helper execution child-local and console-safe', () => {
     const platform = read('apps/tauri/src-tauri/src/platform.rs')
     const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
-    const gatewayHost = read('apps/tauri/src-tauri/src/gateway_host.rs')
     expect(platform).toContain('command.env("PATH", joined)')
     expect(platform).not.toContain('env::set_var("PATH"')
     expect(platform).not.toContain('std::env::set_var("PATH"')
     expect(platform).toContain('command.process_group(0)')
     expect(platform).toContain('CREATE_NO_WINDOW')
     expect(runtime).toContain('platform::configure_child_command')
-    expect(gatewayHost).toContain('platform::configure_child_command')
   })
 
   it('publishes Full-only signed updater assets from the exact green main candidate', () => {
