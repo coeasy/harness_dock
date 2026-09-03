@@ -89,7 +89,9 @@ pub(crate) async fn execute(app: AppHandle, subject: SubjectKind, command: HostC
             host_error("DESIRED_STATE_POISONED", ErrorScope::Host, "Host desired-state lock is poisoned", true)
         })?;
         match command {
-            HostCommand::RefreshHarness => desired.harness_surface = SurfaceDesiredState::Visible,
+            HostCommand::ActivatePrimary | HostCommand::RefreshHarness => {
+                desired.harness_surface = SurfaceDesiredState::Visible;
+            }
             HostCommand::RestartRuntime => {
                 desired.runtime = RuntimeDesiredState::Ready;
                 desired.harness_surface = SurfaceDesiredState::Visible;
@@ -114,8 +116,33 @@ pub(crate) async fn execute(app: AppHandle, subject: SubjectKind, command: HostC
     })
 }
 
+async fn activate_primary(app: AppHandle) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        Err("移动端没有本地 Harness 主窗口。".into())
+    }
+    #[cfg(not(mobile))]
+    {
+        if let Some(window) = app.get_webview_window("harness") {
+            let _ = window.unminimize();
+            window
+                .show()
+                .map_err(|error| format!("无法显示 Harness 主窗口: {error}"))?;
+            window
+                .set_focus()
+                .map_err(|error| format!("无法聚焦 Harness 主窗口: {error}"))?;
+            return Ok(());
+        }
+        let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>())
+            .ok_or_else(|| "Runtime 尚未就绪，无法激活 Harness 主窗口。".to_string())?;
+        crate::harness_window::harness_open(app, lease.launch_url).await
+    }
+}
+
 async fn reconcile_command(app: AppHandle, command: HostCommand) -> Result<(), String> {
     match command {
+        HostCommand::ActivatePrimary => activate_primary(app).await,
         HostCommand::RefreshHarness => crate::harness_window::harness_reload_web(app).await,
         HostCommand::RestartRuntime => crate::harness_window::harness_restart_web(app).await.map(|_| ()),
         HostCommand::StartSafeMode => crate::harness_window::harness_safe_mode_restart(app).await.map(|_| ()),
