@@ -74,7 +74,7 @@ describe('Tauri shell fail-open guarantees', () => {
   it('keeps the packaged Runtime environment child-only instead of mutating the Host PATH', () => {
     const platform = read('apps/tauri/src-tauri/src/platform.rs')
     expect(platform).toContain('fn embedded_runtime_root')
-    expect(platform).toContain('tools').toBeTruthy()
+    expect(platform).toContain('tools')
     expect(platform).toContain('command.env("PATH", joined)')
     expect(platform).toContain('configure_child_command')
     expect(platform).toContain('command.process_group(0)')
