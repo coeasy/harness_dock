@@ -4,7 +4,7 @@
 //! native UI events into typed intents; Runtime/Gateway/Update procedure order
 //! belongs exclusively to the Reconciler and Resource Actors.
 
-use std::{env, sync::atomic::Ordering};
+use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
 use crate::{service::workflow, AppState};
@@ -26,7 +26,20 @@ pub(crate) fn spawn_intent(app: &tauri::AppHandle, intent: workflow::HostIntent)
     });
 }
 
-#[cfg(not(mobile))]
+/// Bring the user's primary Harness surface to the foreground for a
+/// single-instance handoff. Prefer the real Harness Web window, but fall back
+/// to startup/recovery surfaces when the runtime is not ready yet.
+pub(crate) fn focus_primary(app: &tauri::AppHandle) {
+    for label in ["harness", "splash", "control"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
+    }
+}
+
 fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
@@ -64,31 +77,6 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(mobile))]
-fn configure_embedded_runtime_tool_path(app: &tauri::App) -> Result<(), String> {
-    let resources = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("无法解析 HarnessDock resource 目录: {error}"))?;
-    let runtime = resources.join("dsh-runtime");
-    let tool_bin = runtime.join("tools").join("bin");
-    if !tool_bin.is_dir() {
-        return Ok(());
-    }
-    let node_bin = if cfg!(windows) {
-        runtime
-    } else {
-        runtime.join("bin")
-    };
-    let current = env::var_os("PATH").unwrap_or_default();
-    let mut entries = vec![tool_bin, node_bin];
-    entries.extend(env::split_paths(&current));
-    let joined = env::join_paths(entries)
-        .map_err(|error| format!("无法配置内置 Runtime 工具 PATH: {error}"))?;
-    env::set_var("PATH", joined);
-    Ok(())
-}
-
 fn visible_webview(app: &tauri::AppHandle, label: &str) -> bool {
     app.get_webview_window(label)
         .and_then(|window| window.is_visible().ok())
@@ -107,33 +95,29 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 }
 
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(not(mobile))]
-    {
-        if let Err(error) = configure_embedded_runtime_tool_path(app) {
-            eprintln!(
-                "HarnessDock bundled plugin-management tools unavailable; Harness Web will continue: {error}"
-            );
-        }
-        match crate::tray::create_tray(&app.handle()) {
-            Ok(()) => app
-                .state::<AppState>()
-                .tray_available
-                .store(true, Ordering::Release),
-            Err(error) => eprintln!(
-                "HarnessDock tray unavailable; primary-window close will exit cleanly: {error}"
-            ),
-        }
-        if let Err(error) = app
-            .handle()
-            .plugin(tauri_plugin_updater::Builder::new().build())
-        {
-            eprintln!("HarnessDock updater unavailable; continuing without automatic install: {error}");
-        }
-        if let Err(error) = install_shell_menu(app) {
-            eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
-        }
-        crate::startup::spawn(app.handle().clone());
+    // Never mutate the process-global PATH here. Runtime/tool processes resolve
+    // packaged executables explicitly and receive any environment overrides on
+    // their own Command, so plugins cannot change the host's executable search
+    // path or race unrelated child launches.
+    match crate::tray::create_tray(&app.handle()) {
+        Ok(()) => app
+            .state::<AppState>()
+            .tray_available
+            .store(true, Ordering::Release),
+        Err(error) => eprintln!(
+            "HarnessDock tray unavailable; primary-window close will exit cleanly: {error}"
+        ),
     }
+    if let Err(error) = app
+        .handle()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+    {
+        eprintln!("HarnessDock updater unavailable; continuing without automatic install: {error}");
+    }
+    if let Err(error) = install_shell_menu(app) {
+        eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
+    }
+    crate::startup::spawn(app.handle().clone());
     Ok(())
 }
 
