@@ -102,7 +102,10 @@ jobs:
           set -euo pipefail
           git config user.name 'coeasy'
           git config user.email 'mdonetwo@yeah.net'
-          git add rust-toolchain.toml package.json apps/tauri/package.json apps/tauri/src-tauri/Cargo.lock apps/tauri/src-tauri/src scripts/check-versions.mjs scripts/check-shell-package.mjs tests/parity/reproducible-release-contract.test.ts .github/workflows/ci.yml .github/workflows/tauri-ci.yml .github/workflows/tauri-candidate.yml
-          git diff --cached --quiet && { echo 'No validated round-one changes to commit.'; exit 1; }
+          # Workflow files are validated in this job but intentionally not pushed by
+          # GITHUB_TOKEN; the repository write API applies those separately. This
+          # avoids the GitHub App workflow-scope failure that blocked the previous run.
+          git add rust-toolchain.toml package.json apps/tauri/package.json apps/tauri/src-tauri/Cargo.lock apps/tauri/src-tauri/src scripts/check-versions.mjs scripts/check-shell-package.mjs tests/parity/reproducible-release-contract.test.ts
+          git diff --cached --quiet && { echo 'No validated round-one product changes to commit.'; exit 1; }
           git commit -m 'build: freeze and format Tauri v0.2.0 toolchain'
           git push origin HEAD:refactor/v0.2.0-shell-first
