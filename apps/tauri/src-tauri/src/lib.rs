@@ -12,7 +12,7 @@ mod update;
 #[cfg(not(mobile))]
 mod tray;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -26,6 +26,7 @@ pub(crate) struct AppState {
     pub(crate) settings_opening: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
     pub(crate) gateway_starting: AtomicBool,
+    pub(crate) gateway_generation: AtomicU64,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: AtomicBool,
 }
@@ -41,6 +42,7 @@ impl Default for AppState {
             settings_opening: AtomicBool::new(false),
             gateway: Mutex::new(None),
             gateway_starting: AtomicBool::new(false),
+            gateway_generation: AtomicU64::new(0),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: AtomicBool::new(false),
         }
