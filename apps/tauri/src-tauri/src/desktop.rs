@@ -26,7 +26,6 @@ pub(crate) fn spawn_intent(app: &tauri::AppHandle, intent: workflow::HostIntent)
     });
 }
 
-#[cfg(not(mobile))]
 fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
@@ -82,28 +81,27 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 }
 
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(not(mobile))]
-    {
-        match crate::tray::create_tray(&app.handle()) {
-            Ok(()) => app
-                .state::<AppState>()
-                .tray_available
-                .store(true, Ordering::Release),
-            Err(error) => eprintln!(
-                "HarnessDock tray unavailable; primary-window close will exit cleanly: {error}"
-            ),
-        }
-        if let Err(error) = app
-            .handle()
-            .plugin(tauri_plugin_updater::Builder::new().build())
-        {
-            eprintln!("HarnessDock updater unavailable; continuing without automatic install: {error}");
-        }
-        if let Err(error) = install_shell_menu(app) {
-            eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
-        }
-        crate::startup::spawn(app.handle().clone());
+    crate::host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
+
+    match crate::tray::create_tray(&app.handle()) {
+        Ok(()) => app
+            .state::<AppState>()
+            .tray_available
+            .store(true, Ordering::Release),
+        Err(error) => eprintln!(
+            "HarnessDock tray unavailable; primary-window close will exit cleanly: {error}"
+        ),
     }
+    if let Err(error) = app
+        .handle()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+    {
+        eprintln!("HarnessDock updater unavailable; continuing without automatic install: {error}");
+    }
+    if let Err(error) = install_shell_menu(app) {
+        eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
+    }
+    crate::startup::spawn(app.handle().clone());
     Ok(())
 }
 
