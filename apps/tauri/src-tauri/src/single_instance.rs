@@ -94,6 +94,20 @@ fn try_handoff(path: &PathBuf) -> bool {
         .is_ok()
 }
 
+fn dispatch_primary_activation(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::host_kernel::execute_native(
+            app.clone(),
+            crate::host_protocol::SubjectKind::DesktopShell,
+            crate::host_protocol::HostCommand::ActivatePrimary,
+        )
+        .await
+        {
+            crate::desktop::report_shell_error(&app, &error.message);
+        }
+    });
+}
+
 fn install_primary(app: AppHandle, path: PathBuf) -> Result<SingleInstanceGuard, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -129,7 +143,7 @@ fn install_primary(app: AppHandle, path: PathBuf) -> Result<SingleInstanceGuard,
                         let mut raw = String::new();
                         let _ = stream.read_to_string(&mut raw);
                         if raw.trim() == format!("FOCUS {nonce}") {
-                            crate::desktop::focus_primary(&app);
+                            dispatch_primary_activation(app.clone());
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -154,8 +168,9 @@ pub(crate) fn install(app: AppHandle) -> Result<InstallOutcome, String> {
         Ok(guard) => Ok(InstallOutcome::Primary(guard)),
         Err(_) if try_handoff(&path) => Ok(InstallOutcome::SecondaryHandedOff),
         Err(_) => {
-            // The owner record is stale or malformed. Reclaim it once; a live
-            // owner would have accepted the nonce-bound handoff above.
+            // Transitional fallback until the official Tauri single-instance
+            // plugin fully owns this boundary. Even this path only emits a
+            // typed Host intent; it never manipulates Runtime or windows.
             let _ = fs::remove_file(&path);
             install_primary(app, path).map(InstallOutcome::Primary)
         }
