@@ -6,17 +6,39 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 describe('Gateway lifecycle admission contract', () => {
-  it('serializes explicit start and stop through the same atomic admission bit', () => {
+  it('serializes start/stop through the GatewayActor generation state machine', () => {
     const source = readFileSync(
       path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
       'utf8',
     )
 
-    expect(source).toContain('fn claim_gateway_start')
-    expect(source).toContain('fn claim_gateway_stop')
-    expect(source).toContain('Arc::clone(&state.gateway_starting)')
-    expect(source).toContain('lifecycle.swap(true, Ordering::AcqRel)')
-    expect(source).toContain('let _stopping = claim_gateway_stop(&state)?;')
-    expect(source).not.toContain('if state.gateway_starting.load(Ordering::Acquire) {\n        return Err("Gateway 正在启动，请稍候再停止。"')
+    expect(source).toContain('pub enum GatewayPhase')
+    expect(source).toContain('pub(crate) struct GatewayActorState')
+    expect(source).toContain('fn begin_start(&mut self) -> Result<u64, String>')
+    expect(source).toContain('self.generation = self.generation.saturating_add(1)')
+    expect(source).toContain('self.phase = GatewayPhase::Starting')
+    expect(source).toContain('self.phase != GatewayPhase::Starting || self.generation != generation')
+    expect(source).toContain('fn begin_stop(&mut self) -> Option<NativeGateway>')
+    expect(source).toContain('self.phase = GatewayPhase::Stopping')
+    expect(source).toContain('self.server.take()')
+    expect(source).toContain('actor.settle_stopped()')
+    expect(source).toContain('ensure_current_runtime(&*state, lease.generation.id)')
+    expect(source).not.toContain('state.gateway_starting')
+    expect(source).not.toContain('fn claim_gateway_start')
+    expect(source).not.toContain('fn claim_gateway_stop')
+  })
+
+  it('drops the actor lock before blocking server shutdown', () => {
+    const source = readFileSync(
+      path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
+      'utf8',
+    )
+    const stop = source.slice(source.indexOf('pub(crate) fn stop_managed'))
+    const take = stop.indexOf('actor.begin_stop()')
+    const stopServer = stop.indexOf('server.stop()')
+    const settle = stop.indexOf('actor.settle_stopped()')
+    expect(take).toBeGreaterThanOrEqual(0)
+    expect(stopServer).toBeGreaterThan(take)
+    expect(settle).toBeGreaterThan(stopServer)
   })
 })
