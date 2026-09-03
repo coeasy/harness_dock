@@ -1,9 +1,8 @@
 //! Harness Web shell adapter.
 //!
 //! The UI is shipped as the independent `@dsh/plugin-harness-shell` dsh
-//! plugin. Tauri only supplies the versioned host bridge here, so the same
-//! shell asset can be published and installed independently by other dsh
-//! hosts without copying Tauri-specific code into the Web application.
+//! plugin. Tauri supplies only minimum window primitives plus Host Protocol v2.
+//! The remote Harness document never receives direct Runtime/update/quit IPC.
 
 use tauri::Manager;
 
@@ -15,33 +14,51 @@ const BRIDGE_SCRIPT: &str = r#"
   'use strict';
   const tauriInvoke = window.__TAURI__?.core?.invoke;
   const tauriListen = window.__TAURI__?.event?.listen;
-  const commandMap = Object.freeze({
+  const directWindowMap = Object.freeze({
     'window.minimize': 'harness_minimize',
     'window.toggleMaximize': 'harness_toggle_maximize',
     'window.state': 'harness_window_state',
-    'window.close': 'harness_shell_close',
-    'web.reload': 'harness_reload_web',
-    'web.restart': 'harness_restart_web',
-    'runtime.safe-mode': 'harness_safe_mode_restart',
-    'runtime.clear-quarantine': 'harness_clear_quarantine_restart',
-    'gateway.manage': 'control_show',
-    'diagnostics.open': 'shell_settings_show',
-    'app.update.check': 'update_check',
-    'app.update.install': 'update_install',
-    'app.quit': 'app_quit'
+    'window.close': 'harness_shell_close'
+  });
+  const hostCommandMap = Object.freeze({
+    'web.reload': 'refresh-harness',
+    'web.restart': 'restart-runtime',
+    'runtime.safe-mode': 'start-safe-mode',
+    'runtime.clear-quarantine': 'clear-quarantine',
+    'gateway.manage': 'show-gateway',
+    'diagnostics.open': 'show-diagnostics'
   });
   const capabilities = Object.freeze(Object.fromEntries(
-    Object.keys(commandMap).map((command) => [command, typeof tauriInvoke === 'function'])
+    [...Object.keys(directWindowMap), ...Object.keys(hostCommandMap)]
+      .map((command) => [command, typeof tauriInvoke === 'function'])
   ));
+  let requestSequence = 0;
+  const requestId = () => {
+    requestSequence += 1;
+    const random = globalThis.crypto?.randomUUID?.();
+    return random || `shell-${Date.now()}-${requestSequence}`;
+  };
+  const unwrapHostResponse = (response) => {
+    if (response?.result?.Err) throw new Error(String(response.result.Err.message || 'Host command denied'));
+    return response?.result?.Ok ?? response;
+  };
   const invoke = (command, payload) => {
-    if (typeof command !== 'string' || !Object.prototype.hasOwnProperty.call(commandMap, command)) {
-      return Promise.reject(new Error('外壳命令无效'));
-    }
-    const nativeCommand = commandMap[command];
-    if (!nativeCommand || typeof tauriInvoke !== 'function') {
+    if (typeof command !== 'string' || typeof tauriInvoke !== 'function') {
       return Promise.reject(new Error('外壳桥接不可用'));
     }
-    return tauriInvoke(nativeCommand, payload);
+    if (Object.prototype.hasOwnProperty.call(directWindowMap, command)) {
+      return tauriInvoke(directWindowMap[command], payload);
+    }
+    if (Object.prototype.hasOwnProperty.call(hostCommandMap, command)) {
+      const envelope = {
+        protocolVersion: 2,
+        requestId: requestId(),
+        subject: 'harness-web',
+        command: { type: hostCommandMap[command] }
+      };
+      return tauriInvoke('host_execute', { envelope }).then(unwrapHostResponse);
+    }
+    return Promise.reject(new Error('外壳命令无效'));
   };
   const subscribe = (listener) => {
     if (typeof tauriListen !== 'function' || typeof listener !== 'function') return () => {};
@@ -71,7 +88,7 @@ const BRIDGE_SCRIPT: &str = r#"
     };
   };
   window.__DSH_SHELL_BRIDGE__ = Object.freeze({
-    apiVersion: 1,
+    apiVersion: 2,
     pluginId: 'harness-shell',
     version: '0.2.0',
     capabilities,
@@ -82,9 +99,8 @@ const BRIDGE_SCRIPT: &str = r#"
 "#;
 
 /// The custom shell close button hides to tray only when a tray actually
-/// exists. On desktops where tray creation failed, hiding would strand an
-/// invisible process because the normal ExitRequested guard intentionally
-/// keeps the host alive during WebView transitions.
+/// exists. On desktops where tray creation failed, it performs supervised exit
+/// so the Runtime/Gateway actors are still drained before process termination.
 #[tauri::command]
 pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
     let tray_available = app
