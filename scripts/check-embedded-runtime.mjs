@@ -17,18 +17,38 @@ const fail = (message) => {
   throw new Error(`[embedded-runtime] ${message}`)
 }
 
+const requireCandidateMarker = (marker, message) => {
+  if (!candidate.includes(marker)) fail(message)
+}
+
 if (tauri.bundle?.resources?.['resources/'] !== '') {
   fail('Tauri bundle must embed src-tauri/resources at the application resource root')
 }
-if (!candidate.includes('Prepare per-platform bundled runtime')) {
-  fail('candidate must prepare a per-platform bundled Runtime before desktop packaging')
-}
-if (!candidate.includes('Download prepared runtime into Tauri resources')) {
-  fail('candidate must place the prepared Runtime under Tauri resources')
-}
-if (!candidate.includes('Verify full runtime before packaging')) {
-  fail('candidate must smoke-verify the embedded Full Runtime before packaging')
-}
+
+// Check stable implementation commands/paths rather than human-readable step
+// labels. Step titles are documentation and may be renamed without changing the
+// Full Runtime release contract.
+requireCandidateMarker(
+  'pnpm --filter @dsh/client-runtime bundle-runtime',
+  'candidate must build each target Runtime from the pinned official source closure',
+)
+requireCandidateMarker(
+  'name: tauri-runtime-${{ matrix.artifact }}',
+  'candidate must publish a target-specific prepared Runtime artifact',
+)
+requireCandidateMarker(
+  'path: apps/tauri/src-tauri/resources/dsh-runtime',
+  'candidate must place the prepared Runtime under Tauri resources',
+)
+requireCandidateMarker(
+  'pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime',
+  'candidate must smoke-verify the exact Runtime copied into Tauri resources',
+)
+requireCandidateMarker(
+  'Verify full runtime before packaging',
+  'candidate must verify the embedded Full Runtime before desktop packaging',
+)
+
 if (!runtime.includes('resource_path(&app, "dsh-runtime")')) {
   fail('native Runtime startup must resolve dsh-runtime from packaged resources')
 }
@@ -38,7 +58,10 @@ if (!runtimePackage.scripts?.['bundle-runtime']?.includes('prune-node-cli.ts')) 
 if (!prepare.includes('required official packed upstream tarballs')) {
   fail('Runtime preparation must keep using the official packed dsh production closure')
 }
-if (!nodePrune.includes("path.join('lib', 'node_modules')") || !nodePrune.includes("path.join('node_modules', 'npm')")) {
+if (
+  !nodePrune.includes("path.join('lib', 'node_modules')") ||
+  !nodePrune.includes("path.join('node_modules', 'npm')")
+) {
   fail('compact Node pruning must remove bundled package-manager payloads on Unix and Windows')
 }
 if (runtime.includes('download Node') || runtime.includes('download dsh')) {
