@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { inspectBundledRuntime, runtimeCacheDir } from './bundled.ts'
+import { computeRuntimeImageIdentity } from './image-identity.ts'
 import { assertBundledRuntimeIntegrity } from './integrity.ts'
 import { pruneBundledNodeDistribution } from './node-runtime-prune.ts'
 
@@ -35,10 +36,22 @@ const priorCount = Number(manifest.nodeDistributionPrunedCount) || 0
 manifest.nodeDistributionPruned = true
 manifest.nodeDistributionPrunedBytes = priorBytes + removedBytes
 manifest.nodeDistributionPrunedCount = priorCount + removedCount
+manifest.productionClosurePrunedBytes = Number(manifest.prunedBytes) || 0
 manifest.runtimeEmbedded = true
 manifest.firstLaunchRuntimeDownloadRequired = false
+manifest.schemaVersion = 1
+manifest.clientVersion = JSON.parse(await readFile(path.join(repoRoot, 'package.json'), 'utf8')).version
+manifest.dshGitTag = manifest.gitTag
+manifest.dshGitCommit = manifest.gitCommit
+manifest.buildCommit = process.env.GITHUB_SHA ?? process.env.HARNESSDOCK_BUILD_COMMIT ?? 'local'
+
+const identity = await computeRuntimeImageIdentity(dest)
+manifest.imageIdentityAlgorithm = identity.algorithm
+manifest.imageIdentity = identity.imageIdentity
+manifest.contentFileCount = identity.contentFileCount
+manifest.contentBytes = identity.contentBytes
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 
 console.log(
-  `[node-prune] embedded runtime verified: ${dest}; removed ${(removedBytes / 1024 / 1024).toFixed(1)} MB this pass`,
+  `[node-prune] embedded runtime verified: ${dest}; removed ${(removedBytes / 1024 / 1024).toFixed(1)} MB this pass; identity=${identity.imageIdentity}; payload=${(identity.contentBytes / 1024 / 1024).toFixed(1)} MB`,
 )
