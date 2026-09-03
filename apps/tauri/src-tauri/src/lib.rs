@@ -34,23 +34,17 @@ pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_manag
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     startup_trace::mark(startup_trace::StartupPhase::ProcessStarted);
-    tauri::Builder::default()
+
+    let builder = tauri::Builder::default();
+    #[cfg(not(mobile))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        single_instance::handle_secondary_launch(app.clone());
+    }));
+
+    builder
         .manage(AppState::default())
         .setup(|app| {
             host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
-            #[cfg(not(mobile))]
-            match single_instance::install(app.handle().clone()).map_err(std::io::Error::other)? {
-                single_instance::InstallOutcome::Primary(guard) => {
-                    *app.state::<AppState>()
-                        .single_instance
-                        .lock()
-                        .map_err(|_| std::io::Error::other("single-instance state lock poisoned"))? = Some(guard);
-                }
-                single_instance::InstallOutcome::SecondaryHandedOff => {
-                    app.handle().exit(0);
-                    return Ok(());
-                }
-            }
             desktop::setup(app)
         })
         .invoke_handler(bridge::handler!())
