@@ -2,6 +2,7 @@ mod gateway;
 mod gateway_host;
 mod harness_shell;
 mod harness_window;
+mod lifecycle;
 mod platform;
 mod plugin_quarantine;
 mod process;
@@ -9,86 +10,18 @@ mod runtime;
 #[cfg(not(mobile))]
 mod startup;
 #[cfg(not(mobile))]
+mod startup_trace;
+mod state;
+mod supervisor;
+#[cfg(not(mobile))]
 mod tray;
 mod update;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+pub(crate) use state::AppState;
+pub(crate) use supervisor::{request_exit, stop_managed_processes, wait_for_managed_processes};
+
+use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
-
-pub(crate) struct AppState {
-    pub(crate) runtime: Mutex<Option<runtime::RuntimeProcess>>,
-    pub(crate) runtime_starting: AtomicBool,
-    pub(crate) runtime_restarting: AtomicBool,
-    pub(crate) runtime_stopping: AtomicBool,
-    pub(crate) web_action: AtomicBool,
-    pub(crate) harness_loading: AtomicBool,
-    pub(crate) harness_load_generation: AtomicU64,
-    pub(crate) startup_recovery_error: Mutex<Option<String>>,
-    pub(crate) settings_opening: AtomicBool,
-    pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
-    pub(crate) gateway_starting: Arc<AtomicBool>,
-    pub(crate) starting_processes: process::StartingProcessRegistry,
-    pub(crate) quitting: Arc<AtomicBool>,
-    pub(crate) tray_available: AtomicBool,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            runtime: Mutex::new(None),
-            runtime_starting: AtomicBool::new(false),
-            runtime_restarting: AtomicBool::new(false),
-            runtime_stopping: AtomicBool::new(false),
-            web_action: AtomicBool::new(false),
-            harness_loading: AtomicBool::new(false),
-            harness_load_generation: AtomicU64::new(0),
-            startup_recovery_error: Mutex::new(None),
-            settings_opening: AtomicBool::new(false),
-            gateway: Mutex::new(None),
-            gateway_starting: Arc::new(AtomicBool::new(false)),
-            starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            quitting: Arc::new(AtomicBool::new(false)),
-            tray_available: AtomicBool::new(false),
-        }
-    }
-}
-
-/// Synchronous, idempotent child cleanup used by both normal shutdown and the
-/// updater's Windows pre-exit hook. The updater may terminate the host as part
-/// of installer handoff, so it cannot rely on an async shutdown task alone.
-pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    process::stop_starting_processes(&state.starting_processes);
-    gateway_host::stop_managed(&state.gateway);
-    runtime::stop_managed(&state.runtime);
-}
-
-pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            stop_managed_processes(&app);
-            if process::starting_processes_empty(&state.starting_processes)
-                && !state.runtime_starting.load(Ordering::Acquire)
-                && !state.gateway_starting.load(Ordering::Acquire)
-            {
-                break;
-            }
-            if std::time::Instant::now() >= deadline {
-                eprintln!("HarnessDock shutdown timed out while waiting for startup tasks; forcing process exit.");
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        // One final idempotent pass covers a startup task that published its
-        // Child just as the last registry check completed.
-        stop_managed_processes(&app);
-    })
-    .await;
-}
 
 #[cfg(not(mobile))]
 pub(crate) fn report_shell_error(app: &tauri::AppHandle, error: &str) {
@@ -96,23 +29,6 @@ pub(crate) fn report_shell_error(app: &tauri::AppHandle, error: &str) {
     if let Some(window) = app.get_webview_window("harness") {
         let _ = window.emit("harnessdock-shell-error", error.to_string());
     }
-}
-
-pub(crate) fn request_exit(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    if state.quitting.swap(true, Ordering::SeqCst) {
-        return;
-    }
-
-    // Do not terminate the Tauri process until every managed child has had a
-    // chance to leave. Runtime/Gateway startup uses blocking tasks, so an
-    // immediate app.exit() here can race the task after it has spawned Node but
-    // before it has published the Child into AppState.
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        wait_for_managed_processes(handle.clone()).await;
-        handle.exit(0);
-    });
 }
 
 #[cfg(not(mobile))]
@@ -221,6 +137,9 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(mobile))]
+    startup_trace::mark(startup_trace::StartupPhase::ProcessStarted);
+
     let mut app = tauri::Builder::default()
         .manage(AppState::default())
         .setup(|app| {
@@ -317,7 +236,7 @@ pub fn run() {
                         // way back into the application. Closing it means quit.
                         harness_window::cancel_harness_load(app_handle);
                         harness_window::hide_splash(app_handle);
-                        request_exit(app_handle);
+                        supervisor::request_exit(app_handle);
                         return;
                     }
 
@@ -325,7 +244,7 @@ pub fn run() {
                         // Startup recovery can make `main` the only visible
                         // surface. Closing that sole recovery window must not
                         // strand a hidden Runtime process with no tray.
-                        request_exit(app_handle);
+                        supervisor::request_exit(app_handle);
                         return;
                     }
 
@@ -351,7 +270,7 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Exit => {
-                stop_managed_processes(app_handle);
+                supervisor::stop_managed_processes(app_handle);
             }
             tauri::RunEvent::ExitRequested { api, .. }
                 if !app_handle
