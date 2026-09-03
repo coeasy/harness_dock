@@ -43,7 +43,12 @@ describe('bundled pnpm tool', () => {
     const details = await stat(shim)
     expect(source).toContain('$SCRIPT_DIR/../../bin/node')
     expect(source).toContain('$SCRIPT_DIR/../pnpm/node_modules/pnpm/bin/pnpm.cjs')
-    expect(details.mode & 0o111).not.toBe(0)
+    // POSIX execute bits are meaningful only on POSIX filesystems. Windows can
+    // generate and validate the Unix shim content, but stat().mode does not
+    // preserve chmod(0755) semantics there.
+    if (process.platform !== 'win32') {
+      expect(details.mode & 0o111).not.toBe(0)
+    }
     await expect(assertBundledPnpm(root, 'linux')).resolves.toBeUndefined()
   })
 
