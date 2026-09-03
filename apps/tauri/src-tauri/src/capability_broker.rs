@@ -19,14 +19,20 @@ pub(crate) enum Decision {
     Deny(&'static str),
 }
 
-pub(crate) const ALL_CAPABILITIES: [Capability; 10] = [
+pub(crate) const ALL_CAPABILITIES: [Capability; 16] = [
     Capability::WindowControl,
     Capability::WebReload,
     Capability::RuntimeRestart,
     Capability::RuntimeSafeMode,
-    Capability::RuntimeClearQuarantine,
-    Capability::GatewayManage,
+    Capability::RuntimeQuarantineAdmin,
+    Capability::SurfaceOpenGateway,
+    Capability::GatewayAdmin,
+    Capability::SurfaceOpenDiagnostics,
     Capability::DiagnosticsRead,
+    Capability::DiagnosticsExport,
+    Capability::PluginAdmin,
+    Capability::ProfileAdmin,
+    Capability::CliAdmin,
     Capability::UpdateCheck,
     Capability::UpdateInstall,
     Capability::AppQuit,
@@ -55,29 +61,44 @@ pub(crate) fn authorize(request: &AuthorizationRequest<'_>, lease: Option<&Runti
             | Capability::WebReload
             | Capability::RuntimeRestart
             | Capability::RuntimeSafeMode
-            | Capability::RuntimeClearQuarantine
-            | Capability::GatewayManage
-            | Capability::DiagnosticsRead => Decision::Allow,
-            Capability::UpdateCheck | Capability::UpdateInstall | Capability::AppQuit => {
-                Decision::Deny("remote-harness-cannot-own-host-update-or-exit")
-            }
+            | Capability::SurfaceOpenGateway
+            | Capability::SurfaceOpenDiagnostics => Decision::Allow,
+            Capability::RuntimeQuarantineAdmin
+            | Capability::GatewayAdmin
+            | Capability::DiagnosticsRead
+            | Capability::DiagnosticsExport
+            | Capability::PluginAdmin
+            | Capability::ProfileAdmin
+            | Capability::CliAdmin
+            | Capability::UpdateCheck
+            | Capability::UpdateInstall
+            | Capability::AppQuit => Decision::Deny("remote-harness-capability-denied"),
         };
     }
 
     match request.subject {
         SubjectKind::NativeMenu | SubjectKind::Tray | SubjectKind::DesktopShell => Decision::Allow,
         SubjectKind::Diagnostics => match request.capability {
-            Capability::DiagnosticsRead
+            Capability::SurfaceOpenGateway
+            | Capability::GatewayAdmin
+            | Capability::SurfaceOpenDiagnostics
+            | Capability::DiagnosticsRead
+            | Capability::DiagnosticsExport
             | Capability::RuntimeRestart
             | Capability::RuntimeSafeMode
-            | Capability::RuntimeClearQuarantine
+            | Capability::RuntimeQuarantineAdmin
+            | Capability::PluginAdmin
+            | Capability::ProfileAdmin
+            | Capability::CliAdmin
             | Capability::UpdateCheck
             | Capability::UpdateInstall
             | Capability::AppQuit => Decision::Allow,
-            _ => Decision::Deny("diagnostics-surface-capability-denied"),
+            Capability::WindowControl | Capability::WebReload => {
+                Decision::Deny("diagnostics-surface-capability-denied")
+            }
         },
         SubjectKind::Mobile => match request.capability {
-            Capability::GatewayManage => Decision::Allow,
+            Capability::SurfaceOpenGateway => Decision::Allow,
             _ => Decision::Deny("mobile-local-host-capability-denied"),
         },
         SubjectKind::HarnessWeb => unreachable!("handled above"),
@@ -139,17 +160,30 @@ mod tests {
             capability: Capability::WebReload,
         };
         assert_eq!(authorize(&request, Some(&lease)), Decision::Allow);
-        let stale = AuthorizationRequest {
-            runtime_generation: Some(6),
-            ..request.clone()
-        };
+        let stale = AuthorizationRequest { runtime_generation: Some(6), ..request.clone() };
         assert!(matches!(authorize(&stale, Some(&lease)), Decision::Deny(_)));
     }
 
     #[test]
-    fn harness_web_never_gets_update_or_exit_authority() {
+    fn harness_web_can_open_admin_surfaces_but_cannot_admin_them() {
         let lease = lease();
-        for capability in [Capability::UpdateCheck, Capability::UpdateInstall, Capability::AppQuit] {
+        for capability in [Capability::SurfaceOpenGateway, Capability::SurfaceOpenDiagnostics] {
+            let request = AuthorizationRequest {
+                subject: SubjectKind::HarnessWeb,
+                surface: SurfaceKind::Harness,
+                origin: Some(&lease.origin),
+                runtime_generation: Some(lease.generation.id),
+                capability,
+            };
+            assert_eq!(authorize(&request, Some(&lease)), Decision::Allow);
+        }
+        for capability in [
+            Capability::GatewayAdmin,
+            Capability::DiagnosticsRead,
+            Capability::RuntimeQuarantineAdmin,
+            Capability::UpdateInstall,
+            Capability::AppQuit,
+        ] {
             let request = AuthorizationRequest {
                 subject: SubjectKind::HarnessWeb,
                 surface: SurfaceKind::Harness,
@@ -159,19 +193,10 @@ mod tests {
             };
             assert!(matches!(authorize(&request, Some(&lease)), Decision::Deny(_)));
         }
-        let allowed = allowed_capabilities(
-            SubjectKind::HarnessWeb,
-            SurfaceKind::Harness,
-            Some(&lease.origin),
-            Some(lease.generation.id),
-            Some(&lease),
-        );
-        assert!(!allowed.contains(&Capability::UpdateInstall));
-        assert!(!allowed.contains(&Capability::AppQuit));
     }
 
     #[test]
-    fn local_diagnostics_can_manage_signed_updates_and_supervised_exit() {
+    fn local_diagnostics_can_manage_privileged_resources() {
         let allowed = allowed_capabilities(
             SubjectKind::Diagnostics,
             SurfaceKind::Diagnostics,
@@ -179,6 +204,8 @@ mod tests {
             None,
             None,
         );
+        assert!(allowed.contains(&Capability::GatewayAdmin));
+        assert!(allowed.contains(&Capability::DiagnosticsExport));
         assert!(allowed.contains(&Capability::UpdateInstall));
         assert!(allowed.contains(&Capability::AppQuit));
     }

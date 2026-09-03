@@ -9,9 +9,9 @@
 | `refresh-harness` | `web-reload` |
 | `restart-runtime` | `runtime-restart` |
 | `start-safe-mode` | `runtime-safe-mode` |
-| `clear-quarantine` | `runtime-clear-quarantine` |
-| `show-gateway` | `gateway-manage` |
-| `show-diagnostics` | `diagnostics-read` |
+| `clear-quarantine` | `runtime-quarantine-admin` |
+| `show-gateway` | `surface-open-gateway` |
+| `show-diagnostics` | `surface-open-diagnostics` |
 | `install-update` | `update-install` |
 | `quit` | `app-quit` |
 
@@ -30,9 +30,15 @@
 - `web-reload`
 - `runtime-restart`
 - `runtime-safe-mode`
-- `runtime-clear-quarantine`
-- `gateway-manage`
+- `runtime-quarantine-admin`
+- `surface-open-gateway`
+- `gateway-admin`
+- `surface-open-diagnostics`
 - `diagnostics-read`
+- `diagnostics-export`
+- `plugin-admin`
+- `profile-admin`
+- `cli-admin`
 - `update-check`
 - `update-install`
 - `app-quit`

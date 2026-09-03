@@ -28,12 +28,24 @@ pub enum Capability {
     RuntimeRestart,
     #[serde(rename = "runtime-safe-mode")]
     RuntimeSafeMode,
-    #[serde(rename = "runtime-clear-quarantine")]
-    RuntimeClearQuarantine,
-    #[serde(rename = "gateway-manage")]
-    GatewayManage,
+    #[serde(rename = "runtime-quarantine-admin")]
+    RuntimeQuarantineAdmin,
+    #[serde(rename = "surface-open-gateway")]
+    SurfaceOpenGateway,
+    #[serde(rename = "gateway-admin")]
+    GatewayAdmin,
+    #[serde(rename = "surface-open-diagnostics")]
+    SurfaceOpenDiagnostics,
     #[serde(rename = "diagnostics-read")]
     DiagnosticsRead,
+    #[serde(rename = "diagnostics-export")]
+    DiagnosticsExport,
+    #[serde(rename = "plugin-admin")]
+    PluginAdmin,
+    #[serde(rename = "profile-admin")]
+    ProfileAdmin,
+    #[serde(rename = "cli-admin")]
+    CliAdmin,
     #[serde(rename = "update-check")]
     UpdateCheck,
     #[serde(rename = "update-install")]
@@ -69,9 +81,9 @@ impl HostCommand {
             Self::RefreshHarness => Capability::WebReload,
             Self::RestartRuntime => Capability::RuntimeRestart,
             Self::StartSafeMode => Capability::RuntimeSafeMode,
-            Self::ClearQuarantine => Capability::RuntimeClearQuarantine,
-            Self::ShowGateway => Capability::GatewayManage,
-            Self::ShowDiagnostics => Capability::DiagnosticsRead,
+            Self::ClearQuarantine => Capability::RuntimeQuarantineAdmin,
+            Self::ShowGateway => Capability::SurfaceOpenGateway,
+            Self::ShowDiagnostics => Capability::SurfaceOpenDiagnostics,
             Self::InstallUpdate => Capability::UpdateInstall,
             Self::Quit => Capability::AppQuit,
         }
