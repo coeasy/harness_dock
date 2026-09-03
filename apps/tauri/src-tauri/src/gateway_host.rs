@@ -11,7 +11,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use url::Url;
 
 use crate::{runtime_actor::RuntimeLease, AppState};
@@ -1255,11 +1255,10 @@ pub fn gateway_host_stop(state: State<'_, AppState>) -> Result<GatewayHostStatus
 }
 
 fn lifecycle_lock(gateway: &Mutex<GatewayActorState>) -> Result<Arc<Mutex<()>>, String> {
-    gateway
-        .lock()
-        .map(|actor| Arc::clone(&actor.lifecycle))
-        .or_else(|poisoned| Ok(Arc::clone(&poisoned.into_inner().lifecycle)))
-        .map_err(|_| "GatewayActor 状态锁已损坏。".to_string())
+    match gateway.lock() {
+        Ok(actor) => Ok(Arc::clone(&actor.lifecycle)),
+        Err(poisoned) => Ok(Arc::clone(&poisoned.into_inner().lifecycle)),
+    }
 }
 
 fn stop_managed_inner(gateway: &Mutex<GatewayActorState>) {
