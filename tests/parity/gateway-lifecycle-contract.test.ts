@@ -41,4 +41,18 @@ describe('Gateway lifecycle admission contract', () => {
     expect(stopServer).toBeGreaterThan(take)
     expect(settle).toBeGreaterThan(stopServer)
   })
+
+  it('owns and drains active native proxy connections during shutdown', () => {
+    const source = readFileSync(
+      path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
+      'utf8',
+    )
+    expect(source).toContain('connection_streams: Mutex<HashMap<usize, Vec<TcpStream>>>')
+    expect(source).toContain('connection_workers: Mutex<Vec<thread::JoinHandle<()>>>')
+    expect(source).toContain('shutdown_active_connections(&self.shared)')
+    expect(source).toContain('join_connection_workers(&self.shared)')
+    expect(source).toContain('TcpStream::connect_timeout')
+    expect(source).toContain('GATEWAY_UPSTREAM_CONNECT_TIMEOUT')
+    expect(source).toContain('set_read_timeout(None)')
+  })
 })
