@@ -1,9 +1,9 @@
 {
   "name": "@dsh/desktop",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "desktopName": "com.dsh.client",
-  "description": "Legacy Electron HarnessDock host retained for compatibility; public releases use Full-only Tauri",
+  "description": "Legacy Electron HarnessDock host retained for compatibility source only; public releases use Full-only Tauri",
   "homepage": "https://github.com/coeasy/harness_dock",
   "author": "HarnessDock contributors",
   "type": "module",
