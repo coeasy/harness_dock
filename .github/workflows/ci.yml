@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           git config user.name 'coeasy'
           git config user.email 'mdonetwo@yeah.net'
-          git add apps/tauri/web/app.js packages/plugin-harness-shell/web/shell.js tests/parity/public-diagnostics-redaction.test.ts tests/parity/tauri-host.test.ts
+          git add apps/tauri/web/app.js packages/plugin-harness-shell/src/web/shell.js packages/plugin-harness-shell/web/shell.js tests/parity/public-diagnostics-redaction.test.ts tests/parity/tauri-host.test.ts
           git diff --cached --quiet && { echo 'No round-two changes to commit.'; exit 1; }
           git commit -m 'security: redact public runtime diagnostics'
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
