@@ -7,13 +7,14 @@ use tauri::{
 
 fn show_primary(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("harness") {
-        // A dynamically-created Harness window is hidden until its first
-        // document has painted. Showing it early is the exact whiteboard
-        // failure mode that the startup coordinator is designed to avoid.
+        // SurfaceActor is the only source of truth for Harness navigation.
+        // Never reintroduce a parallel harness_loading AtomicBool.
         let loading = app
             .state::<crate::AppState>()
-            .harness_loading
-            .load(std::sync::atomic::Ordering::Acquire);
+            .surface_actor
+            .lock()
+            .map(|surface| surface.phase() == crate::surface_actor::SurfacePhase::Loading)
+            .unwrap_or(false);
         if window.is_visible().unwrap_or(false) || !loading {
             let _ = window.show();
             let _ = window.set_focus();
@@ -26,10 +27,6 @@ fn show_primary(app: &AppHandle) {
             let _ = window.set_focus();
             return;
         }
-    }
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
     }
 }
 
@@ -81,9 +78,6 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
-            // Update ownership locator for the legacy parity suite only:
-            // crate::update::update_install is intentionally called by
-            // service/workflow.rs, never directly from this native adapter.
             let intent = match event.id.as_ref() {
                 "tray-open" => {
                     show_primary(app);
@@ -114,10 +108,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         });
 
-    // A missing default icon is an optional shell degradation, not a reason to
-    // panic before Harness Web starts. Tauri may still build the tray on
-    // platforms that provide a system default; otherwise build() returns a
-    // normal error that the caller handles fail-open.
+    // Tray is optional. Failure to build it is handled fail-open by desktop setup.
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }
