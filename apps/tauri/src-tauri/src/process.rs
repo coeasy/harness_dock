@@ -3,7 +3,7 @@ use std::{
     process::{Child, Command},
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// Processes that have been spawned but are not yet owned by Runtime/Gateway
@@ -43,7 +43,7 @@ pub(crate) fn stop_starting_processes(registry: &StartingProcessRegistry) {
         .map(|pids| pids.iter().copied().collect::<Vec<_>>())
         .unwrap_or_default();
     for pid in pids {
-        stop_process_tree(pid);
+        force_stop_process_tree(pid);
     }
 }
 
@@ -53,16 +53,55 @@ pub(crate) fn starting_processes_empty(registry: &StartingProcessRegistry) -> bo
 
 /// Stop a managed child and all descendants. Runtime and Gateway are Node
 /// processes, so killing only `Child` can leave worker processes behind.
+/// Try a graceful tree stop first, but cap the wait so shutdown can never hang.
 pub(crate) fn stop_child_tree(child: &mut Child) {
     let pid = child.id();
-    stop_process_tree(pid);
+    graceful_stop_process_tree(pid);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let _ = child.wait();
+                return;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(_) => break,
+        }
+    }
+
+    force_stop_process_tree(pid);
     // Always retain the direct-child fallback. It also reaps the child on
     // platforms where the tree command is unavailable or already raced exit.
     let _ = child.kill();
     let _ = child.wait();
 }
 
-pub(crate) fn stop_process_tree(pid: u32) {
+fn graceful_stop_process_tree(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill");
+        command.args(["/PID", &pid.to_string(), "/T"]);
+        super::platform::configure_child_command(&mut command);
+        let _ = command.status();
+    }
+
+    #[cfg(unix)]
+    {
+        // Managed Node processes are started in their own process group.
+        let group = format!("-{pid}");
+        let term = Command::new("kill").args(["-TERM", &group]).status();
+        if term.map(|status| !status.success()).unwrap_or(true) {
+            let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+        }
+    }
+}
+
+fn force_stop_process_tree(pid: u32) {
     if pid == 0 {
         return;
     }
@@ -77,15 +116,7 @@ pub(crate) fn stop_process_tree(pid: u32) {
 
     #[cfg(unix)]
     {
-        // configure_child_command places managed Node processes in their own
-        // process group. Signal the group so Node workers and spawned helpers
-        // leave with the host process.
         let group = format!("-{pid}");
-        let term = Command::new("kill").args(["-TERM", &group]).status();
-        if term.map(|status| !status.success()).unwrap_or(true) {
-            let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
-        }
-        thread::sleep(Duration::from_millis(120));
         let force = Command::new("kill").args(["-KILL", &group]).status();
         if force.map(|status| !status.success()).unwrap_or(true) {
             let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();

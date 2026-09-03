@@ -60,18 +60,23 @@ fn normalized_version(value: &str) -> String {
 
 fn version_tuple(value: &str) -> Option<(u64, u64, u64)> {
     let normalized = normalized_version(value);
-    let mut parts = normalized.split('.');
-    Some((
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-        parts.next()?.split('-').next()?.parse().ok()?,
-    ))
+    let core = normalized.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
     match (version_tuple(latest), version_tuple(current)) {
         (Some(latest), Some(current)) => latest > current,
-        _ => normalized_version(latest) != normalized_version(current),
+        // A malformed/non-semver release must never become an implicit upgrade
+        // merely because its text differs from the installed version.
+        _ => false,
     }
 }
 

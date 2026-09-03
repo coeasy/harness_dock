@@ -1,8 +1,8 @@
 {
   "name": "harnessdock",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
-  "description": "DeepSeek Harness full-capability client: embed official Web UI, pin docs+runtime to the same exact version.",
+  "description": "DeepSeek Harness full-capability Tauri client: embed official Web UI, pin docs+runtime to the same exact version.",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -16,24 +16,14 @@
     "check:size": "node scripts/check-size.mjs",
     "perf:report": "node scripts/perf-report.mjs",
     "mark:released": "node scripts/mark-released.mjs",
-    "e2e": "pnpm --filter ./tests/e2e test",
+    "e2e": "pnpm --filter @dsh/parity-tests e2e",
     "build": "pnpm -r --if-present run build",
     "setup": "node scripts/bootstrap.mjs",
     "sync:dsh": "pnpm --filter @dsh/docs-sync start",
     "prepare:runtime": "pnpm --filter @dsh/client-runtime bundle-runtime",
-    "build:desktop": "node scripts/build.mjs",
-    "pack:desktop": "pnpm --filter @dsh/desktop pack:current",
-    "pack:desktop:full": "pnpm --filter @dsh/desktop pack:current:full",
-    "pack:desktop:win": "pnpm --filter @dsh/desktop pack:win",
-    "pack:desktop:win:full": "pnpm --filter @dsh/desktop pack:win:full",
-    "pack:desktop:mac": "pnpm --filter @dsh/desktop pack:mac",
-    "pack:desktop:mac:full": "pnpm --filter @dsh/desktop pack:mac:full",
-    "pack:desktop:linux": "pnpm --filter @dsh/desktop pack:linux",
-    "pack:desktop:linux:full": "pnpm --filter @dsh/desktop pack:linux:full",
     "pack:vscode": "pnpm --filter ./apps/vscode run pack:vsix",
     "parity": "pnpm --filter @dsh/parity-tests test",
-    "dev:dsh": "node --import tsx scripts/dev-dsh.mjs",
-    "start:desktop": "pnpm --filter @dsh/desktop start"
+    "dev:dsh": "node --import tsx scripts/dev-dsh.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

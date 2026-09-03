@@ -12,7 +12,7 @@ mod update;
 #[cfg(not(mobile))]
 mod tray;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -25,6 +25,8 @@ pub(crate) struct AppState {
     pub(crate) harness_loading: AtomicBool,
     pub(crate) settings_opening: AtomicBool,
     pub(crate) gateway: Mutex<Option<gateway_host::GatewayProcess>>,
+    pub(crate) gateway_starting: AtomicBool,
+    pub(crate) gateway_generation: AtomicU64,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: AtomicBool,
 }
@@ -39,6 +41,8 @@ impl Default for AppState {
             harness_loading: AtomicBool::new(false),
             settings_opening: AtomicBool::new(false),
             gateway: Mutex::new(None),
+            gateway_starting: AtomicBool::new(false),
+            gateway_generation: AtomicU64::new(0),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: AtomicBool::new(false),
         }
@@ -53,6 +57,18 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
     process::stop_starting_processes(&state.starting_processes);
     gateway_host::stop_managed(&state.gateway);
     runtime::stop_managed(&state.runtime);
+}
+
+/// Runtime ownership is upstream of Gateway ownership. A public Runtime stop
+/// must therefore invalidate both an already-running Gateway and any Gateway
+/// start that is still waiting for its ready file. Keeping this invariant in
+/// the native command prevents renderer ordering from becoming a correctness
+/// requirement.
+#[tauri::command]
+fn runtime_stop(state: tauri::State<'_, AppState>) -> Result<runtime::RuntimeStatus, String> {
+    state.gateway_generation.fetch_add(1, Ordering::AcqRel);
+    gateway_host::stop_managed(&state.gateway);
+    runtime::runtime_stop(state)
 }
 
 #[cfg(not(mobile))]
@@ -210,7 +226,7 @@ pub fn run() {
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_restart,
-            runtime::runtime_stop,
+            runtime_stop,
             runtime::runtime_clear_plugin_quarantine,
             update::update_check,
             update::update_install,
