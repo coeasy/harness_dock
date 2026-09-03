@@ -3,46 +3,7 @@ use serde_json::Value;
 
 pub use crate::runtime_actor::RuntimePhase;
 
-pub const HOST_PROTOCOL_VERSION: u16 = 2;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SubjectKind {
-    DesktopShell,
-    HarnessWeb,
-    NativeMenu,
-    Tray,
-    Diagnostics,
-    Mobile,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Capability {
-    WindowControl,
-    WebReload,
-    RuntimeRestart,
-    RuntimeSafeMode,
-    RuntimeClearQuarantine,
-    GatewayManage,
-    DiagnosticsRead,
-    UpdateCheck,
-    UpdateInstall,
-    AppQuit,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-pub enum HostCommand {
-    RefreshHarness,
-    RestartRuntime,
-    StartSafeMode,
-    ClearQuarantine,
-    ShowGateway,
-    ShowDiagnostics,
-    InstallUpdate,
-    Quit,
-}
+include!("host_protocol_generated.rs");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,6 +140,12 @@ mod tests {
         };
         assert!(envelope.validate().is_ok());
         assert_eq!(serde_json::to_value(envelope.subject).unwrap(), "harness-web");
+    }
+
+    #[test]
+    fn protocol_command_capability_mapping_is_generated() {
+        assert_eq!(HostCommand::RestartRuntime.capability(), Capability::RuntimeRestart);
+        assert_eq!(HostCommand::InstallUpdate.capability(), Capability::UpdateInstall);
     }
 
     #[test]
