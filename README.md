@@ -10,7 +10,7 @@
 | --- | --- |
 | HarnessDock | `0.1.2` |
 | 发布通道 | `beta` |
-| 当前发布 tag | `v0.1.2-beta.1` |
+| 当前发布 tag | `v0.1.2-beta.2` |
 | 内置 DeepSeek Harness Runtime | `dsh-v0.1.2-rc.1` |
 | Runtime commit | `a66e4702047846cdaa10c66c9d3df3951f5ea70d` |
 | 桌面宿主 | Tauri 2 |
@@ -139,7 +139,8 @@ v0.1.2 beta 只有在同一个 `main` SHA 上满足以下条件才允许发布�
 - [项目介绍](docs/PROJECT_INTRO.md)
 - [Tauri 客户端说明](apps/tauri/README.md)
 - [v0.1.2 发布说明](.github/release-notes/v0.1.2.md)
-- [v0.1.2 beta.1 发布说明](.github/release-notes/v0.1.2-beta.1.md)
+- [v0.1.2 beta.2 启动链路修复说明](.github/release-notes/v0.1.2-beta.2.md)
+- [v0.1.2 beta.1 历史说明](.github/release-notes/v0.1.2-beta.1.md)
 
 `docs/` 中仍保留部分文件名含 `v0.2.x` 的历史架构设计稿，用于记录 Native Host 重构过程；这些文件名**不再代表 HarnessDock 当前产品版本**。当前活动产品版本以根 `package.json`、`release-manifest.json` 和本页为准。
 
