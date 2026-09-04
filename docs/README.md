@@ -1,109 +1,77 @@
 # HarnessDock 文档索引
 
-## 当前唯一有效架构基线
+## 当前活动版本
 
-HarnessDock v0.2.0 的桌面分发策略已经最终确定：
+HarnessDock 当前产品版本：**v0.1.2**。
 
-**安装包必须内置 Node + dsh；首次启动不下载 Node 或 dsh；断网仍可直接启动 Harness Web。**
+当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.2-rc.1`**，commit `a66e4702047846cdaa10c66c9d3df3951f5ea70d`。
 
-后续实现只以以下两份文档为架构与执行基线：
-
-1. [`v0.2.0-architecture-five-round-final.md`](./v0.2.0-architecture-five-round-final.md)  
-   **唯一架构设计基线**。定义 Native Host Kernel、Immutable Embedded Runtime、Host Protocol v2、Resource Actor、RuntimeLease、Reconciler、Capability Broker、Native Gateway、体积与 Release 不变量。
-2. [`plan/v0.2.0-five-round-rebuild-plan.md`](./plan/v0.2.0-five-round-rebuild-plan.md)  
-   **唯一五轮实施计划**。定义五轮连续开发、删除项、建设项、审计项、自动化门禁和最终完成条件。
-
-当前有效实施补充：
-
-- [`plan/v0.2.0-leading-client-architecture-three-round-optimization-final.md`](./plan/v0.2.0-leading-client-architecture-three-round-optimization-final.md)  
-  **五轮架构之后的三轮生产化收口方案**。对标 VS Code Agent/Extension Host、Chromium Site Isolation、Tauri v2 Capability 与现代软件供应链，继续收敛 HostKernelTask、真正 Reconciler、HostEvent、single-instance、RuntimeSupervisor、Native Gateway HTTP stack、Plugin/Profile transaction、diagnostics、SBOM 与 artifact provenance。该文档不改变 Full Runtime 产品定义。
-- [`plan/v0.2.0-embedded-runtime-tooling.md`](./plan/v0.2.0-embedded-runtime-tooling.md)  
-  定义 Full Runtime 的工具层：Node 自带 npm/corepack 可裁剪，但必须内置 pinned pnpm 并通过受控 Runtime execution environment 提供给 `dsh plugin`，从而保持插件安装/更新能力而不依赖用户系统 pnpm。
-
-事实参考：
-
-- [`reference/deepseek-harness-desktop-size-and-feature-analysis.md`](./reference/deepseek-harness-desktop-size-and-feature-analysis.md)  
-  解释参考项目为什么安装包小，以及哪些机制可借鉴。注意：参考项目的 first-run Runtime download **不属于 HarnessDock 最终方案**。
-
-如果任何其它文档与上述基线冲突，以当前五轮架构基线、三轮生产化收口方案和 Embedded Runtime Tooling Contract 为准；其中三轮方案只能继续收紧控制平面和安全边界，不能反向改变“Full Runtime 内置、首启零下载、Harness Web 为唯一主业务 Surface”的产品不变量。
-
-## 最终桌面主链
+桌面产品不再使用 Electron。唯一桌面宿主为 `apps/tauri`，正常启动链路是：
 
 ```text
-Signed Full Installer
-  -> embedded compact Node + pinned dsh + pinned pnpm tool
-  -> Tauri Adapter
-  -> Host Protocol
-  -> Host Kernel
-  -> RuntimeActor
+Tauri Native Host
+  -> sealed Full Runtime
   -> RuntimeLease
-  -> HarnessSurface
+  -> Harness WebView
   -> Harness Web
+  -> optional Harness Shell
 ```
 
-首次启动没有 Runtime 下载阶段。
+安装包必须内置 Node + pinned dsh + 必要 Runtime Tool；首次启动不下载 Node/dsh。Harness Web 是唯一正常主业务 Surface，Recovery / Gateway / Diagnostics / Update 均为按需能力。
 
-## 五轮基础路线
+## 版本规则
 
-```text
-Round 1  Protocol + Adapter + Embedded Full Runtime Contract
-Round 2  RuntimeActor + Compact Immutable Runtime Image
-Round 3  RuntimeLease + Resource Graph + Reconciler + Surface/Recovery
-Round 4  Capability Broker + Native Gateway + Shell v2 + CLI/Profile/Plugin
-Round 5  Model/Fault Tests + Performance/Size SLO + Release Graph + Cleanup
-```
+从 v0.1.2 起：
 
-## 三轮生产化补充路线
+- HarnessDock 产品版本使用 pinned 最新 dsh 的**基础 SemVer**；
+- 上游 `-rc.* / -beta.* / -alpha.*` 后缀只保留在 Runtime provenance；
+- 例如 `dsh-v0.1.2-rc.1 -> HarnessDock 0.1.2`；
+- Release gate 会检查 root/workspace/Tauri/Rust/Shell/origin/manifest 版本一致，并检查 HarnessDock 与 dsh 基础 SemVer 一致；
+- Runtime `version + gitTag + gitCommit` 必须在 `release-manifest.json` 与 `origin.json` 完全一致。
 
-```text
-Optimization Round A  Control Plane + Trust Boundary
-Optimization Round B  Supervision + Gateway + Plugin Transaction
-Optimization Round C  Production Proof + Supply Chain + Observability
-```
+详见 [`VERSIONING.md`](./VERSIONING.md)。
 
-重点不是再换一次技术栈，而是把现有先进组件真正连成一条单一控制链：
+## 当前使用文档
 
-```text
-command
- -> capability
- -> desired state
- -> reconciler
- -> resource actor
- -> event
- -> snapshot/resync
-```
+1. [`../README.md`](../README.md)  
+   用户入口、平台支持、安装使用、核心能力、发布门禁。
+2. [`PROJECT_INTRO.md`](./PROJECT_INTRO.md)  
+   项目定位、架构边界、开发和发布说明。
+3. [`../apps/tauri/README.md`](../apps/tauri/README.md)  
+   Tauri Native Host、Runtime、WebView、Shell、Gateway 与构建说明。
+4. [`VERSIONING.md`](./VERSIONING.md)  
+   HarnessDock 与 DeepSeek Harness/dsh 的版本对齐政策。
+5. [`../.github/release-notes/v0.1.2-beta.1.md`](../.github/release-notes/v0.1.2-beta.1.md)  
+   当前测试版发布说明。
 
-## 当前实施状态
+## 当前架构不变量
 
-当前实现已经跨越早期 Round 1：
+- 桌面：Full Runtime，首启零下载。
+- 移动：Remote Gateway only，不在 Android/iOS 内启动 Node/dsh。
+- 正常启动：Runtime ready 后直接显示 Harness Web，不先打开设置页。
+- Shell：独立、可选、fail-open；Shell 故障必须回退原生窗口控件。
+- WebView：只允许当前 RuntimeLease 对应的 `127.0.0.1` origin。
+- 生命周期：Runtime/Gateway/Surface/Update 通过 Host Kernel、Reconciler 和 Actor 状态管理，避免孤儿逻辑与重复并发操作。
+- 插件：异常进入隔离/恢复流程，不让第三方插件故障终止主客户端。
+- 发布：只接受同一 `main` SHA 的绿色 CI 与 candidate 资产。
 
-- `lib.rs` 已恢复 composition-root 方向；
-- `bridge.rs / desktop.rs / service/workflow.rs` 已建立；
-- Tray/Menu 已使用 typed Host intent；
-- Host Protocol v2 canonical schema/codegen 已存在；
-- RuntimeActor / RuntimeGeneration / RuntimeLease 已落地；
-- SurfaceActor / GatewayActor / UpdateActor 已落地；
-- Capability Broker 已存在；
-- Full Runtime candidate pipeline 保持 Node+dsh 内置；
-- Node 官方发行包已进入瘦身和 Runtime image identity 路线；
-- pinned pnpm 作为独立 Runtime Tool 内置，避免 `dsh plugin` 依赖系统 pnpm；
-- embedded-runtime contract 已接入 CI；
-- Native Gateway 已替代 Node Gateway sidecar 主路径。
+## 历史架构设计文档
 
-但当前 PR head 仍未达到最终完成条件：`ci / tauri-ci / upstream-compat` 仍需在同一最新 SHA 上全部变绿；legacy IPC、真正 Reconciler、HostEvent、single-instance、主动 Supervisor、Plugin/Profile transaction、Gateway 成熟 HTTP stack、SBOM/provenance 等继续按照三轮优化方案收尾。
+仓库中保留了一组文件名含 `v0.2.0` / `v0.2.x` 的设计稿，例如：
 
-## 历史文档
+- `v0.2.0-architecture-five-round-final.md`
+- `plan/v0.2.0-five-round-rebuild-plan.md`
+- `plan/v0.2.0-leading-client-architecture-three-round-optimization-final.md`
+- `plan/v0.2.0-embedded-runtime-tooling.md`
 
-以下仅用于理解项目演进，不再约束实现：
+这些文档记录了 Native Host 重构过程和架构决策，**文件名是历史设计阶段标签，不再定义当前产品版本**。如历史文档与当前代码、`release-manifest.json`、根 README 或本索引冲突，以当前活动版本和代码契约为准。
+
+以下更早内容同样只作为演进记录：
 
 - `v0.2.0-architecture-rebuild-final.md`
 - `plan/v0.2.0-three-round-rebuild-plan.md`
 - `upgrade-refactor-plan.md`
 - `upgrade-refactor-plan-v2.md`
-- `plan/v0.2.0-client-platform-upgrade-plan.md`
-- `plan/v0.2.0-core-chain-hardening.md`
-- `plan/v0.2.0-host-core-architecture.md`
-- `plan/v0.2.0-shell-first-implementation.md`
 - 历史 `v0.2.1` / `v0.2.6` / `v0.2.7` / `v0.2.8` / `v0.2.9` 方案
 
-历史文档中的 Electron、Host-only 默认安装包、first-run Node/dsh download、Host Bridge v1、隐藏控制页、多 AtomicBool 最终状态模型等都不得重新成为新架构主路径。
+历史文档中的 Electron、Host-only 默认安装包、first-run Node/dsh download、Host Bridge v1 等路径不得重新成为当前主路径。
