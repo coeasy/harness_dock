@@ -49,13 +49,20 @@ describe('v0.2.0 Round 1 host boundaries', () => {
 
   it('locks desktop distribution to a packaged Node+dsh Runtime with zero first-launch download', () => {
     const check = read('scripts/check-embedded-runtime.mjs')
+    const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
+    const finalPrune = read('packages/client-runtime/src/prune-node-cli.ts')
     const runtimePackage = read('packages/client-runtime/package.json')
     const nodePrune = read('packages/client-runtime/src/node-runtime-prune.ts')
     const plan = read('docs/v0.2.0-architecture-five-round-final.md')
 
     expect(check).toContain('resource_path')
     expect(check).toContain('"dsh-runtime"')
-    expect(check).toContain('first_launch_runtime_download_required')
+    expect(check).toContain("firstLaunchRuntimeDownloadRequired = false")
+    expect(finalPrune).toContain('firstLaunchRuntimeDownloadRequired = false')
+    expect(runtime).toContain('fn load_runtime_image(')
+    expect(runtime).not.toContain('fn verify_runtime_image(')
+    expect(runtime).not.toContain('!node.is_file()')
+    expect(runtime).not.toContain('!dsh.is_file()')
     expect(runtimePackage).toContain('prune-node-cli.ts')
     expect(nodePrune).toContain("path.join('node_modules', 'npm')")
     expect(plan).toContain('首次启动不下载 Node 或 dsh')

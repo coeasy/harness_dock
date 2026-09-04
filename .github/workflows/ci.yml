@@ -37,7 +37,11 @@ jobs:
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm check:versions
       - run: pnpm check:embedded-runtime
-      - run: pnpm test
+      # Gateway integration requests use an 8s production timeout and Windows
+      # can also need bounded fs.rm retries while Defender/indexers release
+      # package directories. Keep the test harness above those real bounds;
+      # this changes only the Vitest failure ceiling, not production timeouts.
+      - run: pnpm test -- --testTimeout=20000 --hookTimeout=20000
 
   tauri-source:
     needs: test

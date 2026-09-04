@@ -172,16 +172,11 @@ fn allowed_runtime_navigation(app: &AppHandle, url: &Url) -> bool {
 #[cfg(not(mobile))]
 fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &Url) {
     let app = window.app_handle();
-    let Ok(lease) = current_runtime_lease(&app) else {
-        let _ = window.hide();
-        show_startup_recovery(&app, "Harness Web 加载完成时 RuntimeLease 已失效。");
-        return;
-    };
-    if !allowed_runtime_navigation(&app, loaded_url) {
-        let _ = window.hide();
-        show_startup_recovery(&app, "Harness Web 导航到了不受管理的 origin，已阻止加载。");
-        return;
-    }
+
+    // WebView engines can deliver Finished for a redirect or for the previous
+    // Runtime generation after the current document already moved on. Stale
+    // callbacks are not startup failures. Reject them before consulting mutable
+    // Runtime state so an old callback cannot hide the new healthy surface.
     let current_matches_event = window
         .url()
         .ok()
@@ -194,6 +189,15 @@ fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &U
     if !current_matches_event {
         return;
     }
+
+    // A momentary absence of a lease can occur while an explicit restart is
+    // replacing generations. Do not convert that transition into recovery from
+    // a page-load callback; the generation-aware watchdog/startup fallback will
+    // either publish the current navigation or report the real timeout.
+    let Ok(lease) = current_runtime_lease(&app) else {
+        eprintln!("Ignoring Harness page-load callback while RuntimeLease is transitioning");
+        return;
+    };
     let (navigation_id, navigation_generation) = app
         .state::<crate::AppState>()
         .surface_actor
@@ -201,6 +205,17 @@ fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &U
         .map(|actor| actor.current_navigation())
         .unwrap_or((0, None));
     if navigation_generation != Some(lease.generation.id) {
+        return;
+    }
+
+    let Ok(candidate) = validated_runtime_url(loaded_url.as_str()) else {
+        let _ = window.hide();
+        show_startup_recovery(&app, "Harness Web 导航到了无效的 Runtime URL，已阻止加载。");
+        return;
+    };
+    if candidate.origin().ascii_serialization() != lease.origin {
+        let _ = window.hide();
+        show_startup_recovery(&app, "Harness Web 导航到了不受管理的 origin，已阻止加载。");
         return;
     }
     if app

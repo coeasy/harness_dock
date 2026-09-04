@@ -59,13 +59,7 @@ struct OriginInfo {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeManifest {
-    schema_version: Option<u32>,
     image_identity: Option<String>,
-    image_identity_algorithm: Option<String>,
-    runtime_embedded: Option<bool>,
-    first_launch_runtime_download_required: Option<bool>,
-    plugin_management_ready: Option<bool>,
-    build_commit: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,8 +128,15 @@ impl RuntimeProcess {
             }
             Ok(None) => true,
             Err(error) => {
-                eprintln!("Unable to inspect dsh Runtime process: {error}");
-                false
+                // A failed liveness inspection is not evidence that the child
+                // exited. Revoking the published RuntimeLease on an inspection
+                // error races WebView page-load callbacks and can tear down a
+                // healthy packaged Runtime. Preserve the lease until an actual
+                // exit status is observed or an explicit stop/restart occurs.
+                eprintln!(
+                    "Unable to inspect dsh Runtime process; preserving current RuntimeLease: {error}"
+                );
+                true
             }
         }
     }
@@ -214,56 +215,34 @@ fn dsh_path(root: &Path) -> PathBuf {
         .join("bin.js")
 }
 
-fn verify_runtime_image(app: &AppHandle) -> Result<RuntimeImage, String> {
+fn load_runtime_image(app: &AppHandle) -> Result<RuntimeImage, String> {
+    // The desktop candidate already validates the complete sealed Runtime image
+    // before packaging. Normal application startup must not perform a second
+    // Node/dsh filesystem preflight. Resolve the packaged paths and the minimal
+    // immutable metadata needed for generation binding, then spawn directly.
+    // If an installed image is actually corrupt, Command::spawn/readiness will
+    // fail through the normal recovery path instead of presenting a Node check.
     let root = platform::node_cli_path(&resource_path(app, "dsh-runtime")?);
     let node = node_path(&root);
     let dsh = dsh_path(&root);
     let manifest_path = root.join("manifest.json");
     let origin_path = resource_path(app, "origin.json")?;
 
-    if !node.is_file() || !dsh.is_file() || !manifest_path.is_file() || !origin_path.is_file() {
-        return Err(format!(
-            "Tauri Full Runtime 不完整: node={} dsh={} manifest={}",
-            node.display(),
-            dsh.display(),
-            manifest_path.display()
-        ));
-    }
     let manifest: RuntimeManifest = serde_json::from_str(
         &fs::read_to_string(&manifest_path)
             .map_err(|error| format!("无法读取 Runtime manifest.json: {error}"))?,
     )
     .map_err(|error| format!("Runtime manifest.json 无效: {error}"))?;
-    if manifest.schema_version != Some(1)
-        || manifest.runtime_embedded != Some(true)
-        || manifest.first_launch_runtime_download_required != Some(false)
-    {
-        return Err("Runtime manifest 未声明 sealed embedded/offline-first v1 contract。".into());
-    }
-    if manifest.plugin_management_ready == Some(false) {
-        return Err("Runtime manifest 显示 pinned pnpm/plugin management 未准备完成。".into());
-    }
-    if manifest.image_identity_algorithm.as_deref() != Some("sha256-v1") {
-        return Err("Runtime image identity algorithm 不是受支持的 sha256-v1。".into());
-    }
     let image_identity = manifest
         .image_identity
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "Runtime manifest 缺少 sealed imageIdentity。".to_string())?;
-    if manifest
-        .build_commit
-        .as_deref()
-        .is_some_and(|value| value.trim().is_empty())
-    {
-        return Err("Runtime manifest buildCommit 为空。".into());
-    }
     let origin: OriginInfo = serde_json::from_str(
         &fs::read_to_string(&origin_path)
             .map_err(|error| format!("无法读取 origin.json: {error}"))?,
     )
     .map_err(|error| format!("origin.json 无效: {error}"))?;
 
-    startup_trace::mark(StartupPhase::RuntimeVerified);
     Ok(RuntimeImage {
         root,
         node,
@@ -1229,7 +1208,7 @@ async fn start_impl(
             .map_err(|_| "RuntimeActor 状态锁已损坏。".to_string())?;
         actor.begin_start(mode)?
     };
-    let image = match verify_runtime_image(&app) {
+    let image = match load_runtime_image(&app) {
         Ok(image) => image,
         Err(error) => {
             return Err(mark_start_failed(&*state, generation.id, error));
@@ -1359,7 +1338,21 @@ async fn start_impl(
         }
     }
     startup_trace::mark(StartupPhase::RuntimeReady);
-    Ok(status_snapshot(&*state))
+    // Publication is already the authoritative readiness transition. Do not
+    // immediately re-enter status_snapshot(), because that path owns explicit
+    // liveness reconciliation. Return a read-only snapshot of the generation
+    // that was just published so the startup coordinator cannot lose its lease
+    // between RuntimeReady and WebviewRequested.
+    let actor = match state.runtime_actor.lock() {
+        Ok(actor) => actor,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let lease = actor.lease();
+    if let Some(process) = actor.process() {
+        Ok(process.status(lease.as_ref()))
+    } else {
+        Ok(phase_status(actor.phase(), actor.generation_id()))
+    }
 }
 
 #[tauri::command]
