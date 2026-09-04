@@ -7,7 +7,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 const readJson = (relative: string) => JSON.parse(read(relative))
 
-describe('HarnessDock v0.2.0 frozen core contract', () => {
+describe('HarnessDock Native Host frozen core contract', () => {
   it('uses one exact managed Runtime origin across spawn, validation and ACL', () => {
     const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
     const harnessWindow = read('apps/tauri/src-tauri/src/harness_window.rs')
@@ -87,7 +87,7 @@ describe('HarnessDock v0.2.0 frozen core contract', () => {
   it('keeps active documentation aligned with the exact Runtime ACL', () => {
     const readme = read('README.md')
     const implementation = read('docs/plan/v0.2.0-shell-first-implementation.md')
-    expect(readme).toContain('http://127.0.0.1:<ephemeral-port>')
+    expect(readme).toContain('http://127.0.0.1:<port>')
     expect(readme).not.toContain('loopback IPv4、localhost、IPv6 `::1`')
     expect(implementation).toContain('http://127.0.0.1:<port>')
     expect(implementation).toContain('`gateway.manage`')
