@@ -115,7 +115,12 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                 "tray-safe-mode" => Some(workflow::HostIntent::StartSafeMode),
                 "tray-clear-quarantine" => Some(workflow::HostIntent::ClearQuarantine),
                 "tray-update" => Some(workflow::HostIntent::InstallUpdate),
-                "tray-quit" => Some(workflow::HostIntent::Quit),
+                "tray-quit" => {
+                    // Quit is a lifecycle escape hatch, not a business command.
+                    // It must never wait behind a busy or unavailable Host Kernel queue.
+                    crate::request_exit(app);
+                    None
+                }
                 _ => None,
             };
             if let Some(intent) = intent {
