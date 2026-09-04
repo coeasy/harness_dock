@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 /**
- * Release discipline gate for the Tauri updater.
+ * Release discipline gate for HarnessDock + the pinned DeepSeek Harness Runtime.
  *
- * Tauri treats the application version as the single forward unit: a release
- * ships a new client version together with a new pinned origin.json. If a
- * docs-sync PR bumps origin.json without bumping the client version, the
- * updater can consider the same client version already current and users may
- * never receive the new pinned dsh. This script refuses such a release.
+ * Product-version policy:
+ *   HarnessDock tracks the base SemVer of the pinned dsh release. Prerelease
+ *   qualifiers belong to Runtime provenance, not to the HarnessDock product
+ *   version. Example: dsh 0.1.2-rc.1 => HarnessDock 0.1.2.
  *
  * Rules:
- *  1. origin.json.dshVersion must be an exact version (never latest/next).
- *  2. origin.json.clientVersion must equal the root package.json version.
- *  3. If origin.json.dshVersion changed since released-origin.json (the last
- *     marked release) then the client version must have been bumped too.
- *
- * Usage: node scripts/check-release.mjs   (exit 0 = safe to release)
+ *  1. origin.json.dshVersion must be an exact SemVer (never latest/next).
+ *  2. HarnessDock client version must equal the dsh base SemVer.
+ *  3. origin.json.clientVersion must equal package.json version.
+ *  4. release-manifest Runtime version/tag/commit must equal origin.json.
+ *  5. If the pinned dsh changed since released-origin.json, the client version
+ *     must also have changed so the updater/release identity cannot stay stale.
  */
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
@@ -31,6 +30,11 @@ const releasedPath = path.join(repoRoot, 'packages', 'docs-sync', 'released-orig
 const errors = []
 const clientVersion = rootPkg.version
 const { dshVersion } = origin
+const exactDshMatch =
+  typeof dshVersion === 'string'
+    ? dshVersion.trim().match(/^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$/)
+    : null
+const dshBaseVersion = exactDshMatch?.[1]
 
 if (manifest.version !== clientVersion) {
   errors.push(
@@ -50,6 +54,11 @@ if (manifest.runtime?.version !== origin.dshVersion) {
     `release-manifest.json.runtime.version (${manifest.runtime?.version}) != origin.json.dshVersion (${origin.dshVersion})`,
   )
 }
+if (manifest.runtime?.gitTag !== origin.gitTag) {
+  errors.push(
+    `release-manifest.json.runtime.gitTag (${manifest.runtime?.gitTag}) != origin.json.gitTag (${origin.gitTag})`,
+  )
+}
 if (manifest.runtime?.gitCommit !== origin.gitCommit) {
   errors.push('release-manifest.json.runtime.gitCommit != origin.json.gitCommit')
 }
@@ -58,11 +67,19 @@ if (!dshVersion || typeof dshVersion !== 'string') {
   errors.push('origin.json is missing dshVersion')
 } else if (['latest', 'next'].includes(dshVersion.trim().toLowerCase())) {
   errors.push(`origin.json pins floating dist-tag "${dshVersion}"; use an exact version`)
+} else if (!exactDshMatch) {
+  errors.push(`origin.json.dshVersion (${dshVersion}) is not an exact supported SemVer`)
+}
+
+if (dshBaseVersion && clientVersion !== dshBaseVersion) {
+  errors.push(
+    `HarnessDock version (${clientVersion}) must track pinned dsh base version (${dshBaseVersion}, from ${dshVersion})`,
+  )
 }
 
 if (origin.clientVersion !== clientVersion) {
   errors.push(
-    `origin.json.clientVersion (${origin.clientVersion}) != package.json version (${clientVersion}); run \`pnpm sync:dsh\` to regenerate`,
+    `origin.json.clientVersion (${origin.clientVersion}) != package.json version (${clientVersion}); run the version alignment workflow before release`,
   )
 }
 
@@ -71,7 +88,7 @@ if (existsSync(releasedPath)) {
   if (released.dshVersion !== dshVersion && released.clientVersion === clientVersion) {
     errors.push(
       `origin changed (${released.dshVersion} -> ${dshVersion}) but client version was NOT bumped (still ${clientVersion}); ` +
-        `Tauri would not deliver this update. Bump the client version, then \`pnpm mark:released\`.`,
+        `HarnessDock would keep a stale release identity. Align to the new dsh base version before release.`,
     )
   }
 }
@@ -83,5 +100,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `check:release OK: dsh=${dshVersion} client=${clientVersion}${existsSync(releasedPath) ? '' : ' (no released-origin baseline yet)'}`,
+  `check:release OK: dsh=${dshVersion} dshBase=${dshBaseVersion} client=${clientVersion}${existsSync(releasedPath) ? '' : ' (no released-origin baseline yet)'}`,
 )
