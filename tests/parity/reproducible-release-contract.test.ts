@@ -6,14 +6,17 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8')
 
-describe('v0.2.0 reproducible release contract', () => {
-  it('pins the Rust compiler and commits the Tauri dependency lock', () => {
+describe('reproducible release contract', () => {
+  it('pins the Rust compiler and commits the Tauri dependency lock at the active product version', () => {
+    const root = JSON.parse(read('package.json'))
     expect(read('rust-toolchain.toml')).toContain('channel = "1.98.0"')
     const lockPath = path.join(repoRoot, 'apps/tauri/src-tauri/Cargo.lock')
     expect(existsSync(lockPath)).toBe(true)
     const lock = read('apps/tauri/src-tauri/Cargo.lock')
     expect(lock).toContain('name = "harnessdock-tauri"')
-    expect(lock).toContain('version = "0.2.0"')
+    expect(lock).toMatch(
+      new RegExp(`name = "harnessdock-tauri"\\nversion = "${root.version.replaceAll('.', '\\.') }"`),
+    )
     expect(read('apps/tauri/package.json')).toContain('cargo check --locked')
   })
 
