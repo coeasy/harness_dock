@@ -1,5 +1,4 @@
 name: tauri-candidate
-# Beta release candidate workflow: keep exact-main packaging trigger explicit.
 
 on:
   workflow_dispatch:
@@ -334,7 +333,17 @@ jobs:
       - name: Assemble macOS DMG candidate
         if: runner.os == 'macOS'
         shell: bash
-        run: bash scripts/build-macos-dmg.sh apps/tauri
+        run: |
+          set -euo pipefail
+          bash scripts/build-macos-dmg.sh apps/tauri
+          version="$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').version")"
+          case "${RUNNER_ARCH:-$(uname -m)}" in
+            X64|x86_64) arch_tag="x64" ;;
+            ARM64|arm64) arch_tag="aarch64" ;;
+            *) arch_tag="$(uname -m)" ;;
+          esac
+          tar -czf "apps/tauri/src-tauri/target/release/bundle/macos/HarnessDock_${version}_${arch_tag}.app.tar.gz" \
+            -C apps/tauri/src-tauri/target/release/bundle/macos HarnessDock.app
       - name: Verify desktop candidate outputs
         shell: bash
         run: |
