@@ -149,6 +149,12 @@ var inject = ["webServer"];
 function apply(ctx) {
   const readyFile = process.env.DSH_EMBEDDED_READY_FILE;
   if (!readyFile) return;
+  const generation = Number.parseInt(process.env.HARNESSDOCK_RUNTIME_GENERATION ?? "", 10);
+  const nonce = process.env.HARNESSDOCK_RUNTIME_NONCE ?? "";
+  const imageIdentity = process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY ?? "";
+  if (!Number.isSafeInteger(generation) || generation <= 0 || !nonce || !imageIdentity) {
+    return;
+  }
   let written = false;
   let checking = false;
   let disposed = false;
@@ -168,7 +174,10 @@ function apply(ctx) {
           host: "127.0.0.1",
           port: addr.port,
           pid: process.pid,
-          dshVersion: process.env.DSH_EMBEDDED_VERSION ?? "unknown"
+          dshVersion: process.env.DSH_EMBEDDED_VERSION ?? "unknown",
+          generation,
+          nonce,
+          imageIdentity
         };
         writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}
 `, {
