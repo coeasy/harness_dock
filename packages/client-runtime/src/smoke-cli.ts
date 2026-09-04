@@ -18,10 +18,13 @@ const { values } = parseArgs({
   options: {
     'runtime-dir': { type: 'string' },
     plugin: { type: 'string' },
+    'shell-plugin': { type: 'string' },
   },
 })
 if (!values['runtime-dir'] || !values.plugin) {
-  throw new Error('usage: smoke-runtime --runtime-dir <dir> --plugin <index.js>')
+  throw new Error(
+    'usage: smoke-runtime --runtime-dir <dir> --plugin <index.js> [--shell-plugin <index.js>]',
+  )
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -29,6 +32,7 @@ const resolveInput = (value: string): string =>
   path.isAbsolute(value) ? value : path.resolve(repoRoot, value)
 const runtimeDir = resolveInput(values['runtime-dir'])
 const pluginPath = resolveInput(values.plugin)
+const shellPluginPath = values['shell-plugin'] ? resolveInput(values['shell-plugin']) : undefined
 const compatibilityPath = path.join(
   repoRoot,
   'apps',
@@ -79,6 +83,7 @@ const runtime = new DshRuntime({
   origin: { dshVersion: manifest.dshVersion },
   pluginPath,
   compatibilityPath,
+  shellPluginPath,
   bundledRoot: runtimeDir,
   cacheDir: work,
   readyTimeoutMs: 120_000,
