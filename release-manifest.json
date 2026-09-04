@@ -2,7 +2,7 @@
   "product": "HarnessDock",
   "version": "0.1.2",
   "channel": "beta",
-  "prerelease": "beta.2",
+  "prerelease": "beta.3",
   "shell": {
     "package": "@dsh/plugin-harness-shell",
     "version": "0.1.2",
