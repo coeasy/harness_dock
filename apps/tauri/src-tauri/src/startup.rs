@@ -26,11 +26,7 @@ use tauri::{AppHandle, Manager};
 async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
     let mut stable_clean_polls = 0_u8;
     for _ in 0..50 {
-        if app
-            .state::<AppState>()
-            .quitting
-            .load(Ordering::Acquire)
-        {
+        if app.state::<AppState>().quitting.load(Ordering::Acquire) {
             return Ok(());
         }
 
