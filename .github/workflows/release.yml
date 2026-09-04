@@ -292,7 +292,7 @@ jobs:
           test "$(printf '%s' "$release_json" | jq -r '.draft')" = false
           test "$(printf '%s' "$release_json" | jq -r '.prerelease')" = true
           asset_count="$(printf '%s' "$release_json" | jq '[.assets[] | select(.size > 0)] | length')"
-          test "$asset_count" -eq 16 || {
+          test "$asset_count" -eq 15 || {
             echo "expected 15 non-empty unsigned beta assets, got $asset_count" >&2
             exit 1
           }
