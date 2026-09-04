@@ -7,7 +7,9 @@ use tauri::{
 use url::Url;
 
 fn show_primary(app: &AppHandle) {
-    let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>());
+    // Tray re-open is an observational surface operation. It must not probe
+    // Runtime liveness and revoke the lease it is about to reuse.
+    let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>());
     if let Some(window) = app.get_webview_window("harness") {
         // SurfaceActor is the only source of truth for Harness navigation.
         // Never reintroduce a parallel harness_loading AtomicBool.
