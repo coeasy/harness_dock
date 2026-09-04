@@ -57,7 +57,7 @@ for (const [relativePath, readVersion] of versionedFiles) {
 
 const rustToolchainPath = path.join(repoRoot, 'rust-toolchain.toml')
 if (!existsSync(rustToolchainPath)) {
-  mismatches.push('rust-toolchain.toml: file is missing; v0.2.0 Rust toolchain must be frozen')
+  mismatches.push('rust-toolchain.toml: file is missing; release Rust toolchain must be frozen')
 } else {
   const rustToolchain = readFileSync(rustToolchainPath, 'utf8')
   if (!rustToolchain.includes('channel = "1.98.0"')) mismatches.push('rust-toolchain.toml: expected Rust 1.98.0')

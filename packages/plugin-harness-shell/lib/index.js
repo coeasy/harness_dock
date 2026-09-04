@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 var name = "harness-shell";
 var inject = [];
-var version = "0.2.0";
+var version = "0.1.2";
 var apiVersion = 1;
 var service = {
   pluginId: name,
@@ -37,8 +37,7 @@ function apply(ctx = {}) {
   try {
     writeFileSync(
       readyFile,
-      `${JSON.stringify({ pluginId: name, version, apiVersion, pid: process.pid })}
-`,
+      `${JSON.stringify({ pluginId: name, version, apiVersion, pid: process.pid })}\n`,
       { encoding: "utf8", mode: 384 }
     );
   } catch {

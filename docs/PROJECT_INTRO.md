@@ -8,40 +8,57 @@
 
 *DeepSeek Harness 的一键桌面停靠入口*
 
-> 免责声明：本项目为独立的第三方客户端，与 DeepSeek 官方无隶属或背书关系；DeepSeek 及相关标识为 DeepSeek 官方商标。
+> 本项目为独立第三方客户端，与 DeepSeek 官方无隶属或背书关系；DeepSeek 及相关标识归其权利人所有。
 
 </div>
 
+## 当前版本
+
+HarnessDock 当前产品版本为 **v0.1.2**，当前内置 Runtime 精确锁定：
+
+```text
+dsh-v0.1.2-rc.1
+a66e4702047846cdaa10c66c9d3df3951f5ea70d
+```
+
+HarnessDock 产品版本跟随 pinned dsh 的基础 SemVer；上游 prerelease 后缀仅作为 Runtime provenance 保存。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
+
 ## 项目定位
 
-HarnessDock 是 DeepSeek Harness 的 Tauri 原生薄壳。它不 fork 或重写官方 Web UI，只负责启动版本锁定的 dsh Runtime、校验 loopback 地址，并在原生窗口中加载官方 Harness Web。
+HarnessDock 是 DeepSeek Harness 的 Tauri 原生 Native Host。它不 fork 或重写官方 Web UI，只负责托管版本锁定的 Runtime、保护进程生命周期、校验 loopback 地址，并在原生窗口中加载 Harness Web。
 
-v0.2.0 只有一个桌面宿主：`apps/tauri`。启动后首个业务界面直接是 Harness Web；设置、诊断、插件恢复和更新均是按需的外壳能力，不会抢占正常首屏。VS Code/Cursor 作为独立编辑器扩展保留，不属于桌面安装包。
+`apps/tauri` 是唯一桌面应用宿主。桌面启动后第一个业务界面就是 Harness Web；设置、诊断、插件恢复、Gateway 和更新检查均为按需能力，不会抢占正常首屏。VS Code/Cursor 扩展作为独立宿主保留，不属于桌面安装包。
 
 ## 核心能力
 
-- Tauri 2 Windows、macOS、Linux 桌面客户端；桌面包统一为 Full Runtime，支持离线启动。
-- Android/iOS 通过认证 Gateway 连接远程 Runtime，不在移动设备内启动 Node/dsh。
-- `@dsh/plugin-harness-shell` 独立发布，提供菜单、最小化、最大化/还原和关闭按钮，以及刷新 Web、重启 Runtime、隔离插件、诊断和 Tauri 更新入口。
-- Runtime、Gateway 和 WebView 均有单飞、超时、回收、地址校验和关闭保护；插件故障进入隔离/恢复流程，不修改用户真实配置。
-- Tauri updater 只接受 GitHub Release 的签名更新清单；未配置签名发布材料时只提示手动更新，不安装未验证文件。
-- `docs-sync`、Runtime、Shell 插件、Tauri 配置和发布清单统一对齐 `v0.2.0` 客户端版本；上游 dsh 版本单独按精确 commit 固定。
+- Windows、macOS、Linux：Tauri 2 Full Runtime 桌面客户端，安装包内置 Node + dsh + 必要 Runtime Tool，支持首启零下载。
+- Android/iOS：Remote Gateway 客户端，不在移动设备内启动 Node/dsh。
+- `@dsh/plugin-harness-shell`：独立可发布外壳，提供菜单、最小化、最大化/还原、关闭、刷新 Web、重启 Runtime、隔离插件、Gateway 与诊断入口。
+- Runtime/Surface/Gateway/Update：通过 generation、lease、Host Kernel、Reconciler 和 Actor 状态机统一管理并发与恢复。
+- Shell fail-open：可选 Shell 注入失败时恢复系统原生窗口控件，Harness Web 仍可使用。
+- Runtime 隔离：第三方插件故障进入有界恢复/隔离路径，不让插件异常直接结束主客户端。
+- WebView origin 限制：桌面 Harness Web 只允许当前 RuntimeLease 对应的 `127.0.0.1` origin。
+- 发布可复现：Release manifest、origin、Runtime tag/commit、版本号和 candidate SHA 都进入发布门禁。
 
-## 架构
+## 正常桌面链路
 
 ```text
-Tauri Native Host
-  ├─ Full dsh Runtime（loopback）
-  ├─ Native GatewayActor（受控远程连接）
-  ├─ Harness WebView（Runtime ready 后显示）
-  ├─ harness-shell plugin + Host Protocol v2
-  └─ signed Tauri updater
-
-Mobile Tauri
-  └─ HTTPS/WSS → HarnessDock Gateway → desktop/server Runtime
+Tauri setup
+  -> Host Kernel / startup coordinator
+  -> sealed Full Runtime
+  -> RuntimeActor / RuntimeLease
+  -> isolated Harness WebView
+  -> Harness Web
+  -> optional Harness Shell
 ```
 
-正常桌面链路为：原生启动协调器 → Runtime ready → 校验 Web URL → 打开 Harness Web → 注入 Shell 插件。控制页只用于启动故障恢复或显式诊断，远程页面不会获得本地 Tauri capability。
+Runtime 或 WebView 首次加载失败时进入 Recovery；Tray、Updater、原生菜单或 Shell 等可选组件初始化失败采用 fail-open，不得阻止 Harness Web 启动。
+
+## 外壳操作
+
+正常 Harness Web 顶部外壳提供窗口操作和受控业务命令。业务操作通过 Host Protocol 进入 Host Kernel/Reconciler，不直接让远程 Web 文档获得高权限本地 API。
+
+主要操作包括：刷新 Web、重启 Runtime、隔离插件启动、Gateway、插件诊断、最小化、最大化/还原、关闭以及受控退出。高权限清理/更新安装能力只允许可信本地 Surface 调用。
 
 ## 开发与验证
 
@@ -49,15 +66,24 @@ Mobile Tauri
 pnpm install --frozen-lockfile
 pnpm check:versions
 pnpm check:release
+pnpm check:embedded-runtime
 pnpm test
 pnpm build
 pnpm tauri:check
 pnpm tauri:dev
 ```
 
-跨平台候选包由 `.github/workflows/tauri-candidate.yml` 构建和验证：Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG、Android APK/AAB、iOS Simulator，以及四个平台的 Full Runtime。正式 `release.yml` 只接受同一 main SHA 的全绿 candidate 和 CI，并上传 `SHA256SUMS`。
+`check:versions` 保证 root/workspace/Tauri/Rust/Shell/origin/manifest/UI 版本一致；`check:release` 继续验证 HarnessDock 与 pinned dsh 基础 SemVer 对齐，以及 Runtime version/tag/commit 一致。
 
-## 独立 Shell 插件
+## 发布
+
+当前 v0.1.2 使用测试版发布通道，目标 tag：`v0.1.2-beta.1`。
+
+`.github/workflows/tauri-candidate.yml` 构建和验证 Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG 与 app archive、Android APK/AAB、iOS Simulator，以及四个平台 Full Runtime bundle。
+
+`.github/workflows/release.yml` 只接受**同一个 main SHA**上的绿色 `ci` 与 `tauri-candidate`，并发布 15 个不可变 beta 资产及 `SHA256SUMS`。当前 beta 不启用操作系统代码签名、Apple notarization 或 Tauri `latest.json/.sig` 自动更新资产；未配置正式签名通道前采用 GitHub Release 手动下载安装。
+
+## 独立 Harness Shell
 
 ```text
 packages/plugin-harness-shell/
@@ -72,19 +98,8 @@ packages/plugin-harness-shell/
 pnpm --filter @dsh/plugin-harness-shell build
 ```
 
-其它 dsh 宿主可以安装该包并读取 `manifest.json`。宿主未实现某个命令时，将 capability 设为 `false`，插件会隐藏该菜单项，同时不影响 Harness Web 启动。
-
-## 版本与发布
-
-```text
-HarnessDock / workspace packages  0.2.0
-Tauri config / Rust crate         0.2.0
-harness-shell plugin              0.2.0
-origin clientVersion              0.2.0
-```
-
-发布前必须通过 `pnpm check:versions`、`pnpm check:release`、全量测试、Tauri Rust 检查和完整 candidate；桌面更新只由 Tauri updater 负责。
+宿主缺少某项 capability 时应隐藏对应操作；Shell 本身永远不是 Runtime 启动前置依赖。
 
 ## License
 
-MIT。DeepSeek Harness 与其他第三方依赖遵循各自许可证和商标规则。
+MIT。DeepSeek Harness 与其它第三方依赖遵循各自许可证和商标规则。
