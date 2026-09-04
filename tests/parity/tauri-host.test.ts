@@ -12,7 +12,7 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 const readJson = (relative: string): Record<string, any> => JSON.parse(read(relative))
-const unsupportedNativeV02 = [
+const unsupportedNativeCurrent = [
   'notifications',
   'pushNotifications',
   'deepLinks',
@@ -20,7 +20,7 @@ const unsupportedNativeV02 = [
   'backgroundExecution',
 ] as const
 
-describe('Tauri v0.2 host contract', () => {
+describe('Tauri host contract', () => {
   it('promotes Tauri desktop and mobile as stable product hosts', () => {
     expect(TAURI_HOST_PROFILE.channel).toBe('stable')
     expect(TAURI_HOST_PROFILE.capabilities.runtimes).toEqual(['local', 'remote'])
@@ -35,8 +35,8 @@ describe('Tauri v0.2 host contract', () => {
     expect(Object.keys(HOST_PROFILES).some((key) => key.startsWith('perry'))).toBe(false)
   })
 
-  it('does not advertise native services that v0.2 has not implemented', () => {
-    for (const capability of unsupportedNativeV02) {
+  it('does not advertise native services that the current product has not implemented', () => {
+    for (const capability of unsupportedNativeCurrent) {
       expect(TAURI_HOST_PROFILE.capabilities[capability]).toBe(false)
       expect(TAURI_IOS_HOST_PROFILE.capabilities[capability]).toBe(false)
       expect(TAURI_ANDROID_HOST_PROFILE.capabilities[capability]).toBe(false)
@@ -49,7 +49,7 @@ describe('Tauri v0.2 host contract', () => {
     const releaseManifest = readJson('release-manifest.json')
     const shellManifest = readJson('packages/plugin-harness-shell/manifest.json')
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
-    expect(root.version).toBe('0.2.0')
+    expect(root.version).toBe('0.1.2')
     expect(tauri.version).toBe(root.version)
     expect(releaseManifest.version).toBe(root.version)
     expect(releaseManifest.shell.version).toBe(root.version)
