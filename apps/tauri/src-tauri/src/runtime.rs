@@ -134,8 +134,10 @@ impl RuntimeProcess {
             }
             Ok(None) => true,
             Err(error) => {
-                eprintln!("Unable to inspect dsh Runtime process: {error}");
-                false
+                eprintln!(
+                    "Unable to inspect dsh Runtime process; preserving current RuntimeLease until exit is confirmed: {error}"
+                );
+                true
             }
         }
     }
