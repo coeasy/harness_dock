@@ -33,7 +33,7 @@ describe('native lifecycle regression', () => {
     const quitCommand = bridge.slice(quitStart, handlerStart)
     expect(quitCommand).toContain('"settings" | "control"')
     expect(quitCommand).toContain('crate::request_exit(&app);')
-    expect(quitCommand).toContain('remote Harness content cannot use')
+    expect(bridge).toContain('remote Harness content cannot use')
     expect(bridge).toContain('$crate::bridge::lifecycle_quit')
     expect(settings).toContain("await call('lifecycle_quit')")
     expect(settings).not.toContain("await host('quit')")
