@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Align Cargo.lock and release example
+      - name: Align Cargo.lock root package version
         shell: bash
         run: |
           node <<'NODE'
@@ -41,26 +41,18 @@ jobs:
           if (!pattern.test(lock)) throw new Error('harnessdock-tauri entry missing from Cargo.lock')
           lock = lock.replace(pattern, `$1${rootVersion}$2`)
           fs.writeFileSync(lockPath, lock)
-
-          const releasePath = '.github/workflows/release.yml'
-          let release = fs.readFileSync(releasePath, 'utf8')
-          release = release.replace(
-            /Exact beta tag to publish \(for example v[^)]+\)/,
-            `Exact beta tag to publish (for example v${rootVersion}-beta.1)`,
-          )
-          fs.writeFileSync(releasePath, release)
           NODE
           git diff --check
 
-      - name: Commit synchronized generated metadata
+      - name: Commit synchronized Cargo.lock
         shell: bash
         run: |
-          if git diff --quiet; then
-            echo 'Generated metadata already aligned.'
+          if git diff --quiet -- apps/tauri/src-tauri/Cargo.lock; then
+            echo 'Cargo.lock already aligned.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/tauri/src-tauri/Cargo.lock .github/workflows/release.yml
-          git commit -m 'chore: sync v0.1.2 generated version metadata'
+          git add apps/tauri/src-tauri/Cargo.lock
+          git commit -m 'chore: sync v0.1.2 Cargo.lock metadata'
           git push origin HEAD:${{ github.head_ref }}
