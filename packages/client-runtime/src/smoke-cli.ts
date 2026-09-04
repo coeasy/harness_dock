@@ -32,7 +32,9 @@ const resolveInput = (value: string): string =>
   path.isAbsolute(value) ? value : path.resolve(repoRoot, value)
 const runtimeDir = resolveInput(values['runtime-dir'])
 const pluginPath = resolveInput(values.plugin)
-const shellPluginPath = values['shell-plugin'] ? resolveInput(values['shell-plugin']) : undefined
+const shellPluginPath = values['shell-plugin']
+  ? resolveInput(values['shell-plugin'])
+  : path.join(repoRoot, 'packages', 'plugin-harness-shell', 'lib', 'index.js')
 const compatibilityPath = path.join(
   repoRoot,
   'apps',
