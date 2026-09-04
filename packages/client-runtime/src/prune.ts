@@ -192,7 +192,16 @@ export async function pruneBundledRuntime(
 
   const remove = async (target: string): Promise<void> => {
     removedBytes += await sizeOf(target)
-    await rmImpl(target, { recursive: true, force: true })
+    // Windows Defender/indexers can briefly retain directory handles after the
+    // recursive scan. fs.rm supports bounded retries for transient ENOTEMPTY /
+    // EBUSY / EPERM failures; use them in production as well as CI so runtime
+    // packaging does not silently stop pruning after one short-lived lock.
+    await rmImpl(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
     removedCount += 1
   }
 
