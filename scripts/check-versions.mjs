@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
 const rootVersion = rootPkg.version
+const releaseManifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
 const versionedFiles = [
   ['apps/tauri/src-tauri/tauri.conf.json', (value) => value.version],
   ['release-manifest.json', (value) => value.version],
@@ -91,7 +92,8 @@ if (existsSync(releaseManifestPath)) {
 const originPath = path.join(repoRoot, 'packages', 'docs-sync', 'origin.json')
 if (existsSync(originPath)) {
   const origin = JSON.parse(readFileSync(originPath, 'utf8'))
-  const expectedTag = `/releases/download/v${rootVersion}/`
+  const releaseTag = releaseManifest.channel === 'beta' ? `v${rootVersion}-beta.1` : `v${rootVersion}`
+  const expectedTag = `/releases/download/${releaseTag}/`
   for (const [target, bundle] of Object.entries(origin.runtimeBundles ?? {})) {
     if (typeof bundle?.url !== 'string' || !bundle.url.includes(expectedTag)) {
       mismatches.push(`packages/docs-sync/origin.json runtimeBundles.${target}.url: expected ${expectedTag}`)

@@ -35,7 +35,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "category": "DeveloperTool",
     "shortDescription": "HarnessDock DeepSeek Harness client",
     "longDescription": "Full-only Tauri Native Host for DeepSeek Harness with sealed local Runtime and secure Rust-native mobile Gateway pairing.",

@@ -204,17 +204,18 @@ describe('Tauri v0.2 host contract', () => {
     expect(runtime).toContain('platform::configure_child_command')
   })
 
-  it('publishes Full-only signed updater assets from the exact green main candidate', () => {
+  it('publishes full unsigned beta assets from the exact green main candidate', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
     expect(candidate).toContain('Verify full runtime before packaging')
-    expect(candidate).toContain('Require signed Tauri updater material')
+    expect(candidate).toContain('Confirm unsigned beta packaging')
     expect(candidate).not.toContain('@dsh/desktop')
     expect(release).not.toContain('-thin')
-    expect(release).toContain('expected 20 non-empty assets')
-    expect(release).toContain('latest.json')
-    expect(release).toContain('.app.tar.gz.sig')
+    expect(release).toContain('eq 15')
+    expect(release).toContain('expected_tag="v${version}-beta.1"')
+    expect(release).not.toContain('latest.json')
+    expect(release).not.toContain('.app.tar.gz.sig')
     expect(release).toContain('candidate is stale:')
     expect(release).toContain('candidate is not green:')
     expect(release).toContain('no successful same-SHA main CI found')
@@ -222,7 +223,7 @@ describe('Tauri v0.2 host contract', () => {
     expect(release).toContain('Immutable release asset matches')
     expect(release).not.toContain('--clobber')
     expect(release).not.toContain('--method DELETE')
-    expect(tauri.bundle.createUpdaterArtifacts).toBe(true)
+    expect(tauri.bundle.createUpdaterArtifacts).toBe(false)
     expect(tauri.bundle.windows.allowDowngrades).toBe(false)
   })
 
