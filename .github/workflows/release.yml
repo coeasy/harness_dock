@@ -27,10 +27,7 @@ permissions:
 
 jobs:
   publish:
-    # Automatic workflow_run events remain visible for audit, but publishing is
-    # intentionally manual. The operator dispatches this workflow only after the
-    # matching windows-packaged-startup run is green for the exact candidate SHA.
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -112,14 +109,27 @@ jobs:
             exit 1
           }
 
-          # Publishing is manually dispatched only after packaged startup smoke
-          # is green, but enforce the gate again inside the release workflow so
-          # a mistaken dispatch can never publish an unproven Windows candidate.
-          startup_run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&per_page=100" \
-            --jq ".workflow_runs[] | select(.head_sha == \"${candidate_sha}\" and .path == \".github/workflows/windows-packaged-startup.yml\" and .status == \"completed\" and .conclusion == \"success\") | .id" \
-            | head -1)"
+          # windows-packaged-startup is triggered by the same successful
+          # candidate and therefore races this workflow. Wait for that exact
+          # same-SHA smoke instead of publishing in parallel with it.
+          startup_run_id=""
+          startup_deadline=$((SECONDS + 900))
+          while [ "$SECONDS" -lt "$startup_deadline" ]; do
+            startup_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&per_page=100")"
+            startup_run_id="$(printf '%s' "$startup_json" | jq -r --arg sha "$candidate_sha" '.workflow_runs[] | select(.head_sha == $sha and .path == ".github/workflows/windows-packaged-startup.yml" and .status == "completed" and .conclusion == "success") | .id' | head -1)"
+            if [ -n "$startup_run_id" ]; then
+              break
+            fi
+            startup_failure="$(printf '%s' "$startup_json" | jq -r --arg sha "$candidate_sha" '.workflow_runs[] | select(.head_sha == $sha and .path == ".github/workflows/windows-packaged-startup.yml" and .status == "completed" and .conclusion != "success") | "\(.id):\(.conclusion)"' | head -1)"
+            if [ -n "$startup_failure" ]; then
+              echo "same-SHA windows packaged startup smoke failed: ${startup_failure}" >&2
+              exit 1
+            fi
+            echo "Waiting for same-SHA windows packaged startup smoke for ${candidate_sha}..."
+            sleep 15
+          done
           test -n "$startup_run_id" || {
-            echo "no successful same-SHA windows packaged startup smoke found for ${candidate_sha}" >&2
+            echo "timed out waiting for successful same-SHA windows packaged startup smoke for ${candidate_sha}" >&2
             exit 1
           }
 
