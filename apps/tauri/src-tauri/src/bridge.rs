@@ -57,8 +57,11 @@ fn trusted_subject(
                     false,
                 ));
             }
+            // Renderer authorization must be observational. A Host Protocol
+            // request must never probe process liveness and revoke the lease
+            // that authenticates the request it is currently validating.
             let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                crate::runtime::current_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -134,7 +137,7 @@ fn snapshot_subject(
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
             let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                crate::runtime::current_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -197,7 +200,7 @@ pub fn host_snapshot(
         .lock()
         .map(|actor| actor.phase() == crate::gateway_host::GatewayPhase::Ready)
         .unwrap_or(false);
-    let lease = crate::runtime::live_lease(&*state);
+    let lease = crate::runtime::current_lease(&*state);
     let capabilities = crate::capability_broker::allowed_capabilities(
         subject,
         surface,
