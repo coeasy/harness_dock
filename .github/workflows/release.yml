@@ -62,7 +62,12 @@ jobs:
           fi
 
           version="$(node -p "require('./package.json').version")"
-          expected_tag="v${version}-beta.2"
+          prerelease="$(node -p "require('./release-manifest.json').prerelease || ''")"
+          test -n "$prerelease" || {
+            echo "release manifest prerelease is required for the beta workflow" >&2
+            exit 1
+          }
+          expected_tag="v${version}-${prerelease}"
           release_tag="${RELEASE_TAG_INPUT:-$expected_tag}"
           test "$release_tag" = "$expected_tag" || {
             echo "release tag mismatch: expected $expected_tag, got $release_tag" >&2
@@ -130,7 +135,6 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           runtime_version="$(node -p "require('./packages/docs-sync/origin.json').dshVersion")"
           source_date_epoch="$(git show -s --format=%ct "$RELEASE_SHA")"
-          updater_pub_date="$(git show -s --format=%cI "$RELEASE_SHA")"
 
           copy_one() {
             local root="$1"
