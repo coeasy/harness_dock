@@ -36,14 +36,18 @@ describe('packaged startup Web chain regression', () => {
     expect(window).toContain('harness_open_impl(app, url, false).await')
   })
 
-  it('does not revoke the published RuntimeLease from a WebView load callback', () => {
+  it('does not revoke the published RuntimeLease from WebView or host-surface callbacks', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
     const window = read('apps/tauri/src-tauri/src/harness_window.rs')
+    const reconciler = read('apps/tauri/src-tauri/src/reconciler.rs')
 
     expect(window).toContain('crate::runtime::current_lease(&*app.state::<crate::AppState>())')
     expect(window).not.toContain('crate::runtime::live_lease(&*app.state::<crate::AppState>())')
     expect(startup).toContain('crate::runtime::current_lease(&*app.state::<AppState>())')
     expect(startup).not.toContain('crate::runtime::live_lease(&*app.state::<AppState>())')
+    expect(reconciler).toContain('crate::runtime::current_lease(&*state)')
+    expect(reconciler).toContain('crate::runtime::current_lease(&*app.state::<crate::AppState>())')
+    expect(reconciler).not.toContain('crate::runtime::live_lease(')
   })
 
   it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {

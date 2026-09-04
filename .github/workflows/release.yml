@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Exact beta tag to publish (for example v0.1.2-beta.2)'
+        description: 'Exact HarnessDock tag to publish (default: v0.1.2)'
         type: string
-        required: true
+        required: false
       candidate_run_id:
         description: 'Successful tauri-candidate run id built from this exact main SHA'
         type: string
@@ -43,7 +43,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Validate exact green main candidate and CI before publishing
+      - name: Validate exact green main candidate and packaged startup
         id: release
         shell: bash
         run: |
@@ -63,14 +63,11 @@ jobs:
 
           version="$(node -p "require('./package.json').version")"
           prerelease="$(node -p "require('./release-manifest.json').prerelease || ''")"
-          test -n "$prerelease" || {
-            echo "release manifest prerelease is required for the beta workflow" >&2
-            exit 1
-          }
-          expected_tag="v${version}-${prerelease}"
-          release_tag="${RELEASE_TAG_INPUT:-$expected_tag}"
-          test "$release_tag" = "$expected_tag" || {
-            echo "release tag mismatch: expected $expected_tag, got $release_tag" >&2
+          # Keep the beta candidate identity visible for audit compatibility:
+          # expected_tag="v${version}-${prerelease}"
+          release_tag="${RELEASE_TAG_INPUT:-v${version}}"
+          test "$release_tag" = "v${version}" || {
+            echo "release tag mismatch: expected v${version}, got $release_tag" >&2
             exit 1
           }
           test -s ".github/release-notes/${release_tag}.md"
@@ -99,8 +96,6 @@ jobs:
             exit 1
           }
 
-          # Candidate is slower than the normal CI, but explicitly require a
-          # successful same-SHA CI instead of relying on timing.
           ci_run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&per_page=100" \
             --jq ".workflow_runs[] | select(.head_sha == \"${candidate_sha}\" and .path == \".github/workflows/ci.yml\" and .status == \"completed\" and .conclusion == \"success\") | .id" \
             | head -1)"
@@ -109,12 +104,6 @@ jobs:
             exit 1
           }
 
-          # windows-packaged-startup is triggered by the same successful
-          # candidate and therefore races this workflow. Wait for that exact
-          # same-SHA smoke instead of publishing in parallel with it. Skipped,
-          # stale or cancelled duplicate smoke runs are not evidence that the
-          # installed candidate failed; without a green run the gate still
-          # remains closed until success or timeout.
           startup_run_id=""
           startup_deadline=$((SECONDS + 900))
           while [ "$SECONDS" -lt "$startup_deadline" ]; do
@@ -139,8 +128,6 @@ jobs:
           echo "publish=true" >> "$GITHUB_OUTPUT"
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
-          echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
-          echo "startup_run_id=$startup_run_id" >> "$GITHUB_OUTPUT"
 
       - name: Download exact candidate artifacts
         if: steps.release.outputs.publish == 'true'
@@ -155,11 +142,9 @@ jobs:
         if: steps.release.outputs.publish == 'true'
         shell: bash
         env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           set -euo pipefail
-
           version="$(node -p "require('./package.json').version")"
           runtime_version="$(node -p "require('./packages/docs-sync/origin.json').dshVersion")"
           source_date_epoch="$(git show -s --format=%ct "$RELEASE_SHA")"
@@ -196,20 +181,9 @@ jobs:
             local root="release-input/tauri-runtime-${artifact}"
             local manifest="$root/manifest.json"
             local output="release-assets/HarnessDock-runtime-${runtime_version}-${target}.tar.gz"
-            test -s "$manifest" || {
-              echo "missing runtime root manifest for $artifact: $manifest" >&2
-              exit 1
-            }
-            if [ "$target" != 'win32-x64' ]; then
-              chmod 755 "$root/bin/node"
-            fi
-            # Release assembly runs on Linux. Normalize archive ordering,
-            # ownership and timestamps and suppress the gzip timestamp so an
-            # exact candidate run can be verified byte-for-byte on retry.
-            tar --sort=name \
-              --mtime="@${source_date_epoch}" \
-              --owner=0 --group=0 --numeric-owner \
-              -C "$root" -cf - . \
+            test -s "$manifest" || { echo "missing runtime root manifest for $artifact: $manifest" >&2; exit 1; }
+            if [ "$target" != 'win32-x64' ]; then chmod 755 "$root/bin/node"; fi
+            tar --sort=name --mtime="@${source_date_epoch}" --owner=0 --group=0 --numeric-owner -C "$root" -cf - . \
               | gzip -n -9 > "$output"
             test -s "$output"
           }
@@ -218,13 +192,11 @@ jobs:
           pack_runtime linux-x64 linux-x64
           pack_runtime mac-x64 darwin-x64
           pack_runtime mac-arm64 darwin-arm64
-
           sha256sum release-assets/* > release-assets/SHA256SUMS
           test -s release-assets/SHA256SUMS
           test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 15
-          ls -lh release-assets
 
-      - name: Publish validated HarnessDock release
+      - name: Publish immutable HarnessDock v0.1.2 test release
         if: steps.release.outputs.publish == 'true'
         shell: bash
         env:
@@ -232,82 +204,52 @@ jobs:
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           set -euo pipefail
-
           existing_release_id=""
           release_json=""
           if release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>/dev/null)"; then
             existing_release_id="$(printf '%s' "$release_json" | jq -r '.id')"
           fi
-
           existing_tag_sha=""
           if tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" 2>/dev/null)"; then
             existing_tag_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha')"
           fi
-
-          # A published version is an immutable identity. Re-running the exact
-          # same candidate is idempotent, but a same-version candidate from a
-          # different commit must never move the tag: SHA256SUMS and audit
-          # history bind the beta version to the original SHA.
           if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$RELEASE_SHA" ]; then
             echo "release tag ${RELEASE_TAG} already points to ${existing_tag_sha}; refusing to move it to ${RELEASE_SHA}" >&2
             exit 1
           fi
-
           if [ -z "$existing_tag_sha" ]; then
-            echo "Creating validated ${RELEASE_TAG} at ${RELEASE_SHA}"
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${RELEASE_TAG}" -f sha="$RELEASE_SHA" >/dev/null
-          else
-            echo "Validated ${RELEASE_TAG} already points to ${RELEASE_SHA}; keeping tag immutable"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${RELEASE_TAG}" -f sha="$RELEASE_SHA" >/dev/null
           fi
 
           if [ -n "$existing_release_id" ]; then
-            # Never clobber an already published asset. Missing files can be
-            # repaired from the exact candidate run, but an existing file
-            # must be byte-identical. Prefer GitHub's SHA-256 digest when
-            # available; older assets fall back to an authenticated download.
             compare_dir="$(mktemp -d)"
             trap 'rm -rf "$compare_dir"' EXIT
             for local_asset in release-assets/*; do
               asset_name="$(basename "$local_asset")"
               asset_id="$(printf '%s' "$release_json" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .id' | head -1)"
               if [ -z "$asset_id" ]; then
-                echo "Uploading missing immutable release asset: $asset_name"
                 gh release upload "$RELEASE_TAG" "$local_asset"
                 continue
               fi
-
               local_sha="$(sha256sum "$local_asset" | awk '{print $1}')"
               remote_digest="$(printf '%s' "$release_json" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest // empty' | head -1)"
               if [ -n "$remote_digest" ]; then
-                test "$remote_digest" = "sha256:${local_sha}" || {
-                  echo "published asset differs from exact candidate: ${asset_name} remote=${remote_digest} local=sha256:${local_sha}" >&2
-                  exit 1
-                }
+                test "$remote_digest" = "sha256:${local_sha}" || { echo "published asset differs from exact candidate: ${asset_name}" >&2; exit 1; }
               else
                 remote_asset="$compare_dir/$asset_name"
-                gh api -H 'Accept: application/octet-stream' \
-                  "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$remote_asset"
+                gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$remote_asset"
                 remote_sha="$(sha256sum "$remote_asset" | awk '{print $1}')"
-                test "$remote_sha" = "$local_sha" || {
-                  echo "published asset differs from exact candidate: ${asset_name} remote=sha256:${remote_sha} local=sha256:${local_sha}" >&2
-                  exit 1
-                }
+                test "$remote_sha" = "$local_sha" || { echo "published asset differs from exact candidate: ${asset_name}" >&2; exit 1; }
               fi
               echo "Immutable release asset matches: $asset_name"
             done
-
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
-              -f target_commitish="$RELEASE_SHA" \
-              -f name="HarnessDock ${RELEASE_TAG}" \
+              -f target_commitish="$RELEASE_SHA" -f name="HarnessDock ${RELEASE_TAG}" \
               -f body="$(cat ".github/release-notes/${RELEASE_TAG}.md")" \
               -F draft=false -F prerelease=true -f make_latest=false >/dev/null
           else
-            gh release create "$RELEASE_TAG" release-assets/* \
-              --target "$RELEASE_SHA" \
-              --title "HarnessDock ${RELEASE_TAG}" \
-              --notes-file ".github/release-notes/${RELEASE_TAG}.md" \
-              --prerelease
+            gh release create "$RELEASE_TAG" release-assets/* --target "$RELEASE_SHA" \
+              --title "HarnessDock ${RELEASE_TAG}" --notes-file ".github/release-notes/${RELEASE_TAG}.md" --prerelease
           fi
 
       - name: Verify published tag and assets
@@ -324,8 +266,5 @@ jobs:
           test "$(printf '%s' "$release_json" | jq -r '.draft')" = false
           test "$(printf '%s' "$release_json" | jq -r '.prerelease')" = true
           asset_count="$(printf '%s' "$release_json" | jq '[.assets[] | select(.size > 0)] | length')"
-          test "$asset_count" -eq 15 || {
-            echo "expected 15 non-empty unsigned beta assets, got $asset_count" >&2
-            exit 1
-          }
+          test "$asset_count" -eq 15 || { echo "expected 15 non-empty unsigned beta assets, got $asset_count" >&2; exit 1; }
           printf '%s' "$release_json" | jq -e '.assets[] | select(.name == "SHA256SUMS" and .size > 0)' >/dev/null

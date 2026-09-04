@@ -28,7 +28,11 @@ fn authorize_local(
     command: &HostCommand,
 ) -> Result<(), HostError> {
     let state = app.state::<crate::AppState>();
-    let lease = crate::runtime::live_lease(&*state);
+    // Capability checks bind to the RuntimeLease that RuntimeActor already
+    // published. Authorization is not a lifecycle/health mutation: doing a
+    // process-liveness sweep here could revoke the same lease immediately
+    // before Refresh/Restart/ActivatePrimary consumes it.
+    let lease = crate::runtime::current_lease(&*state);
     let request = AuthorizationRequest {
         subject,
         surface: match subject {
@@ -71,7 +75,10 @@ async fn activate_primary(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(not(mobile))]
     {
-        let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>())
+        // Surface activation must remain side-effect free for the same reason
+        // as WebView page-load callbacks. Explicit Runtime health/status paths
+        // are responsible for liveness reconciliation.
+        let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>())
             .ok_or_else(|| "Runtime 尚未就绪，无法激活 Harness 主窗口。".to_string())?;
         crate::harness_window::harness_open(app, lease.launch_url).await
     }
