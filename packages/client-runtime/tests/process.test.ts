@@ -67,6 +67,43 @@ describe('shutdownLadder', () => {
     expect(alive).toBe(false)
   })
 
+  it('escalates immediately when the Windows graceful tree request is rejected', async () => {
+    const calls: Array<{ pid: number; force: boolean }> = []
+    const signals: string[] = []
+    let alive = true
+    let livenessChecks = 0
+    const child = {
+      pid: 78,
+      kill(signal?: NodeJS.Signals) {
+        signals.push(signal ?? 'SIGTERM')
+        return true
+      },
+    }
+
+    const result = await shutdownLadder(child, {
+      termMs: 5_000,
+      killMs: 20,
+      isAlive: () => {
+        livenessChecks += 1
+        return alive
+      },
+      platform: 'win32',
+      taskkill: async (pid, force) => {
+        calls.push({ pid, force })
+        if (!force) throw new Error('console process requires force')
+        alive = false
+      },
+    })
+
+    expect(result).toEqual({ dead: true, survivors: [] })
+    expect(calls).toEqual([
+      { pid: 78, force: false },
+      { pid: 78, force: true },
+    ])
+    expect(signals).toEqual([])
+    expect(livenessChecks).toBeLessThanOrEqual(3)
+  })
+
   it('sends SIGTERM then SIGKILL if the child stays alive', async () => {
     const signals: string[] = []
     const child = {
