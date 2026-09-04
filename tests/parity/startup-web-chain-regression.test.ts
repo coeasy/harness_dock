@@ -24,6 +24,28 @@ describe('packaged startup Web chain regression', () => {
     expect(script).toContain('window.__harnessDockSetStatus')
   })
 
+  it('keeps the normal packaged launch on the primary Harness Web surface', () => {
+    const config = read('apps/tauri/src-tauri/tauri.conf.json')
+    const startup = read('apps/tauri/src-tauri/src/startup.rs')
+    const window = read('apps/tauri/src-tauri/src/harness_window.rs')
+
+    expect(config).toMatch(/"label": "splash"[\s\S]*?"visible": false/)
+    expect(startup).toContain('harness_window::hide_splash(&app)')
+    expect(startup).not.toContain('正在验证内置 Harness Runtime')
+    expect(startup).not.toContain('正在打开 Harness Web')
+    expect(window).toContain('harness_open_impl(app, url, false).await')
+  })
+
+  it('does not revoke the published RuntimeLease from a WebView load callback', () => {
+    const startup = read('apps/tauri/src-tauri/src/startup.rs')
+    const window = read('apps/tauri/src-tauri/src/harness_window.rs')
+
+    expect(window).toContain('crate::runtime::current_lease(&*app.state::<crate::AppState>())')
+    expect(window).not.toContain('crate::runtime::live_lease(&*app.state::<crate::AppState>())')
+    expect(startup).toContain('crate::runtime::current_lease(&*app.state::<AppState>())')
+    expect(startup).not.toContain('crate::runtime::live_lease(&*app.state::<AppState>())')
+  })
+
   it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
 
