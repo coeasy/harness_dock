@@ -125,8 +125,9 @@
 
   function runtimeDetailText(current) {
     if (!current?.appUrl) return 'Runtime 尚未启动。HarnessDock 主程序仍可用，可检查配置后重试。'
-    const node = current.nodeSource ? `Node=${current.nodeSource}` : ''
-    const base = [current.dshVersion || '', node, safeDisplayUrl(current.appUrl)].filter(Boolean).join(' · ')
+    // Node is part of the sealed packaged Runtime and is not a user-selectable
+    // dependency. Do not expose it as a startup check or environment decision.
+    const base = [current.dshVersion || '', safeDisplayUrl(current.appUrl)].filter(Boolean).join(' · ')
     if (!current.recoveryMode) return base
     if (current.recoverySource === 'safe-profile') {
       return `${base}\n安全启动：已绕过用户插件配置，确保 Harness Web 界面可用。用户配置未修改；可在修复插件后停止并重新启动 Runtime。`
@@ -273,7 +274,6 @@
 
   async function boot() {
     try {
-      void splashStatus('正在初始化客户端…')
       const platform = await call('platform_info')
       $('platform-summary').textContent = `${platform.os} / ${platform.arch} · ${platform.surface} · runtime=${platform.runtimeMode}`
       const desktop = platform.surface === 'desktop' && platform.runtimeMode === 'local'
@@ -286,11 +286,9 @@
         return
       }
       if (platform.runtimeMode === 'local') {
-        // Native startup owns the normal desktop path. The control window stays
-        // hidden during normal launch, but its secondary Mobile Gateway card is
-        // ready when the user explicitly opens this window from Shell/Tray.
+        // Native startup owns the normal desktop path. The packaged Runtime is
+        // not re-detected from this secondary control renderer.
         setSurfaceMode('gateway-host')
-        void splashStatus('正在准备本地 Runtime…')
         bootStatus('Harness Web 为主界面；此控制页仅在需要管理移动设备时打开。', 'ready')
       } else {
         bootStatus('Remote Gateway 模式已就绪', 'ready')
@@ -298,7 +296,7 @@
         deviceName.value = defaultDeviceName(platform)
       }
     } catch (error) {
-      bootStatus('运行环境检测失败，当前页面仍可操作', 'error')
+      bootStatus('Harness Web 启动状态读取失败，当前页面仍可操作', 'error')
       window.__harnessDockShowRecovery?.(error)
       status(runtimeDetail || gatewayDetail, String(error), true)
       await showControl()
