@@ -1,4 +1,5 @@
 name: tauri-candidate
+# Beta release candidate workflow: keep exact-main packaging trigger explicit.
 
 on:
   workflow_dispatch:
