@@ -333,7 +333,7 @@ jobs:
       - name: Assemble macOS DMG candidate
         if: runner.os == 'macOS'
         shell: bash
-        run: bash scripts/build-macos-dmg.sh '${{ matrix.artifact }}'
+        run: bash scripts/build-macos-dmg.sh apps/tauri
       - name: Verify desktop candidate outputs
         shell: bash
         run: |
@@ -468,20 +468,3 @@ jobs:
         run: pnpm prepare:icons
       - name: Build iOS simulator candidate
         working-directory: apps/tauri
-        run: cargo tauri ios build --target aarch64-sim --ci
-      - name: Package iOS simulator candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          app="$(find apps/tauri/src-tauri/gen/apple/build -type d -name '*.app' -print | head -1)"
-          test -n "$app"
-          test -s "$app/Info.plist"
-          test -n "$(find "$app" -maxdepth 1 -type f -perm -111 -print -quit)"
-          mkdir -p ios-candidate
-          ditto -c -k --sequesterRsrc --keepParent "$app" ios-candidate/HarnessDock-ios-arm64-simulator.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: tauri-ios-simulator-candidate
-          path: ios-candidate/HarnessDock-ios-arm64-simulator.zip
-          if-no-files-found: error
-          retention-days: 7
