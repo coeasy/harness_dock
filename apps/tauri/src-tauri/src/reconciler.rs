@@ -28,7 +28,15 @@ fn authorize_local(
     command: &HostCommand,
 ) -> Result<(), HostError> {
     let state = app.state::<crate::AppState>();
-    let lease = crate::runtime::live_lease(&*state);
+    // Native/menu/tray/diagnostics authorization does not depend on Runtime
+    // liveness. Do not let an unrelated local command probe or revoke the
+    // current RuntimeLease. Harness Web was already origin-validated at the
+    // bridge boundary, so it only needs the actor's published observation.
+    let lease = if subject == SubjectKind::HarnessWeb {
+        crate::runtime::current_lease(&*state)
+    } else {
+        None
+    };
     let request = AuthorizationRequest {
         subject,
         surface: match subject {
@@ -71,7 +79,7 @@ async fn activate_primary(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(not(mobile))]
     {
-        let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>())
+        let lease = crate::runtime::current_lease(&*app.state::<crate::AppState>())
             .ok_or_else(|| "Runtime 尚未就绪，无法激活 Harness 主窗口。".to_string())?;
         crate::harness_window::harness_open(app, lease.launch_url).await
     }

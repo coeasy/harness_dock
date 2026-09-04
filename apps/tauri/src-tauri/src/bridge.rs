@@ -57,8 +57,11 @@ fn trusted_subject(
                     false,
                 ));
             }
+            // Renderer authorization must be observational. A Host Protocol
+            // request must never probe process liveness and revoke the lease
+            // that authenticates the request it is currently validating.
             let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                crate::runtime::current_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -134,7 +137,7 @@ fn snapshot_subject(
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
             let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                crate::runtime::current_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -197,7 +200,7 @@ pub fn host_snapshot(
         .lock()
         .map(|actor| actor.phase() == crate::gateway_host::GatewayPhase::Ready)
         .unwrap_or(false);
-    let lease = crate::runtime::live_lease(&*state);
+    let lease = crate::runtime::current_lease(&*state);
     let capabilities = crate::capability_broker::allowed_capabilities(
         subject,
         surface,
@@ -258,6 +261,21 @@ pub fn diagnostics_close(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Quit is a lifecycle escape hatch. A local diagnostics/control window must
+/// not wait behind a busy Host Kernel queue to terminate the application.
+/// The invoking WebView label is checked so remote Harness content cannot use
+/// this privileged bypass.
+#[tauri::command]
+pub fn lifecycle_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    match window.label() {
+        "settings" | "control" => {
+            crate::request_exit(&app);
+            Ok(())
+        }
+        _ => Err("当前 Surface 无权直接退出 HarnessDock。".into()),
+    }
+}
+
 macro_rules! handler {
     () => {
         tauri::generate_handler![
@@ -265,6 +283,7 @@ macro_rules! handler {
             $crate::bridge::host_snapshot,
             $crate::bridge::public_runtime_status,
             $crate::bridge::diagnostics_close,
+            $crate::bridge::lifecycle_quit,
             $crate::runtime::runtime_status,
             $crate::platform::platform_info,
             $crate::gateway::gateway_health,

@@ -72,9 +72,9 @@
 
   async function quit() {
     $('settings-quit').disabled = true
-    setStatus($('runtime-detail'), '正在通过 Host Kernel 关闭 Runtime、Gateway 与客户端…')
+    setStatus($('runtime-detail'), '正在关闭 Runtime、Gateway 与客户端…')
     try {
-      await host('quit')
+      await call('lifecycle_quit')
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
       $('settings-quit').disabled = false
@@ -84,7 +84,7 @@
   async function installUpdate() {
     const button = $('update-install')
     button.disabled = true
-    setStatus($('update-detail'), '正在检查稳定 Release，并验证签名后安装可用更新…')
+    setStatus($('update-detail'), '正在检查稳定 Release；已配置发布签名时才会执行安全自动安装…')
     try {
       await host('install-update')
       setStatus($('update-detail'), '更新操作已交给 UpdateActor；状态变化将通过 HostEvent 推送。')

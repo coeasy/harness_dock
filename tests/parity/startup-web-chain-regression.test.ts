@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -6,6 +6,15 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (relative: string) =>
   readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+
+function rustFiles(relative: string): string[] {
+  const absolute = path.join(repoRoot, relative)
+  return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
+    const child = path.join(relative, entry.name)
+    if (entry.isDirectory()) return rustFiles(child)
+    return entry.isFile() && entry.name.endsWith('.rs') ? [child] : []
+  })
+}
 
 describe('packaged startup Web chain regression', () => {
   it('keeps the splash compatible with its strict CSP', () => {
@@ -44,6 +53,49 @@ describe('packaged startup Web chain regression', () => {
     expect(window).not.toContain('crate::runtime::live_lease(&*app.state::<crate::AppState>())')
     expect(startup).toContain('crate::runtime::current_lease(&*app.state::<AppState>())')
     expect(startup).not.toContain('crate::runtime::live_lease(&*app.state::<AppState>())')
+  })
+
+  it('keeps Host Protocol and local authorization lease reads observational', () => {
+    const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
+    const reconciler = read('apps/tauri/src-tauri/src/reconciler.rs')
+
+    expect(bridge).toContain('crate::runtime::current_lease')
+    expect(bridge).not.toContain('crate::runtime::live_lease')
+    expect(reconciler).toContain('subject == SubjectKind::HarnessWeb')
+    expect(reconciler).toContain('crate::runtime::current_lease')
+    expect(reconciler).not.toContain('crate::runtime::live_lease')
+    expect(reconciler).toContain('Native/menu/tray/diagnostics authorization does not depend on Runtime')
+  })
+
+  it('forbids side-effecting live_lease reads outside explicit Runtime/Gateway lifecycle boundaries', () => {
+    const lifecycleFiles = new Set([
+      'apps/tauri/src-tauri/src/runtime.rs',
+      'apps/tauri/src-tauri/src/gateway_host.rs',
+    ])
+    const offenders = rustFiles('apps/tauri/src-tauri/src').filter(
+      (file) => !lifecycleFiles.has(file) && read(file).includes('runtime::live_lease'),
+    )
+    expect(offenders).toEqual([])
+
+    const gateway = read('apps/tauri/src-tauri/src/gateway_host.rs')
+    expect(gateway.match(/runtime::live_lease/g)?.length).toBe(2)
+    expect(gateway).toContain('fn runtime_lease(state: &AppState)')
+    expect(gateway).toContain('fn ensure_current_runtime(state: &AppState, generation: u64)')
+    expect(gateway).toContain('unexpected Runtime exit before any pairing/proxy operation uses it')
+  })
+
+  it('does not revoke a healthy lease when process inspection is inconclusive', () => {
+    const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
+    const alive = runtime.slice(
+      runtime.indexOf('pub(crate) fn is_alive'),
+      runtime.indexOf('pub(crate) fn stop', runtime.indexOf('pub(crate) fn is_alive')),
+    )
+
+    expect(alive).toContain('Ok(Some(_))')
+    expect(alive).toContain('false')
+    expect(alive).toContain('Ok(None) => true')
+    expect(alive).toContain('preserving current RuntimeLease until exit is confirmed')
+    expect(alive).toMatch(/Err\(error\)[\s\S]*?true/)
   })
 
   it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {
