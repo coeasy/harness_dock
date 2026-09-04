@@ -329,7 +329,10 @@ jobs:
       - name: Verify Windows installer uses HarnessDock icon
         if: runner.os == 'Windows'
         shell: pwsh
-        run: node scripts/verify-windows-installer-icon.mjs
+        run: |
+          $installer = Get-ChildItem -Path apps/tauri/src-tauri/target/release/bundle/nsis -Filter '*setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer was not produced' }
+          node scripts/verify-windows-installer-icon.mjs $installer.FullName apps/tauri/src-tauri/icons/icon.ico
       - name: Assemble macOS DMG candidate
         if: runner.os == 'macOS'
         shell: bash
