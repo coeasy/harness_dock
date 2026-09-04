@@ -1,88 +1,148 @@
-<div align="center">
+# HarnessDock v0.1.2
 
-<img src="apps/tauri/src-tauri/icons/app-icon.png" width="88" alt="HarnessDock icon" />
+> DeepSeek Harness 的跨平台原生客户端外壳。桌面端启动即进入官方 Harness Web，外壳只负责 Runtime 生命周期、窗口操作、插件隔离恢复、Gateway、诊断与发布更新边界。
 
-# HarnessDock
-
-**DeepSeek Harness 的 Full-only Tauri 2 桌面 / 移动客户端**
-
-*官方 Harness Web UI · 桌面内置固定 Runtime · 移动端安全 Remote Gateway · 插件故障隔离*
-
-</div>
+> 本项目为独立第三方客户端，与 DeepSeek 官方无隶属或背书关系。DeepSeek、DeepSeek Harness 及相关标识归其权利人所有。
 
 ## 当前版本
 
-- **HarnessDock v0.2.0**：Tauri 2 主线，启动即进入 Harness Web；Windows/macOS/Linux 默认发布 Full Runtime 桌面包。
-- Electron 客户端、Electron Builder、Electron 更新器和 Electron E2E 已从 v0.2.0 移除；正式客户端、启动、退出、更新和发布门禁统一由 Tauri 承担。
-- 上游 DeepSeek Harness 固定为 `dsh-v0.1.2-alpha.1`，commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`。
+| 项目 | 当前值 |
+| --- | --- |
+| HarnessDock | `0.1.2` |
+| 发布通道 | `beta` |
+| 当前发布 tag | `v0.1.2-beta.1` |
+| 内置 DeepSeek Harness Runtime | `dsh-v0.1.2-rc.1` |
+| Runtime commit | `a66e4702047846cdaa10c66c9d3df3951f5ea70d` |
+| 桌面宿主 | Tauri 2 |
+| 桌面 Runtime | Full / sealed / 首启零下载 |
+| 移动端 Runtime | Remote Gateway only |
 
-## 平台矩阵
+### 版本规则
 
-| 平台 | Runtime | 正式资产 |
-| --- | --- | --- |
-| Windows x64 | 内置 Full Runtime + Remote Gateway | NSIS `.exe` |
-| Linux x64 | 内置 Full Runtime + Remote Gateway | `.deb` + `.AppImage` |
-| macOS x64 | 内置 Full Runtime + Remote Gateway | `.dmg` |
-| macOS arm64 | 内置 Full Runtime + Remote Gateway | `.dmg` |
-| Android arm64 | Remote-only | release-optimized `.apk` + `.aab` |
-| iOS Simulator arm64 | Remote-only | Simulator `.zip` |
-
-## v0.2.0 安装与升级体验
-
-- 统一 1024x1024 HarnessDock 品牌源图，candidate 自动生成桌面、Android、iOS 所需图标。
-- Windows NSIS 安装器和卸载器显式使用统一 HarnessDock 图标；CI 会检查最终安装器 PE 图标资源，不允许回退到默认 NSIS 图标。
-- Windows 保持 `com.harnessdock.client` 应用标识与 current-user 安装模式，可直接覆盖升级现有 v0.2.x；禁止意外降级安装。
-- WebView2 bootstrapper 随 Windows 安装器嵌入，缺少 WebView2 时无需再先下载 bootstrapper 本体。
-- Runtime/插件异常不会使宿主应用退出；第三方插件可进入 degraded quarantine 或临时安全配置，Web 仍默认打开。正式 Full Runtime 只使用安装包内固定 Node，不信任用户 PATH，也不会在首次启动下载或替换 Runtime。
-- 插件诊断作为独立按需窗口，只在 Harness `菜单`、托盘或应用菜单中明确点击后显示，不抢占 Web 首屏；窗口居中、紧凑并在页面加载完成后显示。
-- 桌面端 Harness 使用自定义标题栏：`菜单`、最小化、最大化/还原、隐藏到系统托盘；刷新、Runtime 重启、清除插件隔离并重启、插件诊断和自动更新统一收敛到菜单。系统托盘不可用时，窗口关闭会转为受管退出，不会留下无法重新打开的后台进程。
-- 启动、刷新和重启都使用可见执行态；导航期间由本地 splash 显示动画和状态，页面加载成功后自动回到 Harness Web，失败则回到恢复入口而不是白屏。
-- 启动只显示本地 splash，后台控制页和插件诊断均不抢占首屏；自动更新统一从主界面菜单、托盘或应用菜单进入，失败会留在界面内并给出明确降级路径。
-- Runtime 子进程异常退出会被及时识别；重复启动受到保护；重启 Runtime 前会先关闭 Gateway，避免复用失效的上游地址。
-- 顶部入口明确命名为“菜单”，并统一承载 Web 刷新、Runtime 重启、插件隔离恢复、插件诊断和自动更新；插件诊断保持只读、按需打开。
-- `@dsh/plugin-harness-shell` 是独立可发布的 dsh 外壳插件；Tauri 通过 Host Protocol v2 接入，能力由 Capability Broker 和原生 Actor 统一提供，未实现的菜单项会隐藏；插件入口自身采用 fail-open，宿主 service 注册失败不会阻断 Runtime/Harness Web。
-- 桌面启动由原生协调器直接启动 Runtime，Harness Web 完成绘制后才显示；白板、启动超时和窗口切换期间自动退出均进入可操作恢复路径。
-- 桌面 Harness Shell 权限只授予受管的 `http://127.0.0.1:<ephemeral-port>` Runtime origin；localhost、IPv6、HTTPS alias 与其它本机服务均不获得外壳 IPC。
-- 桌面受管 loopback Harness WebView 只获得事件订阅、标题栏拖拽和显式 `harness-shell` Host Bridge 命令；不再授予整组 `core:default` 能力。
-
-完整的 v0.2.0 外壳重构与发布前验收方案见 [`docs/plan/v0.2.0-shell-first-implementation.md`](docs/plan/v0.2.0-shell-first-implementation.md)。
-
-## 架构
+从 v0.1.2 起，HarnessDock 的产品版本与**当前锁定的最新 dsh 基础 SemVer**对齐：
 
 ```text
-Desktop (Windows/macOS/Linux)
-  Tauri Host
-    +-- pinned Full dsh Runtime (loopback)
-    +-- isolated official Harness WebView
-    +-- independent harness-shell plugin + versioned Host Bridge
-    +-- Native GatewayActor
-    +-- plugin failure quarantine/recovery
-
-Mobile (Android/iOS)
-  Tauri pairing UI
-    +-- HTTPS/WSS --> HarnessDock Gateway --> desktop/server dsh
+dsh-v0.1.2-rc.1  -> HarnessDock 0.1.2
+dsh-v0.1.3-beta.2 -> HarnessDock 0.1.3
+dsh-v1.0.0         -> HarnessDock 1.0.0
 ```
 
-移动端不会内嵌桌面 Node Runtime；Gateway/移动端远程页面不会获得本地 Tauri IPC 权限。桌面受管 loopback Harness WebView 仅获得最小化的 `harness-shell` capability，用于标题栏、事件订阅和明确列出的 Host Bridge 命令。
+`rc / beta / alpha` 后缀属于上游 Runtime 的精确来源信息，不附加到 HarnessDock 产品版本。发布门禁会同时检查客户端版本、Runtime version/tag/commit、Shell 版本和下载 URL，防止再次出现版本线错位。
 
-## 开发与验证
+## 产品定位
+
+HarnessDock 不 fork、不重写 DeepSeek Harness Web UI。桌面端只做 Native Host：
+
+```text
+HarnessDock
+  -> sealed Node + pinned dsh Runtime
+  -> Runtime ready / RuntimeLease
+  -> isolated loopback WebView
+  -> official Harness Web
+  -> optional Harness Shell controls
+```
+
+正常启动不进入设置页。Runtime 就绪后直接打开 Harness Web；Recovery、Gateway、Diagnostics 和 Update 都是按需 Surface，不得成为主界面的前置依赖。
+
+## 核心能力
+
+- **启动即用 Harness Web**：Windows、macOS、Linux 启动后自动拉起安装包内置 Runtime 并显示 Harness Web。
+- **Full Runtime 桌面包**：Node、dsh 与必要 Runtime Tool 随安装包分发；首次启动不下载 Node/dsh，离线环境仍可启动已内置的 Harness Web。
+- **桌面外壳操作**：菜单、刷新 Web、重启 Runtime、隔离插件启动、Gateway、插件诊断、最小化、最大化/还原、关闭与受控退出。
+- **Shell fail-open**：独立 `@dsh/plugin-harness-shell` 注入失败时恢复原生窗口边框，不允许可选 Shell 故障阻断 Harness Web。
+- **Runtime 隔离恢复**：第三方插件故障进入受控隔离/恢复路径，不直接修改用户真实配置，也不会让可选插件异常退出客户端。
+- **进程生命周期保护**：Runtime/Gateway 使用 generation、lease、single-flight 与退出保护；Windows 使用 Job Object，Unix 使用独立 process group，减少后台孤儿进程。
+- **受限 WebView**：桌面 Harness WebView 只接受当前受管 `http://127.0.0.1:<port>` Runtime origin。
+- **移动端 Remote Gateway**：Android/iOS 不在设备内启动 Node/dsh，只连接可信 HTTPS Gateway。
+- **独立 Shell 插件**：`packages/plugin-harness-shell` 可独立构建/发布，宿主能力缺失时隐藏对应操作而不是阻断 Web。
+
+## 平台与交付
+
+| 平台 | 交付物 | Runtime 模式 | v0.1.2 beta 状态 |
+| --- | --- | --- | --- |
+| Windows x64 | NSIS Setup | Full local | unsigned test build |
+| Linux x64 | DEB / AppImage | Full local | unsigned test build |
+| macOS x64 | DMG / app archive | Full local | unsigned, not notarized |
+| macOS arm64 | DMG / app archive | Full local | unsigned, not notarized |
+| Android arm64 | APK / AAB | Remote Gateway | release-optimized, non-store signing |
+| iOS Simulator | ZIP | Remote Gateway | Simulator only |
+
+当前 beta 发布不启用 Tauri 自动更新签名资产，也不生成 `latest.json`。正式签名通道启用前，更新检查只引导用户进入 GitHub Release，下载后可使用 `SHA256SUMS` 校验完整性。
+
+## 安装与使用
+
+### Windows
+
+下载 `HarnessDock-0.1.2-windows-x64-setup.exe` 并按当前用户安装。安装程序使用 HarnessDock 自有图标；CI 会直接校验最终 NSIS PE 图标资源，防止回退为默认图标。
+
+### Linux
+
+优先使用发行版对应的 DEB，或直接运行 AppImage。桌面包已包含 Full Runtime，不要求系统预装 Node 或 dsh。
+
+### macOS
+
+按 CPU 架构选择 x64 或 arm64 DMG。v0.1.2 beta 未做 Apple notarization，因此仅作为测试候选分发。
+
+### Android / iOS
+
+移动端不包含桌面 Runtime，需要连接桌面端/服务器端 HarnessDock Gateway。不要把本地 Gateway 端口直接暴露到不可信公网；远程访问应通过受信任的 HTTPS Tunnel / Reverse Proxy。
+
+## 桌面外壳
+
+主 Harness Web 顶部提供：
+
+- 菜单
+- 刷新 Web
+- 最小化
+- 最大化 / 还原
+- 关闭
+
+菜单业务操作通过 Host Protocol 进入统一 Host Kernel/Reconciler，而不是由远程 Web 页面直接持有高权限 Tauri API。插件异常、Tray/Updater/菜单初始化异常采用 fail-open 策略，不得阻断正常 Harness Web 启动。
+
+## 开发
+
+要求：
+
+- Node.js `^22.19.0` 或 `>=24`
+- pnpm `10.12.1`
+- Rust toolchain 由 `rust-toolchain.toml` 固定
+- Tauri 2 系统依赖
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm check:versions
 pnpm check:release
+pnpm check:embedded-runtime
 pnpm test
-cd apps/tauri && cargo check
+pnpm build
+pnpm tauri:check
+pnpm tauri:dev
 ```
 
-正式发布以 `.github/workflows/tauri-candidate.yml` 为唯一候选构建：它固定上游 commit、生成四个平台 Runtime、执行真实 smoke、构建五个桌面资产和移动端 developer preview，并验证品牌图标。`release.yml` 只接受当前 main 同一 SHA 的 candidate + CI 全绿结果，发布 20 个非空资产（含四个 Tauri updater 签名目标、四个平台 Runtime、移动包、`latest.json` 与 `SHA256SUMS`），并要求每类候选资产唯一匹配；Runtime 发布包只能从候选 artifact 根 `manifest.json` 对应目录生成。
+## 发布门禁
 
-Android 候选使用 release profile（`opt-level=z`、Thin LTO、去符号、单 codegen unit、`panic=abort`），并在上传前检查 APK/AAB 包体和最大 native `.so`。旧版 debug APK 的主要体积来自未剥离符号的 `libharnessdock_tauri.so`，不是移动端业务资源。
+v0.1.2 beta 只有在同一个 `main` SHA 上满足以下条件才允许发布：
 
-## 签名状态
+1. `ci` 全绿；
+2. `tauri-candidate` 全绿；
+3. 根版本、workspace、Tauri、Rust crate/Cargo.lock、Shell、origin、Release manifest 全部为 `0.1.2`；
+4. pinned Runtime 精确为 `dsh-v0.1.2-rc.1 @ a66e470...`；
+5. HarnessDock 产品版本等于 pinned dsh 的基础 SemVer；
+6. Windows/Linux/macOS/Android/iOS 候选产物全部生成并通过校验；
+7. 发布资产来自同一个绿色 candidate，不允许用不同 SHA 的产物覆盖。
 
-当前公开 CI 包尚未启用 Windows Authenticode、Apple Developer ID/notarization、Google Play production signing 或 App Store/TestFlight provisioning。GitHub Release 提供 SHA-256 校验值。
+当前 beta 契约发布 15 个资产：桌面/移动端候选包、4 个平台 Runtime bundle 与 `SHA256SUMS`。
+
+## 文档
+
+- [文档索引](docs/README.md)
+- [项目介绍](docs/PROJECT_INTRO.md)
+- [Tauri 客户端说明](apps/tauri/README.md)
+- [v0.1.2 发布说明](.github/release-notes/v0.1.2.md)
+- [v0.1.2 beta.1 发布说明](.github/release-notes/v0.1.2-beta.1.md)
+
+`docs/` 中仍保留部分文件名含 `v0.2.x` 的历史架构设计稿，用于记录 Native Host 重构过程；这些文件名**不再代表 HarnessDock 当前产品版本**。当前活动产品版本以根 `package.json`、`release-manifest.json` 和本页为准。
 
 ## License
 
-MIT。DeepSeek Harness 与其他第三方依赖遵循各自许可证和商标规则。
+MIT。DeepSeek Harness 与其它第三方依赖遵循各自许可证和商标规则。
