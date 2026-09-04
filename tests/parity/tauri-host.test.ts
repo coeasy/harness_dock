@@ -86,7 +86,7 @@ describe('Tauri host contract', () => {
     const tray = read('apps/tauri/src-tauri/src/tray.rs')
     expect(tauri.app.windows[0]).toMatchObject({
       label: 'splash',
-      visible: true,
+      visible: false,
     })
     expect(tauri.app.windows).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ label: 'control' })]),
@@ -96,7 +96,10 @@ describe('Tauri host contract', () => {
     expect(startup).toContain('reconciler::ensure_runtime_for_boot')
     expect(startup).toContain('open_for_startup')
     expect(startup).toContain('show_startup_recovery')
+    expect(startup).not.toContain('正在验证内置 Harness Runtime')
+    expect(startup).not.toContain('正在打开 Harness Web')
     expect(startup).not.toContain('app.exit')
+    expect(harnessWindow).toContain('harness_open_impl(app, url, false).await')
     expect(harnessWindow).toContain('window.set_decorations(true)')
     expect(harnessWindow).toContain('window.set_decorations(false)')
     expect(harnessWindow).toContain('schedule_harness_watchdog')
