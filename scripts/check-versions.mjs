@@ -12,6 +12,19 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
 const rootVersion = rootPkg.version
 const releaseManifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
+const mismatches = []
+
+let activeReleaseTag = `v${rootVersion}`
+if (releaseManifest.channel === 'beta') {
+  if (typeof releaseManifest.prerelease !== 'string' || !/^beta\.\d+$/.test(releaseManifest.prerelease)) {
+    mismatches.push(`release-manifest.json prerelease: expected beta.<number>, got ${releaseManifest.prerelease}`)
+  } else {
+    activeReleaseTag = `v${rootVersion}-${releaseManifest.prerelease}`
+  }
+} else if (releaseManifest.prerelease) {
+  mismatches.push(`release-manifest.json prerelease must be empty outside beta channel: ${releaseManifest.prerelease}`)
+}
+
 const versionedFiles = [
   ['apps/tauri/src-tauri/tauri.conf.json', (value) => value.version],
   ['release-manifest.json', (value) => value.version],
@@ -26,7 +39,6 @@ const globs = workspaceYaml
   .filter((line) => line && !line.startsWith('#'))
   .map((line) => line.replace(/^-\s*/, ''))
 
-const mismatches = []
 for (const glob of globs) {
   if (!glob.endsWith('/*')) continue
   const scopeDir = path.join(repoRoot, glob.slice(0, -2))
@@ -83,17 +95,16 @@ if (existsSync(cargoPath)) {
 
 const releaseManifestPath = path.join(repoRoot, 'release-manifest.json')
 if (existsSync(releaseManifestPath)) {
-  const releaseManifest = JSON.parse(readFileSync(releaseManifestPath, 'utf8'))
-  if (releaseManifest.shell?.version !== rootVersion) {
-    mismatches.push(`release-manifest.json shell.version: ${releaseManifest.shell?.version} (root: ${rootVersion})`)
+  const releaseManifestValue = JSON.parse(readFileSync(releaseManifestPath, 'utf8'))
+  if (releaseManifestValue.shell?.version !== rootVersion) {
+    mismatches.push(`release-manifest.json shell.version: ${releaseManifestValue.shell?.version} (root: ${rootVersion})`)
   }
 }
 
 const originPath = path.join(repoRoot, 'packages', 'docs-sync', 'origin.json')
 if (existsSync(originPath)) {
   const origin = JSON.parse(readFileSync(originPath, 'utf8'))
-  const releaseTag = releaseManifest.channel === 'beta' ? `v${rootVersion}-beta.1` : `v${rootVersion}`
-  const expectedTag = `/releases/download/${releaseTag}/`
+  const expectedTag = `/releases/download/${activeReleaseTag}/`
   for (const [target, bundle] of Object.entries(origin.runtimeBundles ?? {})) {
     if (typeof bundle?.url !== 'string' || !bundle.url.includes(expectedTag)) {
       mismatches.push(`packages/docs-sync/origin.json runtimeBundles.${target}.url: expected ${expectedTag}`)
@@ -160,10 +171,18 @@ for (const [relativePath, expected] of activeDisplayFiles) {
   }
 }
 
+const rootReadme = path.join(repoRoot, 'README.md')
+if (existsSync(rootReadme)) {
+  const readme = readFileSync(rootReadme, 'utf8')
+  if (!readme.includes(`| 当前发布 tag | \`${activeReleaseTag}\` |`)) {
+    mismatches.push(`README.md: missing active release tag ${activeReleaseTag}`)
+  }
+}
+
 if (mismatches.length > 0) {
   console.error('version mismatch detected:')
   for (const mismatch of mismatches) console.error(`  ${mismatch}`)
   process.exit(1)
 }
 
-console.log(`all active versions match: ${rootVersion}`)
+console.log(`all active versions match: ${rootVersion} (${activeReleaseTag})`)
