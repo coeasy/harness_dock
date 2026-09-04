@@ -10,7 +10,7 @@
 | --- | --- |
 | HarnessDock | `0.1.2` |
 | 发布通道 | `beta` |
-| 当前发布 tag | `v0.1.2-beta.2` |
+| 当前发布 tag | `v0.1.2-beta.3` |
 | 内置 DeepSeek Harness Runtime | `dsh-v0.1.2-rc.1` |
 | Runtime commit | `a66e4702047846cdaa10c66c9d3df3951f5ea70d` |
 | 桌面宿主 | Tauri 2 |
@@ -129,7 +129,8 @@ v0.1.2 beta 只有在同一个 `main` SHA 上满足以下条件才允许发布�
 4. pinned Runtime 精确为 `dsh-v0.1.2-rc.1 @ a66e470...`；
 5. HarnessDock 产品版本等于 pinned dsh 的基础 SemVer；
 6. Windows/Linux/macOS/Android/iOS 候选产物全部生成并通过校验；
-7. 发布资产来自同一个绿色 candidate，不允许用不同 SHA 的产物覆盖。
+7. 发布资产来自同一个绿色 candidate，不允许用不同 SHA 的产物覆盖；
+8. 同一 candidate 的 Windows 安装包必须完成真实安装启动 smoke，并到达 `primary_visible`。
 
 当前 beta 契约发布 15 个资产：桌面/移动端候选包、4 个平台 Runtime bundle 与 `SHA256SUMS`。
 
@@ -139,6 +140,7 @@ v0.1.2 beta 只有在同一个 `main` SHA 上满足以下条件才允许发布�
 - [项目介绍](docs/PROJECT_INTRO.md)
 - [Tauri 客户端说明](apps/tauri/README.md)
 - [v0.1.2 发布说明](.github/release-notes/v0.1.2.md)
+- [v0.1.2 beta.3 验收发布说明](.github/release-notes/v0.1.2-beta.3.md)
 - [v0.1.2 beta.2 启动链路修复说明](.github/release-notes/v0.1.2-beta.2.md)
 - [v0.1.2 beta.1 历史说明](.github/release-notes/v0.1.2-beta.1.md)
 
