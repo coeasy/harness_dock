@@ -104,7 +104,7 @@ Windows 使用稳定 identifier `com.harnessdock.client`、current-user 安装�
 
 ## 发布门禁
 
-在发布 `v0.1.2-beta.1` 前必须通过：
+在发布 `v0.1.2-beta.2` 前必须通过：
 
 ```bash
 pnpm check:versions
