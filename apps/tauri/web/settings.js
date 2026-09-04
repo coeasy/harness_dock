@@ -84,7 +84,7 @@
   async function installUpdate() {
     const button = $('update-install')
     button.disabled = true
-    setStatus($('update-detail'), '正在检查稳定 Release，并验证签名后安装可用更新…')
+    setStatus($('update-detail'), '正在检查稳定 Release；已配置发布签名时才会执行安全自动安装…')
     try {
       await host('install-update')
       setStatus($('update-detail'), '更新操作已交给 UpdateActor；状态变化将通过 HostEvent 推送。')
