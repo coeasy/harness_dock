@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
-describe('native tray lifecycle regression', () => {
-  it('keeps exit independent from the serialized Host Kernel command queue', () => {
+describe('native lifecycle regression', () => {
+  it('keeps tray exit independent from the serialized Host Kernel command queue', () => {
     const tray = read('apps/tauri/src-tauri/src/tray.rs')
     const quitStart = tray.indexOf('"tray-quit" => {')
     const fallbackStart = tray.indexOf('_ => None', quitStart)
@@ -20,6 +20,23 @@ describe('native tray lifecycle regression', () => {
     expect(quitArm).toContain('lifecycle escape hatch')
     expect(quitArm).not.toContain('HostIntent::Quit')
     expect(tray).not.toContain('"tray-quit" => Some(workflow::HostIntent::Quit)')
+  })
+
+  it('keeps diagnostics exit independent from the serialized Host Kernel command queue', () => {
+    const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
+    const settings = read('apps/tauri/web/settings.js')
+    const quitStart = bridge.indexOf('pub fn lifecycle_quit')
+    const handlerStart = bridge.indexOf('macro_rules! handler', quitStart)
+
+    expect(quitStart).toBeGreaterThanOrEqual(0)
+    expect(handlerStart).toBeGreaterThan(quitStart)
+    const quitCommand = bridge.slice(quitStart, handlerStart)
+    expect(quitCommand).toContain('"settings" | "control"')
+    expect(quitCommand).toContain('crate::request_exit(&app);')
+    expect(quitCommand).toContain('remote Harness content cannot use')
+    expect(bridge).toContain('$crate::bridge::lifecycle_quit')
+    expect(settings).toContain("await call('lifecycle_quit')")
+    expect(settings).not.toContain("await host('quit')")
   })
 
   it('keeps tray re-open from probing and revoking the current RuntimeLease', () => {
