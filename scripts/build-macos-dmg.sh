@@ -7,6 +7,7 @@ set -euo pipefail
 # app and intermediate image are valid.
 
 tauri_root="${1:-$(pwd)}"
+tauri_root="$(cd "$tauri_root" && pwd)"
 app_path="${tauri_root}/src-tauri/target/release/bundle/macos/HarnessDock.app"
 dmg_dir="${tauri_root}/src-tauri/target/release/bundle/dmg"
 icon_path="${tauri_root}/src-tauri/icons/icon.icns"
