@@ -46,6 +46,18 @@ describe('packaged startup Web chain regression', () => {
     expect(startup).not.toContain('crate::runtime::live_lease(&*app.state::<AppState>())')
   })
 
+  it('keeps Host Protocol and local authorization lease reads observational', () => {
+    const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
+    const reconciler = read('apps/tauri/src-tauri/src/reconciler.rs')
+
+    expect(bridge).toContain('crate::runtime::current_lease')
+    expect(bridge).not.toContain('crate::runtime::live_lease')
+    expect(reconciler).toContain('subject == SubjectKind::HarnessWeb')
+    expect(reconciler).toContain('crate::runtime::current_lease')
+    expect(reconciler).not.toContain('crate::runtime::live_lease')
+    expect(reconciler).toContain('Native/menu/tray/diagnostics authorization does not depend on Runtime')
+  })
+
   it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
 
