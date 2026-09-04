@@ -104,7 +104,7 @@ Windows 使用稳定 identifier `com.harnessdock.client`、current-user 安装�
 
 ## 发布门禁
 
-在发布 `v0.1.2-beta.2` 前必须通过：
+在发布 `v0.1.2-beta.3` 前必须通过：
 
 ```bash
 pnpm check:versions
@@ -114,4 +114,4 @@ pnpm test
 pnpm tauri:check
 ```
 
-并要求同一个 `main` SHA 上的 `ci` 与 `tauri-candidate` 全绿。Release 不接受跨 SHA 复用旧 candidate。
+并要求同一个 `main` SHA 上的 `ci` 与 `tauri-candidate` 全绿；同一候选还必须通过 Windows 安装包真实安装启动 smoke 并到达 `primary_visible`。Release 不接受跨 SHA 复用旧 candidate。
