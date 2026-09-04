@@ -16,15 +16,22 @@ describe('collectProcessTreeViaCim', () => {
     expect(tree.sort((a, b) => a - b)).toEqual([7, 42, 99])
   })
 
-  it('passes root and maxDepth into the PowerShell command', async () => {
+  it('passes root, maxDepth and a hard timeout into the PowerShell command', async () => {
     let script = ''
-    const fakeExec = (async (_cmd: string, args: string[]) => {
+    let commandTimeout = 0
+    const fakeExec = (async (_cmd: string, args: string[], options: { timeout?: number }) => {
       script = args[2] ?? ''
+      commandTimeout = options.timeout ?? 0
       return { stdout: '' }
     }) as never
-    await collectProcessTreeViaCim(1234, { exec: fakeExec, maxDepth: 4 })
+    await collectProcessTreeViaCim(1234, {
+      exec: fakeExec,
+      maxDepth: 4,
+      commandTimeoutMs: 1234,
+    })
     expect(script).toContain('$roots = @(1234)')
     expect(script).toContain('$i -lt 4')
+    expect(commandTimeout).toBe(1234)
   })
 })
 
@@ -39,6 +46,17 @@ describe('collectProcessTree wmic fallback', () => {
     const tree = await collectProcessTree(100, { exec: fakeExec })
     expect(powershellInvoked).toBe(true)
     expect(tree.sort((a, b) => a - b)).toEqual([7, 42, 99])
+  })
+
+  it('passes the same hard timeout through the wmic to CIM fallback', async () => {
+    const timeouts: number[] = []
+    const fakeExec = (async (cmd: string, _args: string[], options: { timeout?: number }) => {
+      timeouts.push(options.timeout ?? 0)
+      if (cmd === 'wmic') throw new Error('wmic unavailable')
+      return { stdout: '' }
+    }) as never
+    await collectProcessTree(100, { exec: fakeExec, commandTimeoutMs: 987 })
+    expect(timeouts).toEqual([987, 987])
   })
 
   it('returns [] when both wmic and CIM fail', async () => {
