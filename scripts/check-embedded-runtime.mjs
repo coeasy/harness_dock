@@ -61,13 +61,24 @@ if (Object.prototype.hasOwnProperty.call(tauriPackage.scripts || {}, 'bundle:sid
   fail('Tauri package scripts must not expose the removed Node Gateway sidecar build')
 }
 
-// Native startup must resolve the sealed image from application resources. Do
-// not couple this gate to a particular borrow spelling such as &app vs app.
+// The candidate/smoke pipeline owns the expensive sealed-image verification.
+// Native application startup only resolves the already packaged Runtime and
+// binds the current generation to its immutable image identity. Repeating a
+// node.exe/bin.js preflight here would reintroduce the user-visible "checking
+// Node/runtime" startup path that the full offline package is designed to avoid.
 if (!/resource_path\(\s*&?app\s*,\s*"dsh-runtime"\s*\)/.test(runtime)) {
   fail('native Runtime startup must resolve dsh-runtime from packaged resources')
 }
-requireText(runtime, 'first_launch_runtime_download_required', 'native Runtime must verify the zero-download manifest contract')
-requireText(runtime, 'image_identity_algorithm', 'native Runtime must verify the sealed image identity algorithm')
+requireText(runtime, 'fn load_runtime_image(', 'native Runtime startup must load the packaged Runtime metadata without a Node preflight')
+requireText(runtime, 'image_identity', 'native Runtime startup must bind generations to the packaged image identity metadata')
+for (const forbidden of [
+  'fn verify_runtime_image(',
+  '!node.is_file()',
+  '!dsh.is_file()',
+  'StartupPhase::RuntimeVerified',
+]) {
+  forbidText(runtime, forbidden, 'normal desktop startup must not repeat packaged Node/dsh Runtime verification')
+}
 for (const marker of [
   'ready.generation != expected_generation.id',
   'ready.nonce != expected_generation.nonce',
