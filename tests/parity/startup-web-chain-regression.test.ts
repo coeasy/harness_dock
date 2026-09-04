@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -6,6 +6,15 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (relative: string) =>
   readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+
+function rustFiles(relative: string): string[] {
+  const absolute = path.join(repoRoot, relative)
+  return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
+    const child = path.join(relative, entry.name)
+    if (entry.isDirectory()) return rustFiles(child)
+    return entry.isFile() && entry.name.endsWith('.rs') ? [child] : []
+  })
+}
 
 describe('packaged startup Web chain regression', () => {
   it('keeps the splash compatible with its strict CSP', () => {
@@ -56,6 +65,13 @@ describe('packaged startup Web chain regression', () => {
     expect(reconciler).toContain('crate::runtime::current_lease')
     expect(reconciler).not.toContain('crate::runtime::live_lease')
     expect(reconciler).toContain('Native/menu/tray/diagnostics authorization does not depend on Runtime')
+  })
+
+  it('forbids side-effecting live_lease reads outside the Runtime lifecycle module', () => {
+    const offenders = rustFiles('apps/tauri/src-tauri/src').filter(
+      (file) => file !== 'apps/tauri/src-tauri/src/runtime.rs' && read(file).includes('runtime::live_lease'),
+    )
+    expect(offenders).toEqual([])
   })
 
   it('does not revoke a healthy lease when process inspection is inconclusive', () => {
