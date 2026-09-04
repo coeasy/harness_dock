@@ -67,8 +67,16 @@ jobs:
           $install = Start-Process -FilePath $env:installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "NSIS silent install failed with exit code $($install.ExitCode)" }
 
-          $app = Get-ChildItem $installDir -Recurse -File -Filter 'HarnessDock.exe' | Select-Object -First 1
-          if (-not $app) { throw "Installed HarnessDock.exe not found under $installDir" }
+          # Tauri bundles the Cargo binary target, while productName controls the
+          # installer/display name. The actual packaged binary is therefore
+          # harnessdock-tauri.exe, as reported by `cargo tauri build`.
+          $app = Get-ChildItem $installDir -Recurse -File -Filter 'harnessdock-tauri.exe' | Select-Object -First 1
+          if (-not $app) {
+            Write-Host "Installed files under ${installDir}:"
+            Get-ChildItem $installDir -Recurse -Force -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host $_.FullName }
+            throw "Installed harnessdock-tauri.exe not found under $installDir"
+          }
 
           $hostProcess = Start-Process -FilePath $app.FullName -PassThru
           try {
