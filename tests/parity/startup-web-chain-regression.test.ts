@@ -33,7 +33,7 @@ describe('packaged startup Web chain regression', () => {
     expect(startup).toContain('stable_clean_polls >= 5')
     expect(startup).toContain('actor.finish_navigation(navigation_id, lease.generation.id)')
     expect(startup).toContain('window.set_decorations(true)')
-    expect(startup).toContain('window.show()')
+    expect(startup).toMatch(/window\s*\.show\(\)/)
     expect(startup).toContain('harness_window::hide_splash(app)')
     expect(startup.indexOf('open_for_startup')).toBeLessThan(
       startup.lastIndexOf('reveal_clean_runtime_fallback(&app).await'),
