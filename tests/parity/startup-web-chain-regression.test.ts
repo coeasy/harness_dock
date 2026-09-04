@@ -58,6 +58,20 @@ describe('packaged startup Web chain regression', () => {
     expect(reconciler).toContain('Native/menu/tray/diagnostics authorization does not depend on Runtime')
   })
 
+  it('does not revoke a healthy lease when process inspection is inconclusive', () => {
+    const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
+    const alive = runtime.slice(
+      runtime.indexOf('pub(crate) fn is_alive'),
+      runtime.indexOf('pub(crate) fn stop', runtime.indexOf('pub(crate) fn is_alive')),
+    )
+
+    expect(alive).toContain('Ok(Some(_))')
+    expect(alive).toContain('false')
+    expect(alive).toContain('Ok(None) => true')
+    expect(alive).toContain('preserving current RuntimeLease until exit is confirmed')
+    expect(alive).toMatch(/Err\(error\)[\s\S]*?true/)
+  })
+
   it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
 
