@@ -1,6 +1,6 @@
 //! Native desktop startup coordinator.
 //!
-//! Normal launch has no hidden renderer dependency: resolve the sealed Runtime ->
+//! Normal launch has no hidden renderer dependency: resolve the packaged Runtime ->
 //! spawn/probe actor generation -> request Harness surface. The packaged Runtime
 //! is already part of the application image, so normal startup does not expose a
 //! separate Node/Runtime verification screen. Recovery/Gateway control surfaces
@@ -50,12 +50,18 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
             .await;
             continue;
         };
-        // WebView publication must observe the lease that was already published
-        // by RuntimeActor. It must not run a process-liveness mutation from a
-        // page-load callback/fallback poll because that can revoke the lease in
-        // the middle of the same navigation.
+        // Runtime replacement and WebView redirect callbacks can briefly cross.
+        // A missing lease in one fallback poll is not proof that startup failed;
+        // wait for the current generation instead of turning the transient into
+        // a recovery window. The generation-aware watchdog remains the bounded
+        // failure path if the lease never returns.
         let Some(lease) = crate::runtime::current_lease(&*app.state::<AppState>()) else {
-            return Err("Harness WebView 已创建，但当前 RuntimeLease 已失效。".into());
+            stable_clean_polls = 0;
+            let _ = tauri::async_runtime::spawn_blocking(|| {
+                std::thread::sleep(Duration::from_millis(100));
+            })
+            .await;
+            continue;
         };
 
         let clean_managed_url = window.url().ok().is_some_and(|current| {
