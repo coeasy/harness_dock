@@ -72,9 +72,9 @@
 
   async function quit() {
     $('settings-quit').disabled = true
-    setStatus($('runtime-detail'), '正在通过 Host Kernel 关闭 Runtime、Gateway 与客户端…')
+    setStatus($('runtime-detail'), '正在关闭 Runtime、Gateway 与客户端…')
     try {
-      await host('quit')
+      await call('lifecycle_quit')
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
       $('settings-quit').disabled = false
