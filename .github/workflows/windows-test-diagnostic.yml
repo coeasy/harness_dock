@@ -1,0 +1,76 @@
+name: windows-test-diagnostic
+
+on:
+  push:
+    branches:
+      - fix/startup-web-chain-beta2
+  workflow_dispatch:
+
+concurrency:
+  group: windows-test-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm check:versions
+      - run: pnpm check:embedded-runtime
+      - name: Run pnpm test and capture the real Windows failure
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'pnpm-test.log'
+          & pnpm test 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          "TEST_EXIT_CODE=$code" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "pnpm test exit code: $code"
+          exit 0
+      - name: Print focused failure summary
+        if: always()
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'pnpm-test.log'
+          if (-not (Test-Path $log)) {
+            Write-Host 'pnpm-test.log was not created.'
+            exit 0
+          }
+          Write-Host '=== Filtered failure lines ==='
+          Select-String -Path $log -Pattern 'FAIL|failed|AssertionError|ERR_ASSERTION|Error:|expected|received|not ok|×|✗' -CaseSensitive:$false |
+            Select-Object -First 160 |
+            ForEach-Object { Write-Host $_.Line }
+          Write-Host '=== Final 180 lines ==='
+          Get-Content -Path $log -Tail 180
+      - name: Upload complete Windows test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-pnpm-test-log
+          path: ${{ runner.temp }}/pnpm-test.log
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Preserve pnpm test result
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not $env:TEST_EXIT_CODE) {
+            Write-Error 'pnpm test did not record an exit code.'
+            exit 1
+          }
+          $code = [int]$env:TEST_EXIT_CODE
+          if ($code -ne 0) {
+            Write-Error "pnpm test failed with exit code $code"
+            exit $code
+          }
