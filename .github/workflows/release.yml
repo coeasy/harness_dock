@@ -111,7 +111,10 @@ jobs:
 
           # windows-packaged-startup is triggered by the same successful
           # candidate and therefore races this workflow. Wait for that exact
-          # same-SHA smoke instead of publishing in parallel with it.
+          # same-SHA smoke instead of publishing in parallel with it. Skipped,
+          # stale or cancelled duplicate smoke runs are not evidence that the
+          # installed candidate failed; without a green run the gate still
+          # remains closed until success or timeout.
           startup_run_id=""
           startup_deadline=$((SECONDS + 900))
           while [ "$SECONDS" -lt "$startup_deadline" ]; do
@@ -120,7 +123,7 @@ jobs:
             if [ -n "$startup_run_id" ]; then
               break
             fi
-            startup_failure="$(printf '%s' "$startup_json" | jq -r --arg sha "$candidate_sha" '.workflow_runs[] | select(.head_sha == $sha and .path == ".github/workflows/windows-packaged-startup.yml" and .status == "completed" and .conclusion != "success") | "\(.id):\(.conclusion)"' | head -1)"
+            startup_failure="$(printf '%s' "$startup_json" | jq -r --arg sha "$candidate_sha" '.workflow_runs[] | select(.head_sha == $sha and .path == ".github/workflows/windows-packaged-startup.yml" and .status == "completed" and (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure")) | "\(.id):\(.conclusion)"' | head -1)"
             if [ -n "$startup_failure" ]; then
               echo "same-SHA windows packaged startup smoke failed: ${startup_failure}" >&2
               exit 1
