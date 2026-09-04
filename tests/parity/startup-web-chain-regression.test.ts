@@ -67,11 +67,21 @@ describe('packaged startup Web chain regression', () => {
     expect(reconciler).toContain('Native/menu/tray/diagnostics authorization does not depend on Runtime')
   })
 
-  it('forbids side-effecting live_lease reads outside the Runtime lifecycle module', () => {
+  it('forbids side-effecting live_lease reads outside explicit Runtime/Gateway lifecycle boundaries', () => {
+    const lifecycleFiles = new Set([
+      'apps/tauri/src-tauri/src/runtime.rs',
+      'apps/tauri/src-tauri/src/gateway_host.rs',
+    ])
     const offenders = rustFiles('apps/tauri/src-tauri/src').filter(
-      (file) => file !== 'apps/tauri/src-tauri/src/runtime.rs' && read(file).includes('runtime::live_lease'),
+      (file) => !lifecycleFiles.has(file) && read(file).includes('runtime::live_lease'),
     )
     expect(offenders).toEqual([])
+
+    const gateway = read('apps/tauri/src-tauri/src/gateway_host.rs')
+    expect(gateway.match(/runtime::live_lease/g)?.length).toBe(2)
+    expect(gateway).toContain('fn runtime_lease(state: &AppState)')
+    expect(gateway).toContain('fn ensure_current_runtime(state: &AppState, generation: u64)')
+    expect(gateway).toContain('unexpected Runtime exit before any pairing/proxy operation uses it')
   })
 
   it('does not revoke a healthy lease when process inspection is inconclusive', () => {
