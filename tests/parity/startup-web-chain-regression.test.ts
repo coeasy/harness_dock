@@ -60,4 +60,13 @@ describe('packaged startup Web chain regression', () => {
     expect(packagedSmoke).not.toContain("-Filter 'HarnessDock.exe'")
     expect(packagedSmoke).toContain('Installed harnessdock-tauri.exe not found')
   })
+
+  it('keeps skipped duplicate startup smokes from masquerading as package failures', () => {
+    const release = read('.github/workflows/release.yml')
+
+    expect(release).toContain('startup_deadline=$((SECONDS + 900))')
+    expect(release).toContain('.conclusion == "failure" or .conclusion == "timed_out"')
+    expect(release).toContain('.conclusion == "action_required" or .conclusion == "startup_failure"')
+    expect(release).not.toContain('.conclusion != "success"')
+  })
 })
