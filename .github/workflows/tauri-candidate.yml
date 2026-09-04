@@ -478,7 +478,7 @@ jobs:
         run: pnpm prepare:icons
       - name: Build iOS simulator candidate
         working-directory: apps/tauri
-        run: cargo tauri ios build --target aarch64-sim --ci --no-bundle
+        run: cargo tauri ios build --target aarch64-sim --ci
       - name: Package iOS simulator candidate
         shell: bash
         run: |
