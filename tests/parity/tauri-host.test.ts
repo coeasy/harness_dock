@@ -213,7 +213,7 @@ describe('Tauri host contract', () => {
     expect(candidate).not.toContain('@dsh/desktop')
     expect(release).not.toContain('-thin')
     expect(release).toContain('eq 15')
-    expect(release).toContain('expected_tag="v${version}-beta.1"')
+    expect(release).toContain('expected_tag="v${version}-beta.2"')
     expect(release).not.toContain('latest.json')
     expect(release).not.toContain('.app.tar.gz.sig')
     expect(release).toContain('candidate is stale:')
