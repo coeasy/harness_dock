@@ -8,7 +8,7 @@ const read = (relative: string) =>
   readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('packaged startup Web chain regression', () => {
-  it('keeps the splash compatible with its strict CSP', () => {
+  it('keeps the splash compatible with its strict CSP without exposing Runtime verification', () => {
     const html = read('apps/tauri/web/splash.html')
     const css = read('apps/tauri/web/splash.css')
     const script = read('apps/tauri/web/splash.js')
@@ -18,6 +18,8 @@ describe('packaged startup Web chain regression', () => {
     expect(html).toContain('<script src="./splash.js" defer></script>')
     expect(html).not.toMatch(/<style(?:\s|>)/i)
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i)
+    expect(html).toContain('正在打开 Harness Web…')
+    expect(html).not.toContain('正在验证内置 Harness Runtime')
     expect(css).toContain('.splash')
     expect(css).toContain('.spinner')
     expect(css).toContain('.progress::before')
