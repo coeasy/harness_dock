@@ -50,4 +50,14 @@ describe('packaged startup Web chain regression', () => {
     expect(candidate).toContain('Build independent Harness Shell plugin')
     expect(candidate).toContain('@dsh/client-runtime smoke-runtime')
   })
+
+  it('launches the actual Cargo binary from the installed Windows candidate', () => {
+    const cargo = read('apps/tauri/src-tauri/Cargo.toml')
+    const packagedSmoke = read('.github/workflows/windows-packaged-startup.yml')
+
+    expect(cargo).toContain('name = "harnessdock-tauri"')
+    expect(packagedSmoke).toContain("-Filter 'harnessdock-tauri.exe'")
+    expect(packagedSmoke).not.toContain("-Filter 'HarnessDock.exe'")
+    expect(packagedSmoke).toContain('Installed harnessdock-tauri.exe not found')
+  })
 })
