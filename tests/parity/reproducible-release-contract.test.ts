@@ -15,7 +15,7 @@ describe('reproducible release contract', () => {
     const lock = read('apps/tauri/src-tauri/Cargo.lock')
     expect(lock).toContain('name = "harnessdock-tauri"')
     expect(lock).toMatch(
-      new RegExp(`name = "harnessdock-tauri"\\nversion = "${root.version.replaceAll('.', '\\.') }"`),
+      new RegExp(`name = "harnessdock-tauri"\\r?\\nversion = "${root.version.replaceAll('.', '\\.')}"`),
     )
     expect(read('apps/tauri/package.json')).toContain('cargo check --locked')
   })
