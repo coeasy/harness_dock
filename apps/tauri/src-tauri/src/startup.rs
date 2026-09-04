@@ -1,8 +1,10 @@
 //! Native desktop startup coordinator.
 //!
-//! Normal launch has no hidden renderer dependency: verify sealed Runtime ->
-//! spawn/probe actor generation -> request Harness surface. Recovery/Gateway
-//! control surfaces are created only when explicitly needed.
+//! Normal launch has no hidden renderer dependency: resolve the sealed Runtime ->
+//! spawn/probe actor generation -> request Harness surface. The packaged Runtime
+//! is already part of the application image, so normal startup does not expose a
+//! separate Node/Runtime verification screen. Recovery/Gateway control surfaces
+//! are created only when explicitly needed.
 
 use crate::{
     harness_window, reconciler,
@@ -48,7 +50,11 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
             .await;
             continue;
         };
-        let Some(lease) = crate::runtime::live_lease(&*app.state::<AppState>()) else {
+        // WebView publication must observe the lease that was already published
+        // by RuntimeActor. It must not run a process-liveness mutation from a
+        // page-load callback/fallback poll because that can revoke the lease in
+        // the middle of the same navigation.
+        let Some(lease) = crate::runtime::current_lease(&*app.state::<AppState>()) else {
             return Err("Harness WebView 已创建，但当前 RuntimeLease 已失效。".into());
         };
 
@@ -108,7 +114,10 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
 
 pub(crate) fn spawn(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        harness_window::show_splash(&app, "正在验证内置 Harness Runtime…");
+        // The packaged application owns a sealed Runtime image. Keep the
+        // bootstrap surface hidden and go straight to the Harness Web surface;
+        // failures still open the explicit recovery control surface.
+        harness_window::hide_splash(&app);
         let status = match reconciler::ensure_runtime_for_boot(app.clone()).await {
             Ok(status) => status,
             Err(error) => {
@@ -125,7 +134,6 @@ pub(crate) fn spawn(app: AppHandle) {
             );
             return;
         };
-        harness_window::show_splash(&app, "正在打开 Harness Web…");
         startup_trace::mark(StartupPhase::WebviewRequested);
         if let Err(error) = harness_window::open_for_startup(app.clone(), url).await {
             startup_trace::mark(StartupPhase::Recovery);
