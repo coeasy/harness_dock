@@ -28,18 +28,31 @@ describe('packaged startup Web chain regression', () => {
     const config = read('apps/tauri/src-tauri/tauri.conf.json')
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
     const window = read('apps/tauri/src-tauri/src/harness_window.rs')
+    const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
+    const control = read('apps/tauri/web/app.js')
 
     expect(config).toMatch(/"label": "splash"[\s\S]*?"visible": false/)
     expect(startup).toContain('harness_window::hide_splash(&app)')
     expect(startup).not.toContain('正在验证内置 Harness Runtime')
     expect(startup).not.toContain('正在打开 Harness Web')
     expect(window).toContain('harness_open_impl(app, url, false).await')
+
+    // The candidate already verifies the sealed Runtime image. Normal launch
+    // resolves the packaged paths and spawns directly instead of doing a second
+    // node.exe/bin.js existence preflight in the user startup path.
+    expect(runtime).toContain('fn load_runtime_image(')
+    expect(runtime).not.toContain('fn verify_runtime_image(')
+    expect(runtime).not.toContain('!node.is_file()')
+    expect(runtime).not.toContain('!dsh.is_file()')
+    expect(control).not.toContain('Node=${current.nodeSource}')
+    expect(control).not.toContain('运行环境检测失败')
   })
 
   it('does not revoke the published RuntimeLease from WebView or host-surface callbacks', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
     const window = read('apps/tauri/src-tauri/src/harness_window.rs')
     const reconciler = read('apps/tauri/src-tauri/src/reconciler.rs')
+    const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
 
     expect(window).toContain('crate::runtime::current_lease(&*app.state::<crate::AppState>())')
     expect(window).not.toContain('crate::runtime::live_lease(&*app.state::<crate::AppState>())')
@@ -48,6 +61,23 @@ describe('packaged startup Web chain regression', () => {
     expect(reconciler).toContain('crate::runtime::current_lease(&*state)')
     expect(reconciler).toContain('crate::runtime::current_lease(&*app.state::<crate::AppState>())')
     expect(reconciler).not.toContain('crate::runtime::live_lease(')
+
+    // A liveness inspection error is unknown state, not confirmed process exit.
+    expect(runtime).toContain('preserving current RuntimeLease')
+    expect(runtime).toMatch(/Err\(error\)\s*=>\s*\{[\s\S]*?preserving current RuntimeLease[\s\S]*?true/)
+    expect(runtime).not.toContain('Ok(status_snapshot(&*state))')
+  })
+
+  it('ignores stale or transitional WebView callbacks instead of opening recovery', () => {
+    const startup = read('apps/tauri/src-tauri/src/startup.rs')
+    const window = read('apps/tauri/src-tauri/src/harness_window.rs')
+
+    expect(window).toContain('if !current_matches_event')
+    expect(window).toContain('Ignoring Harness page-load callback while RuntimeLease is transitioning')
+    expect(window).not.toContain('Harness Web 加载完成时 RuntimeLease 已失效。')
+    expect(startup).toContain('let Some(lease) = crate::runtime::current_lease')
+    expect(startup).toContain('stable_clean_polls = 0;')
+    expect(startup).not.toContain('Harness WebView 已创建，但当前 RuntimeLease 已失效。')
   })
 
   it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {
