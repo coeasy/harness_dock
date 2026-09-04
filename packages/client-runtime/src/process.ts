@@ -4,6 +4,7 @@ import { rejectFloatingDistTag } from '@dsh/docs-sync'
 import type { Killable, RuntimeMode } from './types.ts'
 
 const execFileAsync = promisify(execFile)
+const PROCESS_TREE_COMMAND_TIMEOUT_MS = 3_000
 
 export function resolveRuntimeMode(input: {
   env: NodeJS.ProcessEnv
@@ -42,6 +43,8 @@ export function isProcessAlive(pid: number | undefined): boolean {
 export interface ProcessTreeOptions {
   /** how many parent→child hops to walk (default 6, mirroring wmic loop) */
   maxDepth?: number
+  /** hard ceiling for each OS enumeration command; prevents quit from hanging on CIM */
+  commandTimeoutMs?: number
   /** injectable execFile for tests */
   exec?: typeof execFileAsync
 }
@@ -51,7 +54,9 @@ export interface ProcessTreeOptions {
  * PowerShell call via CIM (Get-CimInstance Win32_Process): all processes are
  * snapshotted once, then parent→child links are iterated up to `maxDepth`, with
  * one pid printed per line on stdout. Best-effort: throws on failure so callers
- * can fall back or degrade.
+ * can fall back or degrade. The OS query is bounded because CIM can stall on
+ * unhealthy Windows hosts and must never turn application shutdown into an
+ * unbounded wait.
  */
 export async function collectProcessTreeViaCim(
   root: number,
@@ -59,6 +64,7 @@ export async function collectProcessTreeViaCim(
 ): Promise<number[]> {
   const exec = options?.exec ?? execFileAsync
   const maxDepth = options?.maxDepth ?? 6
+  const commandTimeoutMs = options?.commandTimeoutMs ?? PROCESS_TREE_COMMAND_TIMEOUT_MS
   const script = [
     `$all = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ P=([int]$_.ProcessId); PP=([int]$_.ParentProcessId) } });`,
     `$roots = @(${root});`,
@@ -68,6 +74,7 @@ export async function collectProcessTreeViaCim(
   ].join(' ')
   const { stdout } = await exec('powershell', ['-NoProfile', '-Command', script], {
     windowsHide: true,
+    timeout: commandTimeoutMs,
   })
   const pids = stdout
     .split(/\r?\n/)
@@ -89,6 +96,7 @@ export async function collectProcessTree(
 ): Promise<number[]> {
   const exec = options?.exec ?? execFileAsync
   const maxDepth = options?.maxDepth ?? 6
+  const commandTimeoutMs = options?.commandTimeoutMs ?? PROCESS_TREE_COMMAND_TIMEOUT_MS
   const known = new Set<number>()
   let frontier = [root]
   for (let depth = 0; depth < maxDepth && frontier.length > 0; depth += 1) {
@@ -97,7 +105,7 @@ export async function collectProcessTree(
       const { stdout } = await exec(
         'wmic',
         ['process', 'where', where, 'get', 'ProcessId', '/format:list'],
-        { windowsHide: true },
+        { windowsHide: true, timeout: commandTimeoutMs },
       )
       const kids = [...stdout.matchAll(/ProcessId=(\d+)/g)]
         .map((m) => Number(m[1]))
@@ -108,7 +116,7 @@ export async function collectProcessTree(
       // wmic failed (missing binary / broken output / permission): rebuild the
       // whole tree from root through the CIM enumeration instead of returning
       // a silently-empty (or partial) result and orphaning the dsh descendants.
-      return collectProcessTreeViaCim(root, { maxDepth, exec }).catch(() => [])
+      return collectProcessTreeViaCim(root, { maxDepth, commandTimeoutMs, exec }).catch(() => [])
     }
   }
   return [...known]
@@ -150,28 +158,48 @@ export async function shutdownLadder(
     const killTree = options.taskkill ?? defaultTaskkill
     const pid = child.pid
 
-    // 1) graceful termination attempt; when taskkill is unavailable
-    //    (ENOENT) degrade to the direct kill the OS gives us, then verify.
+    // Windows console processes commonly reject non-forced taskkill. When the
+    // command itself fails, waiting the full graceful window cannot make any
+    // progress, so escalate immediately to the tree force-kill instead of
+    // adding a deterministic multi-second delay to every Runtime shutdown.
+    let gracefulTreeRequested = false
     try {
       await killTree(pid, false)
+      gracefulTreeRequested = true
     } catch {
-      child.kill('SIGTERM')
+      // The force step below also provides the direct-kill fallback when
+      // taskkill is missing entirely.
     }
-    if (await waitWhile(options.isAlive, options.termMs)) return { dead: true, survivors: [] }
+    if (
+      gracefulTreeRequested &&
+      await waitWhile(options.isAlive, options.termMs)
+    ) {
+      return { dead: true, survivors: [] }
+    }
 
-    // 2) force-kill the whole tree (direct-kill fallback if unavailable)
+    // 2) force-kill the whole tree (direct-kill fallback if unavailable).
+    // A successful `taskkill /T /F` is already an OS-level tree guarantee; if
+    // the root is reaped, avoid an expensive CIM sweep. Explicit `verify: true`
+    // still forces the sweep for adversarial/mocked verification tests.
+    let forcedTreeRequested = false
     try {
       await killTree(pid, true)
+      forcedTreeRequested = true
     } catch {
       child.kill('SIGKILL')
     }
+    const directDead = await waitWhile(options.isAlive, options.killMs)
     if (!verify) {
-      await waitWhile(options.isAlive, options.killMs)
-      const stillAlive = options.isAlive()
+      const stillAlive = !directDead && options.isAlive()
       return { dead: !stillAlive, survivors: stillAlive ? [pid] : [] }
     }
+    if (directDead && forcedTreeRequested && options.verify !== true) {
+      return { dead: true, survivors: [] }
+    }
 
-    // 3) verify against the OS, sweeping survivors for up to 3 rounds
+    // 3) verify against the OS, sweeping survivors for up to 3 rounds. OS
+    // enumeration itself is bounded by collectProcessTree so this path cannot
+    // hold shutdown forever on a stalled Windows CIM provider.
     const survivorsAfter = await sweepWithVerification(pid, killTree, alive, tree)
     return { dead: survivorsAfter.length === 0, survivors: survivorsAfter }
   }
@@ -225,9 +253,11 @@ async function defaultTaskkill(pid: number, force: boolean): Promise<void> {
       return
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        // Graceful taskkill exits non-zero for console apps by design (the
-        // ladder escalates to force); a missing pid also lands here.
-        return
+        // Propagate a real taskkill failure to the ladder. In particular,
+        // non-forced taskkill commonly rejects console processes; swallowing
+        // that error used to make shutdown wait termMs even though no graceful
+        // termination had actually been requested.
+        throw error
       }
       // ENOENT = binary not found on PATH -> try the next candidate
     }
