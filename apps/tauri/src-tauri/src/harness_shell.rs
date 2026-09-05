@@ -9,6 +9,88 @@ use tauri::Manager;
 const SHELL_WEB_SCRIPT: &str =
     include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
+/// Web API compatibility layer, injected before every other page script.
+///
+/// HarnessDock ships against the WebView2 Runtime that is already present on
+/// the host machine. Older Evergreen runtimes (observed: Chromium 113) lack
+/// the Web APIs dsh's client bundle relies on, so a missing API degrades the
+/// whole document instead of one feature:
+///
+/// * `Promise.withResolvers` is used by Tauri's own `window.__TAURI__` bridge
+///   script. When it throws, the shell bridge is installed only partially.
+/// * `AbortSignal.any` is used by dsh's `RemoteStream.read` control stream.
+///   When it throws, the session controller cannot establish a stream, the
+///   connection client backs off forever, and the Settings chrome stays on
+///   "connecting" while the browser console is filled with TypeErrors.
+///
+/// Polyfilling here is the only host-side hook that runs before the document's
+/// scripts, so it fixes Tauri's bridge and dsh's bundle with one injection.
+const POLYFILL_SCRIPT: &str = r#"
+(() => {
+  'use strict';
+  if (typeof Promise.withResolvers !== 'function') {
+    Promise.withResolvers = function () {
+      let resolve, reject;
+      const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+  }
+  if (typeof AbortSignal.any !== 'function') {
+    const isAbortSignal = (value) =>
+      typeof value === 'object' && value !== null &&
+      'aborted' in value && typeof value.addEventListener === 'function';
+    const readReason = (signal, fallback) => {
+      try {
+        const reason = signal.reason;
+        return reason === undefined ? fallback : reason;
+      } catch (_) {
+        return fallback;
+      }
+    };
+    const abortSignalWithReason = (signal, reason) => {
+      if (signal.aborted) return;
+      let safeReason = reason;
+      try {
+        safeReason = readReason(signal, new DOMException('The operation was aborted.', 'AbortError'));
+      } catch (_) {}
+      try {
+        Object.defineProperty(signal, 'reason', { value: safeReason, configurable: true });
+      } catch (_) {}
+      try {
+        signal.dispatchEvent(new Event('abort'));
+      } catch (_) {}
+    };
+    AbortSignal.any = function (signals) {
+      const result = new AbortController().signal;
+      const live = [];
+      let settled = false;
+      const settle = (reason) => {
+        if (settled) return;
+        settled = true;
+        abortSignalWithReason(result, reason);
+        for (const signal of live) abortSignalWithReason(signal, reason);
+        live.length = 0;
+      };
+      for (const value of signals) {
+        if (!isAbortSignal(value)) continue;
+        if (live.some((signal) => signal === value)) continue;
+        if (value.aborted) {
+          settle(readReason(value, undefined));
+          continue;
+        }
+        const onAbort = () => settle(readReason(value, undefined));
+        live.push(value);
+        value.addEventListener('abort', onAbort, { once: true });
+      }
+      return result;
+    };
+  }
+})();
+"#;
+
 const BRIDGE_SCRIPT: &str = r#"
 (() => {
   'use strict';
@@ -113,6 +195,9 @@ pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Initialisation script order matters: polyfills first so that Tauri's own
+/// `window.__TAURI__` bridge and dsh's client bundle both find the APIs they
+/// call, then the host bridge, then the shell UI.
 pub(crate) fn init_script() -> String {
-    format!("{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
+    format!("{POLYFILL_SCRIPT}\n{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
 }
