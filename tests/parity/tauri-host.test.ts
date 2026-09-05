@@ -208,7 +208,7 @@ describe('Tauri host contract', () => {
     expect(runtime).toContain('platform::configure_child_command')
   })
 
-  it('publishes full unsigned beta assets from the exact green main candidate', () => {
+  it('publishes full unsigned beta assets and only replaces a fully gated test prerelease', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const releaseManifest = readJson('release-manifest.json')
@@ -227,9 +227,13 @@ describe('Tauri host contract', () => {
     expect(release).toContain('candidate is not green:')
     expect(release).toContain('no successful same-SHA main CI found')
     expect(release).toContain('published asset differs from exact candidate')
-    expect(release).toContain('Immutable release asset matches')
+    expect(release).toContain('Existing same-SHA release asset matches')
+    expect(release).toContain('Replacing broken test prerelease')
+    expect(release).toContain('existing_prerelease')
+    expect(release).toContain('is not the replaceable published test prerelease')
+    expect(release).toContain('without a managed prerelease; refusing to move it')
+    expect(release).toContain('--method DELETE')
     expect(release).not.toContain('--clobber')
-    expect(release).not.toContain('--method DELETE')
     expect(tauri.bundle.createUpdaterArtifacts).toBe(false)
     expect(tauri.bundle.windows.allowDowngrades).toBe(false)
   })
