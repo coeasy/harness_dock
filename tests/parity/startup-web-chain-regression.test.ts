@@ -70,6 +70,35 @@ describe('packaged startup Web chain regression', () => {
     expect(runtime).not.toContain('Ok(status_snapshot(&*state))')
   })
 
+  it('waits for the full dsh Loader tree and stable authenticated HTML before publishing ready.json', () => {
+    const embedded = read('packages/plugin-embedded-client/src/index.ts')
+    const upstreamContractComment = 'A rejected Loader means boot failed.'
+
+    expect(embedded).toContain("export const inject = ['webServer', 'connection']")
+    expect(embedded).toContain("getService(ctx, 'loader')")
+    expect(embedded).toContain('loader.await()')
+    expect(embedded).toContain('consecutiveHealthyProbes < 3')
+    expect(embedded).toContain('runtimeServicesPresent(ctx)')
+    expect(embedded).toContain(upstreamContractComment)
+    expect(embedded.indexOf('beginAfterLoaderSettlement()')).toBeLessThan(
+      embedded.lastIndexOf("writeFileSync(readyFile"),
+    )
+  })
+
+  it('does not let a WebView network error page masquerade as a visible Harness surface', () => {
+    const window = read('apps/tauri/src-tauri/src/harness_window.rs')
+
+    expect(window).toContain('fn runtime_listener_reachable(url: &Url) -> bool')
+    expect(window).toContain('std::net::TcpStream::connect_timeout')
+    expect(window).toContain('127.0.0.1 拒绝连接')
+    const reachabilityCheck = window.indexOf('if !runtime_listener_reachable(&candidate)')
+    const primaryVisible = window.indexOf('StartupPhase::PrimaryVisible')
+    expect(reachabilityCheck).toBeGreaterThan(-1)
+    expect(primaryVisible).toBeGreaterThan(reachabilityCheck)
+    expect(window).toContain('if !runtime_listener_reachable(&runtime_url)')
+    expect(window).toContain('if !runtime_listener_reachable(&launch_url)')
+  })
+
   it('ignores stale or transitional WebView callbacks instead of opening recovery', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
     const window = read('apps/tauri/src-tauri/src/harness_window.rs')
@@ -109,7 +138,7 @@ describe('packaged startup Web chain regression', () => {
     expect(candidate).toContain('@dsh/client-runtime smoke-runtime')
   })
 
-  it('launches the actual Cargo binary from the installed Windows candidate', () => {
+  it('launches the actual installed Cargo binary from a neutral cwd and proves Harness HTML is reachable', () => {
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
     const packagedSmoke = read('.github/workflows/windows-packaged-startup.yml')
 
@@ -117,6 +146,11 @@ describe('packaged startup Web chain regression', () => {
     expect(packagedSmoke).toContain("-Filter 'harnessdock-tauri.exe'")
     expect(packagedSmoke).not.toContain("-Filter 'HarnessDock.exe'")
     expect(packagedSmoke).toContain('Installed harnessdock-tauri.exe not found')
+    expect(packagedSmoke).toContain('-WorkingDirectory $neutralCwd')
+    expect(packagedSmoke).toContain("-Filter 'ready.json'")
+    expect(packagedSmoke).toContain('Test-HarnessWebHtml')
+    expect(packagedSmoke).toContain('$healthyWebProbes -ge 2')
+    expect(packagedSmoke).toContain('served stable authenticated HTML')
   })
 
   it('keeps skipped duplicate startup smokes from masquerading as package failures', () => {
