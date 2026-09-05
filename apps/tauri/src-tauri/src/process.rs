@@ -2,9 +2,10 @@ use std::{
     collections::HashSet,
     process::{Child, Command},
     sync::{Arc, Mutex},
-    thread,
-    time::Duration,
 };
+
+#[cfg(unix)]
+use std::{thread, time::Duration};
 
 pub(crate) type StartingProcessRegistry = Arc<Mutex<HashSet<u32>>>;
 

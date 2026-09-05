@@ -3,8 +3,13 @@
 mod bridge;
 #[cfg(not(mobile))]
 mod capability_broker;
+mod crypto;
 #[cfg(not(mobile))]
 mod desktop;
+#[cfg(not(mobile))]
+mod diagnostic;
+#[cfg(not(mobile))]
+mod error;
 mod gateway;
 #[cfg(not(mobile))]
 mod gateway_host;
@@ -16,6 +21,8 @@ mod harness_window;
 mod host_kernel;
 #[cfg(not(mobile))]
 mod host_protocol;
+#[cfg(not(mobile))]
+mod lease;
 #[cfg(not(mobile))]
 mod lifecycle;
 mod platform;
@@ -49,6 +56,8 @@ mod tray;
 mod update;
 #[cfg(not(mobile))]
 mod update_actor;
+#[cfg(not(mobile))]
+mod util;
 
 #[cfg(not(mobile))]
 pub(crate) use state::AppState;

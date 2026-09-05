@@ -8,6 +8,7 @@ use tauri::Manager;
 #[cfg(not(mobile))]
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::error::lock_err;
 use crate::update_actor::UpdatePhase;
 
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/coeasy/harness_dock/releases/latest";
@@ -255,7 +256,7 @@ impl UpdateActionGuard {
         app.state::<crate::AppState>()
             .update_actor
             .lock()
-            .map_err(|_| "UpdateActor 状态锁已损坏。".to_string())?
+            .map_err(|_| lock_err("UpdateActor"))?
             .begin()?;
         Ok(Self {
             app: app.clone(),

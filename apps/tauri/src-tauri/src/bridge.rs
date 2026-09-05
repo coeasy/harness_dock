@@ -182,21 +182,12 @@ pub fn host_snapshot(
 ) -> Result<HostSnapshot, HostError> {
     let (subject, surface, origin, runtime_generation) = snapshot_subject(&app, &window)?;
     let state = app.state::<crate::AppState>();
-    let (runtime_phase, current_generation) = state
-        .runtime_actor
-        .lock()
-        .map(|actor| (actor.phase(), actor.generation_id()))
-        .unwrap_or((crate::runtime_actor::RuntimePhase::Failed, None));
-    let harness_visible = state
-        .surface_actor
-        .lock()
-        .map(|actor| actor.primary_visible())
-        .unwrap_or(false);
-    let gateway_enabled = state
-        .gateway
-        .lock()
-        .map(|actor| actor.phase() == crate::gateway_host::GatewayPhase::Ready)
-        .unwrap_or(false);
+    // Read through the single read-only snapshot layer (service::snapshot).
+    // This fixes one canonical lock order for status readers (runtime ->
+    // surface -> gateway) instead of letting each bridge command lock actors
+    // ad hoc.
+    let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&*state);
+    let runtime_phase = snapshot.runtime_phase;
     let lease = crate::runtime::live_lease(&*state);
     let capabilities = crate::capability_broker::allowed_capabilities(
         subject,
@@ -217,13 +208,13 @@ pub fn host_snapshot(
         revision: kernel.revision,
         event_sequence: kernel.event_sequence,
         runtime_phase,
-        runtime_generation: current_generation,
+        runtime_generation: snapshot.runtime_generation,
         runtime_dsh_version: lease.as_ref().map(|value| value.dsh_version.clone()),
         runtime_image_identity: lease
             .as_ref()
             .map(|value| value.generation.image_identity.clone()),
-        harness_visible,
-        gateway_enabled,
+        harness_visible: snapshot.harness_visible,
+        gateway_enabled: snapshot.gateway_enabled,
         capabilities,
     })
 }
@@ -233,7 +224,10 @@ pub fn host_snapshot(
 /// module macro. It never returns the private launch credential URL.
 #[tauri::command]
 pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
-    let mut status = crate::runtime::status_snapshot(&*app.state::<crate::AppState>());
+    // Read-only snapshot: this command only reports state. It must never
+    // reap a dead process or stop the gateway as a side effect of a status
+    // query issued from the diagnostics Surface.
+    let mut status = crate::runtime::status_snapshot_readonly(&*app.state::<crate::AppState>());
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
             parsed.set_username("").ok();

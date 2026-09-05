@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const read = (relative) => readFileSync(path.join(root, relative), 'utf8')
+import { rustSource } from './lib/rust-source.mjs'
+const read = (relative) =>
+  relative.endsWith('.rs') ? rustSource(root, relative) : readFileSync(path.join(root, relative), 'utf8')
 const readJson = (relative) => JSON.parse(read(relative))
 
 const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')

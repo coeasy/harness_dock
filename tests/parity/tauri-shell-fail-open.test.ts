@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { rustSource } from './rust-source.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+const read = (relative: string) => rustSource(repoRoot, relative).replace(/\r\n/g, '\n')
 const readJson = (relative: string) => JSON.parse(read(relative))
 
 describe('Tauri shell fail-open guarantees', () => {

@@ -8,9 +8,10 @@ import {
   TAURI_HOST_PROFILE,
   TAURI_IOS_HOST_PROFILE,
 } from '../../packages/bootstrap/src/index.ts'
+import { rustSource } from './rust-source.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+const read = (relative: string) => rustSource(repoRoot, relative).replace(/\r\n/g, '\n')
 const readJson = (relative: string): Record<string, any> => JSON.parse(read(relative))
 const unsupportedNativeCurrent = [
   'notifications',

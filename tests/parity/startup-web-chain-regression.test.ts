@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { rustSource } from './rust-source.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) =>
-  readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+const read = (relative: string) => rustSource(repoRoot, relative).replace(/\r\n/g, '\n')
 
 describe('packaged startup Web chain regression', () => {
   it('keeps the splash compatible with its strict CSP without exposing Runtime verification', () => {
@@ -56,7 +56,7 @@ describe('packaged startup Web chain regression', () => {
     const reconciler = read('apps/tauri/src-tauri/src/reconciler.rs')
     const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
 
-    expect(window).toContain('crate::runtime::current_lease(&*app.state::<crate::AppState>())')
+    expect(window).toContain('crate::lease::require_current_lease(&*app.state::<crate::AppState>())')
     expect(window).not.toContain('crate::runtime::live_lease(&*app.state::<crate::AppState>())')
     expect(startup).toContain('crate::runtime::current_lease(&*app.state::<AppState>())')
     expect(startup).not.toContain('crate::runtime::live_lease(&*app.state::<AppState>())')

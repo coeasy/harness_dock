@@ -7,11 +7,26 @@ use std::{
 
 const DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
 
+/// Schema v2: quarantine records carry a `dsh_base_version` and survive
+/// prerelease-only upgrades of the same base SemVer (e.g. 0.1.2-rc.1 ->
+/// 0.1.2), while still invalidating across base-version changes.
+const SCHEMA_VERSION: u8 = 2;
+
+/// Extract the `MAJOR.MINOR.PATCH` base version from a full SemVer-ish string
+/// such as `0.1.2-rc.1` or `0.1.2`. Falls back to the input when it has no
+/// prerelease/build suffix.
+fn base_version(value: &str) -> String {
+    let base = value.split(['-', '+']).next().unwrap_or(value);
+    base.trim().to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PluginQuarantineRecord {
     pub schema_version: u8,
     pub dsh_version: String,
+    #[serde(default)]
+    pub dsh_base_version: String,
     pub created_at: u64,
     pub expires_at: u64,
     pub isolated_plugins: Vec<String>,
@@ -30,6 +45,25 @@ fn valid_reason(reason: &str) -> bool {
     reason == "diagnostic-match" || reason == "ambiguous"
 }
 
+/// Whether a persisted record still applies to the current runtime version.
+fn record_applies(record: &PluginQuarantineRecord, dsh_version: &str) -> bool {
+    if record.schema_version > SCHEMA_VERSION {
+        return false;
+    }
+    match record.schema_version {
+        // Schema v1 (strict version match) is honoured for backwards
+        // compatibility: a record written by an older client only applies to
+        // the exact runtime version it was created against.
+        1 => record.dsh_version == dsh_version,
+        // Schema v2: apply across prerelease-only upgrades of the same base
+        // SemVer, invalidate on cross-base-version upgrades.
+        _ => {
+            let expected_base = base_version(dsh_version);
+            !expected_base.is_empty() && record.dsh_base_version == expected_base
+        }
+    }
+}
+
 pub(crate) fn read(path: &Path, dsh_version: &str) -> Option<PluginQuarantineRecord> {
     let record = fs::read_to_string(path)
         .ok()
@@ -38,8 +72,7 @@ pub(crate) fn read(path: &Path, dsh_version: &str) -> Option<PluginQuarantineRec
         let _ = fs::remove_file(path);
         return None;
     };
-    if record.schema_version != 1
-        || record.dsh_version != dsh_version
+    if !record_applies(&record, dsh_version)
         || record.expires_at <= now_secs()
         || record.isolated_plugins.is_empty()
         || !valid_reason(&record.reason)
@@ -92,8 +125,9 @@ pub(crate) fn write(
     }
     let created_at = now_secs();
     let record = PluginQuarantineRecord {
-        schema_version: 1,
+        schema_version: SCHEMA_VERSION,
         dsh_version: dsh_version.to_string(),
+        dsh_base_version: base_version(dsh_version),
         created_at,
         expires_at: created_at.saturating_add(DEFAULT_TTL_SECS),
         isolated_plugins,
@@ -142,6 +176,30 @@ mod tests {
         )
         .unwrap();
         assert!(read(&file, "new").is_none());
+        assert!(!file.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn newest_quarantine_survives_prerelease_ignored_upgrade() {
+        // v0.1.2-rc.1 and v0.1.2 share the same base SemVer: the isolation
+        // policy must outlive a prerelease-only runtime upgrade.
+        let root = test_root("prerelease-upgrade");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        write(
+            &file,
+            "0.1.2-rc.1",
+            vec!["bad-a".into()],
+            vec!["bad-a".into()],
+            "diagnostic-match",
+        )
+        .unwrap();
+        assert_eq!(read(&file, "0.1.2").expect("rc -> stable keeps quarantine").isolated_plugins, vec!["bad-a"]);
+        assert_eq!(read(&file, "0.1.2-rc.2").expect("rc -> rc keeps quarantine").isolated_plugins, vec!["bad-a"]);
+        // Cross-base upgrade invalidates and removes.
+        assert!(read(&file, "0.2.0").is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }

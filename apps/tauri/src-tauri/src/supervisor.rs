@@ -19,28 +19,32 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
 }
 
 pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            stop_managed_processes(&app);
-            let current = lifecycle::snapshot(&*state);
-            if process::starting_processes_empty(&state.starting_processes)
-                && current.managed_operations_idle()
-            {
-                break;
-            }
-            if std::time::Instant::now() >= deadline {
-                eprintln!(
-                    "HarnessDock shutdown timed out while waiting for actor lifecycle operations; forcing process exit."
-                );
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
+    // Pacing uses `tokio::time::sleep` instead of a blocking `spawn_blocking`
+    // + thread::sleep poll loop: the shutdown coordinator is fully async, no
+    // blocking thread is tied up for up to 30s, and the deadline is derived
+    // from a monotonic clock just like before. The `State` borrow is taken
+    // inside each iteration so it never spans an `.await` point.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
         stop_managed_processes(&app);
-    })
-    .await;
+        let idle = {
+            let state = app.state::<AppState>();
+            let current = lifecycle::snapshot(&*state);
+            process::starting_processes_empty(&state.starting_processes)
+                && current.managed_operations_idle()
+        };
+        if idle {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            eprintln!(
+                "HarnessDock shutdown timed out while waiting for actor lifecycle operations; forcing process exit."
+            );
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    stop_managed_processes(&app);
 }
 
 pub(crate) fn request_exit(app: &tauri::AppHandle) {

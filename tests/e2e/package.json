@@ -1,0 +1,14 @@
+{
+  "name": "@dsh/e2e-tests",
+  "private": true,
+  "version": "0.1.2",
+  "description": "Playwright end-to-end smoke tests for the HarnessDock desktop client",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

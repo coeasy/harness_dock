@@ -1,7 +1,8 @@
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use url::Url;
+
+use crate::util::is_loopback;
 
 const HEALTH_PATH: &str = "/api/harnessdock/health";
 const PAIR_PATH: &str = "/api/harnessdock/pair";
@@ -28,15 +29,6 @@ struct PairRequest<'a> {
 pub struct PairResponse {
     pub connect_url: String,
     pub expires_at: String,
-}
-
-fn is_loopback(host: &str) -> bool {
-    if host.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
-    host.parse::<IpAddr>()
-        .map(|ip| ip.is_loopback())
-        .unwrap_or(false)
 }
 
 fn normalize_gateway_origin(value: &str) -> Result<Url, String> {
@@ -162,3 +154,98 @@ pub async fn pair_gateway(
     }
     Ok(paired)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_https_origins() {
+        assert!(normalize_gateway_origin("https://gateway.example.com").is_ok());
+        assert!(normalize_gateway_origin("https://gateway.example.com/").is_ok());
+        assert!(normalize_gateway_origin("https://gateway.example.com:8443").is_ok());
+    }
+
+    #[test]
+    fn accepts_http_only_for_loopback_hosts() {
+        for value in [
+            "http://localhost",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://127.7.7.7:8080",
+            "http://[::1]:8080",
+        ] {
+            assert!(
+                normalize_gateway_origin(value).is_ok(),
+                "loopback HTTP origin must be accepted: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_http_for_non_loopback_hosts() {
+        let error = normalize_gateway_origin("http://192.168.1.10:8080")
+            .expect_err("plain HTTP to a LAN host must be rejected");
+        assert!(
+            error.contains("HTTPS"),
+            "unexpected rejection reason: {error}"
+        );
+        assert!(normalize_gateway_origin("http://gateway.example.com").is_err());
+        assert!(normalize_gateway_origin("http://0.0.0.0:8080").is_err());
+    }
+
+    #[test]
+    fn rejects_non_http_schemes() {
+        for value in [
+            "wss://gateway.example.com",
+            "ws://gateway.example.com",
+            "ftp://gateway.example.com",
+            "httpx://gateway.example.com",
+        ] {
+            assert!(
+                normalize_gateway_origin(value).is_err(),
+                "scheme must be rejected: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn requires_a_bare_origin() {
+        assert!(normalize_gateway_origin("https://gateway.example.com/pair").is_err());
+        assert!(normalize_gateway_origin("https://gateway.example.com?token=abc").is_err());
+        assert!(normalize_gateway_origin("https://gateway.example.com#token").is_err());
+        assert!(normalize_gateway_origin("https://user:pass@gateway.example.com/").is_err());
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace_and_normalises_the_path() {
+        let url = normalize_gateway_origin("  https://gateway.example.com:8443  ")
+            .expect("padded HTTPS origin must be accepted");
+        assert_eq!(url.as_str(), "https://gateway.example.com:8443/");
+    }
+
+    #[test]
+    fn rejects_malformed_or_incomplete_input() {
+        for value in ["not a url", "://gateway.example.com", "https://", ""] {
+            assert!(
+                normalize_gateway_origin(value).is_err(),
+                "input must be rejected: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn endpoint_joins_absolute_api_paths_against_the_origin() {
+        let base = normalize_gateway_origin("http://127.0.0.1:8080")
+            .expect("loopback origin must be accepted");
+        let health = endpoint(&base, HEALTH_PATH).expect("health endpoint must build");
+        assert_eq!(
+            health.as_str(),
+            "http://127.0.0.1:8080/api/harnessdock/health"
+        );
+        let pair = endpoint(&base, PAIR_PATH).expect("pair endpoint must build");
+        assert_eq!(pair.as_str(), "http://127.0.0.1:8080/api/harnessdock/pair");
+        assert_eq!(health.origin(), base.origin());
+    }
+}
+

@@ -4,12 +4,14 @@ import { fileURLToPath } from "node:url";
 var name = "harness-shell";
 var inject = [];
 var version = "0.1.2";
-var apiVersion = 1;
+var apiVersion = 2;
 var service = {
   pluginId: name,
   version,
   apiVersion,
   webEntry: fileURLToPath(new URL("../web/shell.js", import.meta.url)),
+  // Must stay identical to SHELL_COMMANDS: this is the web-reachable set, so
+  // anything `capability_broker.rs` denies to the HarnessWeb subject is absent.
   capabilities: [
     "window.minimize",
     "window.toggleMaximize",
@@ -18,12 +20,8 @@ var service = {
     "web.reload",
     "web.restart",
     "runtime.safe-mode",
-    "runtime.clear-quarantine",
     "gateway.manage",
-    "diagnostics.open",
-    "app.update.check",
-    "app.update.install",
-    "app.quit"
+    "diagnostics.open"
   ]
 };
 function apply(ctx = {}) {

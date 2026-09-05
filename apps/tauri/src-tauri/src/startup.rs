@@ -56,10 +56,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
 
         let Some(window) = app.get_webview_window("harness") else {
             stable_clean_polls = 0;
-            let _ = tauri::async_runtime::spawn_blocking(|| {
-                std::thread::sleep(Duration::from_millis(100));
-            })
-            .await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
         // Runtime replacement and WebView redirect callbacks can briefly cross.
@@ -69,10 +66,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
         // failure path if the lease never returns.
         let Some(lease) = crate::runtime::current_lease(&*app.state::<AppState>()) else {
             stable_clean_polls = 0;
-            let _ = tauri::async_runtime::spawn_blocking(|| {
-                std::thread::sleep(Duration::from_millis(100));
-            })
-            .await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
 
@@ -123,10 +117,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
             }
         }
 
-        let _ = tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(Duration::from_millis(100));
-        })
-        .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     Ok(())
 }

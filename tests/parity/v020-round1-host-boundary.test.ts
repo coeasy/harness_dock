@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { rustSource } from './rust-source.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+const read = (relative: string) => rustSource(repoRoot, relative).replace(/\r\n/g, '\n')
 
 describe('v0.2.0 Round 1 host boundaries', () => {
   it('keeps lib.rs as a composition root and moves desktop integration to the adapter', () => {

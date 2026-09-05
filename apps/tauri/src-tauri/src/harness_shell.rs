@@ -102,6 +102,14 @@ const BRIDGE_SCRIPT: &str = r#"
     'window.state': 'harness_window_state',
     'window.close': 'harness_shell_close'
   });
+  // This map is exactly the set of commands `capability_broker.rs` allows for
+  // the HarnessWeb subject. Commands the broker denies to web
+  // (RuntimeQuarantineAdmin, UpdateInstall, AppQuit, ...) are reachable from
+  // the native tray and diagnostics surfaces instead — they are deliberately
+  // absent here and from SHELL_COMMANDS, so the web contract can never
+  // advertise a command the broker is bound to reject.
+  // tests/parity/shell-contract-lockstep.test.ts enforces the three-way
+  // agreement between this map, SHELL_COMMANDS and the broker allow-list.
   const hostCommandMap = Object.freeze({
     'web.reload': 'refresh-harness',
     'web.restart': 'restart-runtime',

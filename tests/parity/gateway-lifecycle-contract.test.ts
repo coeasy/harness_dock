@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { rustSource } from './rust-source.ts'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -7,10 +7,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 
 describe('Gateway lifecycle admission contract', () => {
   it('serializes start/stop through the GatewayActor generation state machine', () => {
-    const source = readFileSync(
-      path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
-      'utf8',
-    )
+    const source = rustSource(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs')
 
     expect(source).toContain('pub enum GatewayPhase')
     expect(source).toContain('pub(crate) struct GatewayActorState')
@@ -22,17 +19,14 @@ describe('Gateway lifecycle admission contract', () => {
     expect(source).toContain('self.phase = GatewayPhase::Stopping')
     expect(source).toContain('self.server.take()')
     expect(source).toContain('actor.settle_stopped()')
-    expect(source).toContain('ensure_current_runtime(&*state, lease.generation.id)')
+    expect(source).toContain('is_current_generation(&*state, lease.generation.id)')
     expect(source).not.toContain('state.gateway_starting')
     expect(source).not.toContain('fn claim_gateway_start')
     expect(source).not.toContain('fn claim_gateway_stop')
   })
 
   it('drops the actor lock before blocking server shutdown', () => {
-    const source = readFileSync(
-      path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
-      'utf8',
-    )
+    const source = rustSource(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs')
     const stop = source.slice(source.indexOf('fn stop_managed_inner'))
     const take = stop.indexOf('actor.begin_stop()')
     const stopServer = stop.indexOf('server.stop()')
@@ -43,10 +37,7 @@ describe('Gateway lifecycle admission contract', () => {
   })
 
   it('owns and drains active native proxy connections during shutdown', () => {
-    const source = readFileSync(
-      path.join(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs'),
-      'utf8',
-    )
+    const source = rustSource(repoRoot, 'apps/tauri/src-tauri/src/gateway_host.rs')
     expect(source).toContain('connection_streams: Mutex<HashMap<usize, Vec<TcpStream>>>')
     expect(source).toContain('connection_workers: Mutex<Vec<thread::JoinHandle<()>>>')
     expect(source).toContain('shutdown_active_connections(&self.shared)')

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,16 +8,32 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('self-contained local client build', () => {
-  it('bootstraps a verified build-time Node on bare Windows machines', () => {
+  it('bootstraps a verified build-time Node on bare hosts, per platform', () => {
     const batch = read('scripts/build.bat')
-    const bootstrap = read('scripts/bootstrap-node.ps1')
+    const shell = read('scripts/build.sh')
+    const windowsBootstrap = read('scripts/bootstrap-node.ps1')
+    const posixBootstrap = read('scripts/bootstrap-node.sh')
 
+    // Windows: build.bat delegates portable Node provisioning to bootstrap-node.ps1
+    // and then forwards to the same build.mjs entrypoint as every other host.
     expect(batch).toContain('bootstrap-node.ps1')
     expect(batch).toContain('node scripts\\bootstrap.mjs')
     expect(batch).toContain('node scripts\\build.mjs --skip-install')
-    expect(bootstrap).toContain('SHASUMS256.txt')
-    expect(bootstrap).toContain('Get-FileHash -Algorithm SHA256')
-    expect(bootstrap).toContain('.local-tools')
+    expect(windowsBootstrap).toContain('SHASUMS256.txt')
+    expect(windowsBootstrap).toContain('Get-FileHash -Algorithm SHA256')
+    expect(windowsBootstrap).toContain('.local-tools')
+
+    // POSIX: build.sh is a thin shim over build.mjs and delegates portable Node
+    // provisioning to bootstrap-node.sh, which publishes the same
+    // .local-tools/node-home.txt contract as the Windows counterpart.
+    expect(shell).toContain('bash scripts/bootstrap-node.sh')
+    expect(shell).toContain('.local-tools/node-home.txt')
+    expect(shell).toContain('node scripts/bootstrap.mjs')
+    expect(shell).toContain('node scripts/build.mjs --skip-install')
+    expect(posixBootstrap).toContain('SHASUMS256.txt')
+    expect(posixBootstrap).toContain('sha256sum')
+    expect(posixBootstrap).toContain('node-home.txt')
+    expect(posixBootstrap).not.toContain('build.mjs')
   })
 
   it('prepares the exact sealed runtime instead of assuming resources/dsh-runtime exists', () => {
@@ -81,6 +97,25 @@ describe('self-contained local client build', () => {
       cwd: repoRoot,
       encoding: 'utf8',
     })
-    expect(result.status, result.stderr).toBe(0)
+    expect(result.status, `scripts/build.sh: ${result.stderr}`).toBe(0)
+    const bootstrapResult = spawnSync('bash', ['-n', path.join(repoRoot, 'scripts/bootstrap-node.sh')], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+    expect(bootstrapResult.status, `scripts/bootstrap-node.sh: ${bootstrapResult.stderr}`).toBe(0)
+  })
+
+  it('keeps one build entrypoint and no dead build/dev scripts', () => {
+    for (const relative of [
+      'scripts/build-pipeline.mjs',
+      'scripts/dev-dsh.sh',
+      'scripts/dev-dsh.bat',
+      'scripts/regenerate-icon.ps1',
+    ]) {
+      expect(existsSync(path.join(repoRoot, relative)), `${relative} must stay deleted`).toBe(false)
+    }
+    const build = read('scripts/build.mjs')
+    expect(build).toContain("'smoke-runtime'")
+    expect(build).toContain('verify sealed Runtime + Harness Web readiness')
   })
 })

@@ -4,7 +4,12 @@ import { fileURLToPath } from 'node:url'
 export const name = 'harness-shell'
 export const inject: readonly string[] = []
 export const version = '0.1.2' as const
-export const apiVersion = 1 as const
+/**
+ * Must match `SHELL_API_VERSION` in `packages/bootstrap/src/shell-contract.ts`
+ * and the `apiVersion` published by the desktop bridge in `harness_shell.rs`.
+ * `scripts/check-shell-package.mjs` asserts all three stay in lockstep.
+ */
+export const apiVersion = 2 as const
 
 export interface HarnessShellService {
   pluginId: typeof name
@@ -24,6 +29,8 @@ export const service: HarnessShellService = {
   version,
   apiVersion,
   webEntry: fileURLToPath(new URL('../web/shell.js', import.meta.url)),
+  // Must stay identical to SHELL_COMMANDS: this is the web-reachable set, so
+  // anything `capability_broker.rs` denies to the HarnessWeb subject is absent.
   capabilities: [
     'window.minimize',
     'window.toggleMaximize',
@@ -32,12 +39,8 @@ export const service: HarnessShellService = {
     'web.reload',
     'web.restart',
     'runtime.safe-mode',
-    'runtime.clear-quarantine',
     'gateway.manage',
     'diagnostics.open',
-    'app.update.check',
-    'app.update.install',
-    'app.quit',
   ],
 }
 

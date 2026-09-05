@@ -4,7 +4,7 @@ use std::sync::{
     Arc,
 };
 
-use crate::runtime::RuntimeProcess;
+use crate::runtime::types::RuntimeProcess;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -361,6 +361,25 @@ impl RuntimeActor {
         self.process.take()
     }
 
+    /// Explicit liveness reaper. Checks the owned process once and, only when
+    /// it has actually exited, invalidates the actor state and returns the
+    /// dead process so the caller can release its native resources.
+    ///
+    /// Callers are explicit lifecycle paths (status reconciliation, supervisor
+    /// shutdown). Read-only status/probe paths use `runtime::status_snapshot_readonly`
+    /// and must never call this, otherwise a snapshot read could revoke the
+    /// lease consumed by the very navigation it is reporting on.
+    pub(crate) fn reap_if_dead(&mut self) -> Option<RuntimeProcess> {
+        let dead = self
+            .process_mut()
+            .is_some_and(|process| !process.is_alive());
+        if dead {
+            self.invalidate_dead_process()
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn lease_is_current(&self, generation: u64) -> bool {
         self.lease
             .as_ref()
@@ -373,39 +392,9 @@ impl RuntimeActor {
 }
 
 fn generation_nonce() -> Result<String, String> {
-    let mut bytes = [0_u8; 16];
-    secure_random(&mut bytes)?;
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    use std::fmt::Write as _;
-    for byte in bytes {
-        write!(&mut encoded, "{byte:02x}").map_err(|error| error.to_string())?;
-    }
-    Ok(encoded)
-}
-
-#[cfg(unix)]
-fn secure_random(buffer: &mut [u8]) -> Result<(), String> {
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(buffer))
-        .map_err(|error| format!("OS random source unavailable for Runtime generation: {error}"))
-}
-
-#[cfg(windows)]
-fn secure_random(buffer: &mut [u8]) -> Result<(), String> {
-    #[link(name = "advapi32")]
-    extern "system" {
-        #[link_name = "SystemFunction036"]
-        fn rtl_gen_random(buffer: *mut u8, length: u32) -> u8;
-    }
-    let length = u32::try_from(buffer.len())
-        .map_err(|_| "Runtime generation random request is too large".to_string())?;
-    let ok = unsafe { rtl_gen_random(buffer.as_mut_ptr(), length) };
-    if ok == 0 {
-        Err("Windows cryptographic random source unavailable for Runtime generation".into())
-    } else {
-        Ok(())
-    }
+    // `secure_random` and the hex encoding it feeds are shared with the Gateway
+    // pairing flow, so both surfaces benefit from the same CSPRNG hardening.
+    crate::crypto::random_hex(16)
 }
 
 #[cfg(test)]

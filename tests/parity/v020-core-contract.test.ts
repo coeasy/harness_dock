@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { rustSource } from './rust-source.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+const read = (relative: string) => rustSource(repoRoot, relative).replace(/\r\n/g, '\n')
 const readJson = (relative: string) => JSON.parse(read(relative))
 
 describe('HarnessDock Native Host frozen core contract', () => {
@@ -43,7 +44,11 @@ describe('HarnessDock Native Host frozen core contract', () => {
       'gateway.manage',
       'diagnostics.open',
     ]
-    const localOnlyCommands = [
+    // Native-only: `capability_broker.rs` denies these capabilities to the
+    // HarnessWeb subject, so they are reachable from the tray / diagnostics /
+    // update surfaces only. They must be absent from the shell service, the
+    // shipped bundle and the injected bridge alike.
+    const nativeOnlyCommands = [
       'runtime.clear-quarantine',
       'app.update.check',
       'app.update.install',
@@ -54,9 +59,9 @@ describe('HarnessDock Native Host frozen core contract', () => {
       expect(bundle).toContain(`"${command}"`)
       expect(bridge).toContain(`'${command}'`)
     }
-    for (const command of localOnlyCommands) {
-      expect(service).toContain(`'${command}'`)
-      expect(bundle).toContain(`"${command}"`)
+    for (const command of nativeOnlyCommands) {
+      expect(service).not.toContain(`'${command}'`)
+      expect(bundle).not.toContain(`"${command}"`)
       expect(bridge).not.toContain(`'${command}'`)
     }
   })

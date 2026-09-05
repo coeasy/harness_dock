@@ -11,6 +11,18 @@ window.__ModuleLoader__.load({
       }
     }
 
+    const clone = (value) => {
+      if (typeof structuredClone === 'function') {
+        try { return structuredClone(value) } catch (_) { /* fall through */ }
+      }
+      if (value === null || typeof value !== 'object') return value
+      if (Array.isArray(value)) return value.map((item) => clone(item))
+      if (typeof value !== 'object') return value
+      const out = {}
+      for (const [key, val] of Object.entries(value)) out[key] = clone(val)
+      return out
+    }
+
     const createSnapshotStore = (initial) => {
       const store = {
         _snapshot: initial,
@@ -25,8 +37,11 @@ window.__ModuleLoader__.load({
           listeners(store)
         },
         update: (updater) => {
+          // Deep clone (arrays included) so every subscriber receives a fresh
+          // snapshot and legacy bundles cannot corrupt the store through
+          // shared nested references.
           store._snapshot = typeof store._snapshot === 'object' && store._snapshot !== null
-            ? { ...store._snapshot }
+            ? clone(store._snapshot)
             : store._snapshot
           updater(store._snapshot)
           listeners(store)
