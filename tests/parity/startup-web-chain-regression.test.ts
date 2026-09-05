@@ -77,12 +77,12 @@ describe('packaged startup Web chain regression', () => {
     expect(embedded).toContain("export const inject = ['webServer', 'connection']")
     expect(embedded).toContain("getService(ctx, 'loader')")
     expect(embedded).toContain('loader.await()')
+    expect(embedded).toContain('const settled = loaderSettlement(ctx)')
+    expect(embedded).toContain('void settled.then(() => {')
+    expect(embedded).toContain('if (!disposed && runtimeServicesPresent(ctx)) beginProbing()')
     expect(embedded).toContain('consecutiveHealthyProbes < 3')
     expect(embedded).toContain('runtimeServicesPresent(ctx)')
     expect(embedded).toContain(upstreamContractComment)
-    expect(embedded.indexOf('beginAfterLoaderSettlement()')).toBeLessThan(
-      embedded.lastIndexOf("writeFileSync(readyFile"),
-    )
   })
 
   it('does not let a WebView network error page masquerade as a visible Harness surface', () => {
