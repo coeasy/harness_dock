@@ -111,12 +111,15 @@ describe('packaged startup Web chain regression', () => {
     expect(startup).not.toContain('Harness WebView 已创建，但当前 RuntimeLease 已失效。')
   })
 
-  it('reveals a clean authenticated Runtime URL even when WebView redirect events reorder', () => {
+  it('reveals a clean authenticated Runtime URL only while its loopback listener remains live', () => {
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
 
     expect(startup).toContain('reveal_clean_runtime_fallback')
+    expect(startup).toContain('fn runtime_listener_reachable(url: &url::Url) -> bool')
+    expect(startup).toContain('std::net::TcpStream::connect_timeout')
     expect(startup).toContain('current.origin().ascii_serialization() == lease.origin')
     expect(startup).toContain('key == "token" && !value.is_empty()')
+    expect(startup).toContain('&& runtime_listener_reachable(&current)')
     expect(startup).toContain('stable_clean_polls >= 5')
     expect(startup).toContain('actor.finish_navigation(navigation_id, lease.generation.id)')
     expect(startup).toContain('window.set_decorations(true)')
