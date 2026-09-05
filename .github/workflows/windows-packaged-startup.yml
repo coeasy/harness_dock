@@ -50,15 +50,20 @@ jobs:
           if (-not $installer) { throw 'Windows NSIS candidate was not downloaded' }
           "installer=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Install and prove Harness Web becomes primary
+      - name: Install and prove Harness Web becomes primary and serves HTML
         if: steps.current.outputs.run == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $traceDir = Join-Path ([IO.Path]::GetTempPath()) 'harnessdock-logs'
+          $tempRoot = [IO.Path]::GetTempPath()
+          $traceDir = Join-Path $tempRoot 'harnessdock-logs'
           if (Test-Path $traceDir) {
             Get-ChildItem $traceDir -Filter 'startup-*.log' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
           }
+          # Delete stale Runtime work directories so the smoke can only observe
+          # ready.json produced by the candidate launched below.
+          Get-ChildItem $tempRoot -Directory -Filter 'harnessdock-tauri-*' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
           $installDir = Join-Path $env:RUNNER_TEMP 'HarnessDockStartupSmoke'
           Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -78,11 +83,43 @@ jobs:
             throw "Installed harnessdock-tauri.exe not found under $installDir"
           }
 
-          $hostProcess = Start-Process -FilePath $app.FullName -PassThru
+          # A Start Menu launch does not inherit the repository workspace as its
+          # cwd. Use a neutral directory so CI cannot accidentally make runtime
+          # startup pass only because the checkout is the working directory.
+          $neutralCwd = Join-Path $env:RUNNER_TEMP 'HarnessDockNeutralCwd'
+          Remove-Item $neutralCwd -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $neutralCwd | Out-Null
+
+          function Test-HarnessWebHtml([string]$Url) {
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $handler.AllowAutoRedirect = $true
+            $handler.UseCookies = $true
+            $handler.CookieContainer = [System.Net.CookieContainer]::new()
+            $client = [System.Net.Http.HttpClient]::new($handler)
+            $client.Timeout = [TimeSpan]::FromSeconds(5)
+            try {
+              $response = $client.GetAsync($Url).GetAwaiter().GetResult()
+              if (-not $response.IsSuccessStatusCode) { return $false }
+              $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              return $body -match '(?i)<!doctype\s+html|<html(?:\s|>)'
+            }
+            catch {
+              Write-Host "Harness Web probe failed: $($_.Exception.Message)"
+              return $false
+            }
+            finally {
+              $client.Dispose()
+              $handler.Dispose()
+            }
+          }
+
+          $hostProcess = Start-Process -FilePath $app.FullName -WorkingDirectory $neutralCwd -PassThru
           try {
-            $deadline = (Get-Date).AddSeconds(90)
+            $deadline = (Get-Date).AddSeconds(120)
             $trace = $null
             $content = ''
+            $readyUrl = $null
+            $healthyWebProbes = 0
             while ((Get-Date) -lt $deadline) {
               Start-Sleep -Milliseconds 500
               $trace = Get-ChildItem $traceDir -Filter 'startup-*.log' -ErrorAction SilentlyContinue |
@@ -96,20 +133,51 @@ jobs:
                 if ($hasRecovery -and -not $hasVisible) {
                   throw 'Packaged client entered recovery before Harness Web became primary'
                 }
-                if (
-                  $content -match 'phase=runtime_ready' -and
-                  $content -match 'phase=webview_requested' -and
-                  $hasVisible
-                ) {
-                  Write-Host 'PASS: installed Windows candidate reached primary Harness Web'
-                  exit 0
+              }
+
+              $ready = Get-ChildItem $tempRoot -Directory -Filter 'harnessdock-tauri-*' -ErrorAction SilentlyContinue |
+                ForEach-Object { Get-ChildItem $_.FullName -File -Filter 'ready.json' -ErrorAction SilentlyContinue } |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+              if ($ready) {
+                try {
+                  $readyJson = Get-Content $ready.FullName -Raw | ConvertFrom-Json
+                  if ($readyJson.host -ne '127.0.0.1' -or [int]$readyJson.port -le 0) {
+                    throw "invalid ready.json endpoint: host=$($readyJson.host) port=$($readyJson.port)"
+                  }
+                  $candidateUrl = [string]$readyJson.url
+                  if ($candidateUrl -ne $readyUrl) {
+                    $readyUrl = $candidateUrl
+                    $healthyWebProbes = 0
+                  }
+                  if (Test-HarnessWebHtml $readyUrl) {
+                    $healthyWebProbes += 1
+                    Write-Host "Harness Web HTML probe ${healthyWebProbes}/2 passed: $readyUrl"
+                  }
+                  else {
+                    $healthyWebProbes = 0
+                  }
+                }
+                catch {
+                  Write-Host "ready.json not usable yet: $($_.Exception.Message)"
+                  $healthyWebProbes = 0
                 }
               }
+
+              if (
+                $content -match 'phase=runtime_ready' -and
+                $content -match 'phase=webview_requested' -and
+                $content -match 'phase=primary_visible' -and
+                $healthyWebProbes -ge 2
+              ) {
+                Write-Host 'PASS: installed Windows candidate reached primary Harness Web and served stable authenticated HTML'
+                exit 0
+              }
               if ($hostProcess.HasExited) {
-                throw "HarnessDock exited before primary Harness Web; exit=$($hostProcess.ExitCode)"
+                throw "HarnessDock exited before healthy primary Harness Web; exit=$($hostProcess.ExitCode)"
               }
             }
-            throw "Timed out waiting for primary Harness Web. Last trace:`n$content"
+            throw "Timed out waiting for healthy primary Harness Web. readyUrl=$readyUrl healthyProbes=$healthyWebProbes Last trace:`n$content"
           }
           finally {
             if ($hostProcess -and -not $hostProcess.HasExited) {

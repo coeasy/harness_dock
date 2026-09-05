@@ -148,6 +148,18 @@ fn has_launch_token(url: &Url) -> bool {
 }
 
 #[cfg(not(mobile))]
+fn runtime_listener_reachable(url: &Url) -> bool {
+    let Some(port) = url.port() else {
+        return false;
+    };
+    let address = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+        std::net::Ipv4Addr::LOCALHOST,
+        port,
+    ));
+    std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(250)).is_ok()
+}
+
+#[cfg(not(mobile))]
 fn current_runtime_lease(app: &AppHandle) -> Result<crate::runtime_actor::RuntimeLease, String> {
     // A RuntimeLease is published only after the Runtime readiness probe has
     // succeeded. WebView navigation/page-load callbacks must read that lease
@@ -216,6 +228,17 @@ fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &U
     if candidate.origin().ascii_serialization() != lease.origin {
         let _ = window.hide();
         show_startup_recovery(&app, "Harness Web 导航到了不受管理的 origin，已阻止加载。");
+        return;
+    }
+    // WebView2/Chromium emits PageLoadEvent::Finished for its own network error
+    // document as well. Never convert ERR_CONNECTION_REFUSED into
+    // primary_visible merely because the requested URL still matches the Lease.
+    if !runtime_listener_reachable(&candidate) {
+        let _ = window.hide();
+        show_startup_recovery(
+            &app,
+            "Harness Runtime 已发布地址，但本地 Web 监听已经失效（127.0.0.1 拒绝连接）。",
+        );
         return;
     }
     if app
@@ -336,6 +359,15 @@ async fn harness_open_impl(
     let lease = current_runtime_lease(&app)?;
     if runtime_url.origin().ascii_serialization() != lease.origin {
         return Err("Harness Web URL 与当前 RuntimeLease origin 不一致。".into());
+    }
+    // A published URL is not enough to navigate. A failed Loader can tear down
+    // the HTTP listener while leaving the Node supervisor process alive. Catch
+    // that state before creating/reusing a WebView so users never see the
+    // browser's raw 127.0.0.1 connection-refused page.
+    if !runtime_listener_reachable(&runtime_url) {
+        return Err(
+            "Harness Runtime 已发布地址，但本地 Web 监听不可达（127.0.0.1 拒绝连接）。".into(),
+        );
     }
 
     if let Some(window) = app.get_webview_window("harness") {
@@ -494,6 +526,11 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
             .ok()
             .and_then(|value| validated_runtime_url(value.as_str()).ok());
         let launch_url = validated_runtime_url(&lease.launch_url)?;
+        if !runtime_listener_reachable(&launch_url) {
+            let error = "Harness Runtime 本地 Web 监听不可达，无法刷新。".to_string();
+            show_startup_recovery(&app, &error);
+            return Err(error);
+        }
         let navigation_id = begin_harness_load(&app, lease.generation.id)?;
         show_splash(&app, "正在刷新 Harness Web…");
         let result = if current.as_ref().is_some_and(|value| {
@@ -798,5 +835,16 @@ mod tests {
         assert!(!has_launch_token(
             &validated_runtime_url("http://127.0.0.1:4321/?tab=plugins").unwrap()
         ));
+    }
+
+    #[cfg(not(mobile))]
+    #[test]
+    fn listener_probe_distinguishes_live_and_refused_loopback_ports() {
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = validated_runtime_url(&format!("http://127.0.0.1:{port}/")).unwrap();
+        assert!(super::runtime_listener_reachable(&url));
+        drop(listener);
+        assert!(!super::runtime_listener_reachable(&url));
     }
 }

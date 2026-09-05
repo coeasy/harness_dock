@@ -14,6 +14,17 @@ use crate::{
 use std::{sync::atomic::Ordering, time::Duration};
 use tauri::{AppHandle, Manager};
 
+fn runtime_listener_reachable(url: &url::Url) -> bool {
+    let Some(port) = url.port() else {
+        return false;
+    };
+    let address = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+        std::net::Ipv4Addr::LOCALHOST,
+        port,
+    ));
+    std::net::TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
+}
+
 /// WebView2/WebKit may report the authenticated `?token=` load event after the
 /// browser has already followed dsh's 303 to the clean `/` URL. The normal
 /// `on_page_load` callback remains authoritative, but startup must not leave a
@@ -21,10 +32,11 @@ use tauri::{AppHandle, Manager};
 /// reordered by the platform WebView.
 ///
 /// After the Runtime has already passed the browser-faithful readiness probe,
-/// observe the actual WebView URL for a short stability window. If it has
-/// settled on the current managed Runtime origin without the one-time launch
-/// token, publish the primary surface with native decorations. A later shell
-/// callback may still replace those native decorations with Harness Shell.
+/// observe the actual WebView URL for a short stability window. The fallback is
+/// deliberately stricter than a URL-only check: Chromium/WebView2 can retain the
+/// requested clean loopback URL while rendering an internal network-error page.
+/// The current Runtime listener therefore has to remain reachable for every
+/// stability poll before this path may publish the primary surface.
 async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
     let mut stable_clean_polls = 0_u8;
     for _ in 0..50 {
@@ -69,6 +81,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
                 && !current
                     .query_pairs()
                     .any(|(key, value)| key == "token" && !value.is_empty())
+                && runtime_listener_reachable(&current)
         });
         if clean_managed_url {
             stable_clean_polls = stable_clean_polls.saturating_add(1);
