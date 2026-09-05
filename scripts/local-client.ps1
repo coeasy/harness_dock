@@ -34,11 +34,13 @@ function Invoke-Native([string]$FilePath, [string[]]$Arguments) {
 }
 
 function Resolve-RequiredCommand([string]$Name) {
-    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $command) {
         throw "Required command '$Name' was not found on PATH."
     }
-    return $command.Source
+    if ($command.Source) { return $command.Source }
+    if ($command.Path) { return $command.Path }
+    return $command.Name
 }
 
 function Stop-ExistingHarnessDock {
@@ -220,7 +222,7 @@ function Invoke-PackagedStartupSmoke(
                 $healthyCleanProbes -ge 2
             ) {
                 $passed = $true
-                Write-Host '`nPASS: local packaged client reached primary Harness Web and served stable authenticated HTML.' -ForegroundColor Green
+                Write-Host "`nPASS: local packaged client reached primary Harness Web and served stable authenticated HTML." -ForegroundColor Green
                 Write-Host "Installed test binary: $($app.FullName)"
                 Write-Host "HarnessDock PID: $($hostProcess.Id)"
                 break
@@ -260,8 +262,9 @@ try {
     # Local build tooling still needs pnpm/cargo. We intentionally do not run
     # node-version-check.cjs or bootstrap.mjs here: this fast path reuses the
     # developer environment and the already bundled Harness Runtime.
-    $pnpm = Resolve-RequiredCommand 'pnpm.cmd'
-    $cargo = Resolve-RequiredCommand 'cargo.exe'
+    $pnpm = Resolve-RequiredCommand 'pnpm'
+    $cargo = Resolve-RequiredCommand 'cargo'
+    $node = Resolve-RequiredCommand 'node'
 
     if ($Install -or -not (Test-Path (Join-Path $RepoRoot 'node_modules'))) {
         Write-Step 'Installing workspace dependencies'
@@ -291,7 +294,7 @@ try {
             Write-Step 'Building the release client'
             $buildArgs = @('scripts/build.mjs', '--skip-install')
             if ($SkipTests) { $buildArgs += '--skip-tests' }
-            Invoke-Native (Resolve-RequiredCommand 'node.exe') $buildArgs
+            Invoke-Native $node $buildArgs
 
             $targetDir = Get-CargoTargetDirectory $cargo $CargoManifest
             $installer = Get-ChildItem $targetDir -Recurse -File -Filter '*setup.exe' -ErrorAction SilentlyContinue |
@@ -313,7 +316,7 @@ try {
             Write-Step 'Building the release client for packaged startup smoke'
             $buildArgs = @('scripts/build.mjs', '--skip-install')
             if ($SkipTests) { $buildArgs += '--skip-tests' }
-            Invoke-Native (Resolve-RequiredCommand 'node.exe') $buildArgs
+            Invoke-Native $node $buildArgs
 
             $targetDir = Get-CargoTargetDirectory $cargo $CargoManifest
             $installer = Get-ChildItem $targetDir -Recurse -File -Filter '*setup.exe' -ErrorAction SilentlyContinue |
