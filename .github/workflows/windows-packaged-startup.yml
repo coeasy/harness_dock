@@ -90,16 +90,45 @@ jobs:
           Remove-Item $neutralCwd -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $neutralCwd | Out-Null
 
-          function Test-HarnessWebHtml([string]$Url) {
+          function New-HarnessWebSession {
             $handler = [System.Net.Http.HttpClientHandler]::new()
             $handler.AllowAutoRedirect = $true
             $handler.UseCookies = $true
             $handler.CookieContainer = [System.Net.CookieContainer]::new()
             $client = [System.Net.Http.HttpClient]::new($handler)
             $client.Timeout = [TimeSpan]::FromSeconds(5)
+            return @{ Handler = $handler; Client = $client }
+          }
+
+          function Close-HarnessWebSession($Session) {
+            if ($null -ne $Session) {
+              if ($null -ne $Session.Client) { $Session.Client.Dispose() }
+              if ($null -ne $Session.Handler) { $Session.Handler.Dispose() }
+            }
+          }
+
+          function Get-HarnessCleanUrl([string]$Url) {
+            $builder = [System.UriBuilder]::new([System.Uri]$Url)
+            # BrowserAuth uses the launch token only to mint an authority-bound
+            # cookie and then redirects the browser to the clean root URL.
+            $builder.Path = '/'
+            $builder.Query = ''
+            $builder.Fragment = ''
+            return $builder.Uri.AbsoluteUri
+          }
+
+          function Test-HarnessWebHtml($Client, [string]$Url) {
             try {
-              $response = $client.GetAsync($Url).GetAwaiter().GetResult()
-              if (-not $response.IsSuccessStatusCode) { return $false }
+              $response = $Client.GetAsync($Url).GetAwaiter().GetResult()
+              if (-not $response.IsSuccessStatusCode) {
+                Write-Host "Harness Web probe returned HTTP $([int]$response.StatusCode): $Url"
+                return $false
+              }
+              $contentType = [string]$response.Content.Headers.ContentType
+              if ($contentType -and $contentType -notmatch '(?i)text/html') {
+                Write-Host "Harness Web probe returned non-HTML content type '$contentType': $Url"
+                return $false
+              }
               $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
               return $body -match '(?i)<!doctype\s+html|<html(?:\s|>)'
             }
@@ -107,19 +136,18 @@ jobs:
               Write-Host "Harness Web probe failed: $($_.Exception.Message)"
               return $false
             }
-            finally {
-              $client.Dispose()
-              $handler.Dispose()
-            }
           }
 
           $hostProcess = Start-Process -FilePath $app.FullName -WorkingDirectory $neutralCwd -PassThru
+          $webSession = $null
           try {
             $deadline = (Get-Date).AddSeconds(120)
             $trace = $null
             $content = ''
             $readyUrl = $null
-            $healthyWebProbes = 0
+            $cleanUrl = $null
+            $authenticated = $false
+            $healthyCleanProbes = 0
             while ((Get-Date) -lt $deadline) {
               Start-Sleep -Milliseconds 500
               $trace = Get-ChildItem $traceDir -Filter 'startup-*.log' -ErrorAction SilentlyContinue |
@@ -147,20 +175,38 @@ jobs:
                   }
                   $candidateUrl = [string]$readyJson.url
                   if ($candidateUrl -ne $readyUrl) {
+                    Close-HarnessWebSession $webSession
+                    $webSession = New-HarnessWebSession
                     $readyUrl = $candidateUrl
-                    $healthyWebProbes = 0
+                    $cleanUrl = Get-HarnessCleanUrl $readyUrl
+                    $authenticated = $false
+                    $healthyCleanProbes = 0
                   }
-                  if (Test-HarnessWebHtml $readyUrl) {
-                    $healthyWebProbes += 1
-                    Write-Host "Harness Web HTML probe ${healthyWebProbes}/2 passed: $readyUrl"
+
+                  if (-not $authenticated) {
+                    # Model the actual WebView: exchange the launch token once,
+                    # retain the Set-Cookie value in one browser session, and
+                    # prove that the redirected Harness HTML is available.
+                    if (Test-HarnessWebHtml $webSession.Client $readyUrl) {
+                      $authenticated = $true
+                      Write-Host "Harness Web launch-token exchange passed: $readyUrl"
+                    }
+                  }
+                  elseif (Test-HarnessWebHtml $webSession.Client $cleanUrl) {
+                    # Subsequent health requests must work on clean `/` using the
+                    # same browser cookie rather than reusing the token as a
+                    # substitute for a durable WebView session.
+                    $healthyCleanProbes += 1
+                    Write-Host "Harness Web authenticated clean-URL probe ${healthyCleanProbes}/2 passed: $cleanUrl"
                   }
                   else {
-                    $healthyWebProbes = 0
+                    $healthyCleanProbes = 0
                   }
                 }
                 catch {
                   Write-Host "ready.json not usable yet: $($_.Exception.Message)"
-                  $healthyWebProbes = 0
+                  $authenticated = $false
+                  $healthyCleanProbes = 0
                 }
               }
 
@@ -168,18 +214,20 @@ jobs:
                 $content -match 'phase=runtime_ready' -and
                 $content -match 'phase=webview_requested' -and
                 $content -match 'phase=primary_visible' -and
-                $healthyWebProbes -ge 2
+                $authenticated -and
+                $healthyCleanProbes -ge 2
               ) {
-                Write-Host 'PASS: installed Windows candidate reached primary Harness Web and served stable authenticated HTML'
+                Write-Host 'PASS: installed Windows candidate reached primary Harness Web and served stable cookie-authenticated HTML'
                 exit 0
               }
               if ($hostProcess.HasExited) {
                 throw "HarnessDock exited before healthy primary Harness Web; exit=$($hostProcess.ExitCode)"
               }
             }
-            throw "Timed out waiting for healthy primary Harness Web. readyUrl=$readyUrl healthyProbes=$healthyWebProbes Last trace:`n$content"
+            throw "Timed out waiting for healthy primary Harness Web. readyUrl=$readyUrl authenticated=$authenticated healthyCleanProbes=$healthyCleanProbes Last trace:`n$content"
           }
           finally {
+            Close-HarnessWebSession $webSession
             if ($hostProcess -and -not $hostProcess.HasExited) {
               taskkill /PID $hostProcess.Id /T /F | Out-Null
             }
