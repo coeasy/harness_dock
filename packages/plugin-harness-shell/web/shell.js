@@ -52,7 +52,7 @@
   function css() {
     return `
       :host { all: initial; color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .bar { -webkit-app-region: drag; align-items: center; backdrop-filter: blur(18px); background: rgba(20, 24, 32, .94); border: 1px solid rgba(255,255,255,.1); border-radius: 0 0 12px 12px; box-shadow: 0 8px 28px rgba(0,0,0,.22); color: #edf2f7; display: flex; gap: 8px; height: 44px; left: 8px; padding: 0 8px 0 14px; position: fixed; right: 8px; top: 0; user-select: none; z-index: 2147483000; }
+      .bar { -webkit-app-region: drag; align-items: center; backdrop-filter: blur(18px); background: rgba(20, 24, 32, .94); border-bottom: 1px solid rgba(255,255,255,.1); box-shadow: 0 4px 18px rgba(0,0,0,.22); color: #edf2f7; display: flex; gap: 8px; height: 44px; left: 0; padding: 0 8px 0 14px; position: fixed; right: 0; top: 0; user-select: none; z-index: 2147483000; }
       .brand { align-items: center; display: flex; flex: 1; gap: 8px; min-width: 0; }
       .mark { background: linear-gradient(135deg,#6ea8fe,#9b8cff); border-radius: 7px; box-shadow: 0 0 16px rgba(110,168,254,.34); height: 18px; width: 18px; }
       .title { font-size: 13px; font-weight: 650; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

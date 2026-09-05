@@ -35,6 +35,17 @@ window.__ModuleLoader__.load({
       return store
     }
 
-    return { createSnapshotStore }
+    // cordis-compatible plugin: a function that injects createSnapshotStore
+    // into the plugin context so legacy third-party browser bundles that
+    // import @deepseek-ai/dsh-client-runtime can resolve it as a service.
+    const plugin = (ctx) => {
+      if (ctx && typeof ctx.provide === 'function') {
+        ctx.provide('clientStore', { createSnapshotStore })
+      } else if (ctx && typeof ctx.set === 'function') {
+        ctx.set('clientStore', { createSnapshotStore })
+      }
+    }
+    plugin.createSnapshotStore = createSnapshotStore
+    return plugin
   },
 })

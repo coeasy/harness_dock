@@ -218,7 +218,8 @@ function apply(ctx) {
           nonce,
           imageIdentity
         };
-        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, {
+        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}
+`, {
           encoding: "utf8",
           mode: 384
         });
