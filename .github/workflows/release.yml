@@ -196,7 +196,7 @@ jobs:
           test -s release-assets/SHA256SUMS
           test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 15
 
-      - name: Publish immutable HarnessDock v0.1.2 test release
+      - name: Publish replaceable HarnessDock v0.1.2 test prerelease
         if: steps.release.outputs.publish == 'true'
         shell: bash
         env:
@@ -213,10 +213,31 @@ jobs:
           if tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" 2>/dev/null)"; then
             existing_tag_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha')"
           fi
+
+          # v0.1.2 is explicitly a test prerelease. When a real installed-client
+          # regression is found after publishing, a fully gated replacement is
+          # allowed to supersede only that prerelease. Never move a final release
+          # or an orphan tag, and do the replacement only after all CI/candidate/
+          # installed-Web gates and asset assembly above have succeeded.
           if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$RELEASE_SHA" ]; then
-            echo "release tag ${RELEASE_TAG} already points to ${existing_tag_sha}; refusing to move it to ${RELEASE_SHA}" >&2
-            exit 1
+            if [ -z "$existing_release_id" ]; then
+              echo "release tag ${RELEASE_TAG} points to ${existing_tag_sha} without a managed prerelease; refusing to move it" >&2
+              exit 1
+            fi
+            existing_prerelease="$(printf '%s' "$release_json" | jq -r '.prerelease')"
+            existing_draft="$(printf '%s' "$release_json" | jq -r '.draft')"
+            test "$existing_prerelease" = true && test "$existing_draft" = false || {
+              echo "${RELEASE_TAG} is not the replaceable published test prerelease; refusing to move tag" >&2
+              exit 1
+            }
+            echo "::notice::Replacing broken test prerelease ${RELEASE_TAG}: ${existing_tag_sha} -> ${RELEASE_SHA}"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}"
+            existing_release_id=""
+            existing_tag_sha=""
+            release_json=""
           fi
+
           if [ -z "$existing_tag_sha" ]; then
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${RELEASE_TAG}" -f sha="$RELEASE_SHA" >/dev/null
           fi
@@ -241,7 +262,7 @@ jobs:
                 remote_sha="$(sha256sum "$remote_asset" | awk '{print $1}')"
                 test "$remote_sha" = "$local_sha" || { echo "published asset differs from exact candidate: ${asset_name}" >&2; exit 1; }
               fi
-              echo "Immutable release asset matches: $asset_name"
+              echo "Existing same-SHA release asset matches: $asset_name"
             done
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
               -f target_commitish="$RELEASE_SHA" -f name="HarnessDock ${RELEASE_TAG}" \
