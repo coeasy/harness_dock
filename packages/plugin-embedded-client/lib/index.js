@@ -145,7 +145,24 @@ async function probeBrowserUrl(url, timeoutMs = 1e3) {
 
 // src/index.ts
 var name = "embedded-client";
-var inject = ["webServer"];
+var inject = ["webServer", "connection"];
+function getService(ctx, name2) {
+  try {
+    return ctx.get?.(name2);
+  } catch {
+    return void 0;
+  }
+}
+function loaderSettlement(ctx) {
+  const loader = getService(ctx, "loader");
+  return typeof loader?.await === "function" ? loader.await() : void 0;
+}
+function runtimeServicesPresent(ctx) {
+  if (typeof ctx.get !== "function") {
+    return ctx.webServer !== void 0 && ctx.connection !== void 0;
+  }
+  return getService(ctx, "webServer") !== void 0 && getService(ctx, "connection") !== void 0;
+}
 function apply(ctx) {
   const readyFile = process.env.DSH_EMBEDDED_READY_FILE;
   if (!readyFile) return;
@@ -158,16 +175,38 @@ function apply(ctx) {
   let written = false;
   let checking = false;
   let disposed = false;
+  let timer;
+  let consecutiveHealthyProbes = 0;
+  const stop = () => {
+    disposed = true;
+    if (timer !== void 0) {
+      clearInterval(timer);
+      timer = void 0;
+    }
+  };
   const tick = () => {
     if (written || checking || disposed) return;
+    if (!runtimeServicesPresent(ctx)) {
+      consecutiveHealthyProbes = 0;
+      return;
+    }
     const addr = findListenAddress(ctx);
-    if (!addr) return;
+    if (!addr) {
+      consecutiveHealthyProbes = 0;
+      return;
+    }
     const baseUrl = `http://127.0.0.1:${addr.port}`;
     const browserUrl = browserUrlFor(ctx, baseUrl);
     checking = true;
     void probeBrowserUrl(browserUrl).then((ready) => {
       checking = false;
-      if (!ready || written || disposed) return;
+      if (written || disposed) return;
+      if (!ready || !runtimeServicesPresent(ctx)) {
+        consecutiveHealthyProbes = 0;
+        return;
+      }
+      consecutiveHealthyProbes += 1;
+      if (consecutiveHealthyProbes < 3) return;
       try {
         const payload = {
           url: browserUrl,
@@ -179,33 +218,49 @@ function apply(ctx) {
           nonce,
           imageIdentity
         };
-        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}
-`, {
+        writeFileSync(readyFile, `${JSON.stringify(payload, null, 2)}\n`, {
           encoding: "utf8",
           mode: 384
         });
         written = true;
+        if (timer !== void 0) {
+          clearInterval(timer);
+          timer = void 0;
+        }
       } catch {
+        consecutiveHealthyProbes = 0;
       }
+    }, () => {
+      checking = false;
+      consecutiveHealthyProbes = 0;
+    });
+  };
+  const beginProbing = () => {
+    if (disposed || written || timer !== void 0 || !runtimeServicesPresent(ctx)) return;
+    timer = setInterval(tick, 100);
+    tick();
+  };
+  const beginAfterLoaderSettlement = () => {
+    const settled = loaderSettlement(ctx);
+    if (settled === void 0) {
+      beginProbing();
+      return;
+    }
+    void settled.then(() => {
+      if (!disposed && runtimeServicesPresent(ctx)) beginProbing();
+    }, () => {
+      stop();
     });
   };
   if (typeof ctx.effect === "function") {
     ctx.effect(() => {
-      const timer2 = setInterval(tick, 100);
-      tick();
-      return () => {
-        disposed = true;
-        clearInterval(timer2);
-      };
+      beginAfterLoaderSettlement();
+      return stop;
     });
     return;
   }
-  const timer = setInterval(tick, 100);
-  tick();
-  ctx.on?.("dispose", () => {
-    disposed = true;
-    clearInterval(timer);
-  });
+  beginAfterLoaderSettlement();
+  ctx.on?.("dispose", stop);
 }
 export {
   apply,
