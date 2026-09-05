@@ -6,8 +6,12 @@ out/
 Thumbs.db
 *.log
 .cache/
+.local-cache/
+.local-tools/
+.local-logs/
 coverage/
 apps/tauri/src-tauri/target/
+apps/tauri/src-tauri/resources/dsh-runtime/
 apps/perry/release/
 apps/perry/.perry/
 apps/vscode/resources/
