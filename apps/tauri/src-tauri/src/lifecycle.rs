@@ -1,6 +1,10 @@
 use crate::{
-    gateway_host::GatewayPhase, runtime_actor::RuntimePhase, surface_actor::SurfaceOperation,
-    update_actor::UpdatePhase, AppState,
+    gateway_host::GatewayPhase,
+    read_model::HostReadModel,
+    runtime_actor::RuntimePhase,
+    surface_actor::SurfaceOperation,
+    update_actor::UpdatePhase,
+    AppState,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -31,37 +35,19 @@ impl LifecycleSnapshot {
 }
 
 pub(crate) fn snapshot(state: &AppState) -> LifecycleSnapshot {
-    let runtime_phase = state
-        .runtime_actor
-        .lock()
-        .map(|actor| actor.phase())
-        .unwrap_or(RuntimePhase::Failed);
-    let gateway_phase = state
-        .gateway
-        .lock()
-        .map(|actor| actor.phase())
-        .unwrap_or(GatewayPhase::Failed);
-    let update_phase = state
-        .update_actor
-        .lock()
-        .map(|actor| actor.phase())
-        .unwrap_or(UpdatePhase::Failed);
-    let surface_operation = state
-        .surface_actor
-        .lock()
-        .map(|actor| actor.operation())
-        .unwrap_or(SurfaceOperation::Idle);
+    let model = HostReadModel::collect(state);
     LifecycleSnapshot {
-        runtime_phase,
-        gateway_phase,
-        update_phase,
-        surface_operation,
+        runtime_phase: model.runtime_phase,
+        gateway_phase: model.gateway_phase,
+        update_phase: model.update_phase,
+        surface_operation: model.surface_operation,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn explicit_actor_states_define_shutdown_idleness() {
         let idle = LifecycleSnapshot {
