@@ -1,11 +1,9 @@
 //! Gateway request routing: pairing, connect-ticket exchange and the
 //! authenticated upstream proxy.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub fn handle_connection(
     mut stream: TcpStream,
@@ -163,7 +161,11 @@ pub fn handle_pair(
     }
 }
 
-pub fn handle_connect(stream: &mut TcpStream, url: &Url, shared: &GatewayShared) -> Result<(), String> {
+pub fn handle_connect(
+    stream: &mut TcpStream,
+    url: &Url,
+    shared: &GatewayShared,
+) -> Result<(), String> {
     if url.path() != "/api/harnessdock/connect" {
         return write_status(stream, 404, "Not Found", b"");
     }

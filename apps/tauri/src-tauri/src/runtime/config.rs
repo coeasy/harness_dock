@@ -3,11 +3,9 @@
 //! Pure functions over the config-dump text; the recovery boot loop that
 //! consumes these results lives in `spawn` / `start`.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub fn embedded_patch(plugin: &Path, compatibility: &Path, shell: &Path) -> Result<String, String> {
     let plugin_url = Url::from_file_path(platform::node_cli_path(plugin))
@@ -120,7 +118,11 @@ pub fn diagnostic_matches(row: &ConfigDumpRow, diagnostic: &str) -> bool {
 }
 
 pub fn row_tokens(row: &ConfigDumpRow) -> Vec<String> {
-    let mut tokens = vec![row.id.clone(), row.source.clone(), basename(&row.source).to_string()];
+    let mut tokens = vec![
+        row.id.clone(),
+        row.source.clone(),
+        basename(&row.source).to_string(),
+    ];
     if let Some(name) = row.name.as_deref() {
         tokens.push(name.to_string());
         tokens.push(basename(name).to_string());
@@ -315,18 +317,19 @@ mod tests {
         assert_eq!(decode_yaml_scalar("\"unterminated"), "\"unterminated");
         assert_eq!(decode_yaml_scalar("unterminated'"), "unterminated'");
         // A double-quoted value that is not valid JSON keeps its payload.
-        assert_eq!(
-            decode_yaml_scalar(r#""bad escape \q""#),
-            "bad escape \\q"
-        );
+        assert_eq!(decode_yaml_scalar(r#""bad escape \q""#), "bad escape \\q");
     }
 
     #[test]
     fn is_official_source_recognises_deepseek_paths_and_backslash_writes() {
         assert!(is_official_source("@deepseek-ai/dsh-bundle-base"));
         assert!(is_official_source("@deepseek-ai/plugin-core"));
-        assert!(is_official_source("/opt/node_modules/@deepseek-ai/dsh-bundle-base"));
-        assert!(is_official_source("C:\\deepseek\\node_modules\\@deepseek-ai\\plugin"));
+        assert!(is_official_source(
+            "/opt/node_modules/@deepseek-ai/dsh-bundle-base"
+        ));
+        assert!(is_official_source(
+            "C:\\deepseek\\node_modules\\@deepseek-ai\\plugin"
+        ));
         assert!(!is_official_source("third-party-bundle"));
         assert!(!is_official_source("/home/me/.dsh/cordis.patch.yml"));
         assert!(!is_official_source("@deepseek/ai-not-official"));
@@ -374,7 +377,13 @@ mod tests {
         };
         assert_eq!(
             row_tokens(&row),
-            vec!["my-plugin", "/tmp/dump.yml", "dump.yml", "/tmp/FOO/my-plugin.js", "my-plugin.js"]
+            vec![
+                "my-plugin",
+                "/tmp/dump.yml",
+                "dump.yml",
+                "/tmp/FOO/my-plugin.js",
+                "my-plugin.js"
+            ]
         );
         let unnamed = ConfigDumpRow {
             id: "bare".into(),
@@ -394,7 +403,10 @@ mod tests {
             name: Some("/tmp/FOO/my-plugin.js".into()),
             source: "/tmp/dump.yml".into(),
         };
-        assert!(diagnostic_matches(&row, "cannot find module '/tmp/foo/MY-PLUGIN.JS'"));
+        assert!(diagnostic_matches(
+            &row,
+            "cannot find module '/tmp/foo/MY-PLUGIN.JS'"
+        ));
         assert!(diagnostic_matches(&row, "MODULE_NOT_FOUND: my-plugin"));
         assert!(!diagnostic_matches(&row, "no such file: unrelated.txt"));
     }
@@ -483,10 +495,15 @@ mod tests {
 
     impl DshHomeScope {
         fn enter(root: &Path) -> Self {
-            let lock = DSH_HOME_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let lock = DSH_HOME_LOCK
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let previous = std::env::var_os("DSH_HOME");
             std::env::set_var("DSH_HOME", root);
-            Self { previous, _lock: lock }
+            Self {
+                previous,
+                _lock: lock,
+            }
         }
     }
 

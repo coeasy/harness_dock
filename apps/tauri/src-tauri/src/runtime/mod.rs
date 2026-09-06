@@ -40,18 +40,18 @@ use crate::{
 // `types` is deliberately `pub(crate)`: it is the only part of this module
 // tree that `runtime_actor` depends on, and it must stay free of business
 // logic so the actor never reaches into spawn/launch code.
-pub(crate) mod types;
-mod paths;
 mod config;
+mod control;
+mod paths;
 mod spawn;
 mod start;
-mod control;
+pub(crate) mod types;
 
 pub(crate) use types::*;
 // Every submodule is declared `mod` (private), so the `pub` items below
 // are still only reachable from inside this crate.
 pub(crate) use config::*;
+pub(crate) use control::*;
 pub(crate) use paths::*;
 pub(crate) use spawn::*;
 pub(crate) use start::*;
-pub(crate) use control::*;

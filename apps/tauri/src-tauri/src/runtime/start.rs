@@ -1,10 +1,8 @@
 //! The blocking multi-attempt start loop and generation lease publication.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub fn launch_attempt(
     image: &RuntimeImage,

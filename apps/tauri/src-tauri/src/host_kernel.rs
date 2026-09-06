@@ -315,8 +315,7 @@ pub(crate) fn install(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let (sender, receiver) = tauri::async_runtime::channel(KERNEL_QUEUE_CAPACITY);
-    let (fast_sender, fast_receiver) =
-        tauri::async_runtime::channel(KERNEL_FAST_QUEUE_CAPACITY);
+    let (fast_sender, fast_receiver) = tauri::async_runtime::channel(KERNEL_FAST_QUEUE_CAPACITY);
     let public = Arc::new(Mutex::new(KernelPublicState::default()));
     *slot = Some(HostKernelHandle {
         sender,

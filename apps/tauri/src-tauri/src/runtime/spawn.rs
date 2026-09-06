@@ -1,10 +1,8 @@
 //! Process spawning, readiness probing and config dumps for a Runtime image.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub struct WorkDirGuard {
     pub path: PathBuf,
