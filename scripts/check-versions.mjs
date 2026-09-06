@@ -12,6 +12,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
 const rootVersion = rootPkg.version
 const releaseManifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
+const shellContract = JSON.parse(readFileSync(path.join(repoRoot, 'protocol', 'shell-contract.json'), 'utf8'))
 const mismatches = []
 
 let activeReleaseTag = `v${rootVersion}`
@@ -93,12 +94,13 @@ if (existsSync(cargoPath)) {
   }
 }
 
-const releaseManifestPath = path.join(repoRoot, 'release-manifest.json')
-if (existsSync(releaseManifestPath)) {
-  const releaseManifestValue = JSON.parse(readFileSync(releaseManifestPath, 'utf8'))
-  if (releaseManifestValue.shell?.version !== rootVersion) {
-    mismatches.push(`release-manifest.json shell.version: ${releaseManifestValue.shell?.version} (root: ${rootVersion})`)
-  }
+if (releaseManifest.shell?.version !== rootVersion) {
+  mismatches.push(`release-manifest.json shell.version: ${releaseManifest.shell?.version} (root: ${rootVersion})`)
+}
+if (releaseManifest.shell?.apiVersion !== shellContract.apiVersion) {
+  mismatches.push(
+    `release-manifest.json shell.apiVersion: ${releaseManifest.shell?.apiVersion} (shell contract: ${shellContract.apiVersion})`,
+  )
 }
 
 const originPath = path.join(repoRoot, 'packages', 'docs-sync', 'origin.json')
@@ -112,40 +114,64 @@ if (existsSync(originPath)) {
   }
 }
 
-const textVersionFiles = [
-  ['packages/plugin-harness-shell/src/index.ts', /export const version = '([^']+)'/],
-  ['packages/plugin-harness-shell/lib/index.js', /var version = "([^"]+)"/],
-]
-for (const [relativePath, pattern] of textVersionFiles) {
-  const filePath = path.join(repoRoot, relativePath)
-  if (!existsSync(filePath)) {
-    mismatches.push(`${relativePath}: file is missing`)
-    continue
+// Generated shell identity is the active source-level version contract. The
+// plugin entrypoint imports it instead of repeating a string literal, so do
+// not force a duplicate `export const version = 'x.y.z'` back into source.
+const shellGeneratedPath = path.join(
+  repoRoot,
+  'packages',
+  'plugin-harness-shell',
+  'src',
+  'shell-contract.generated.ts',
+)
+if (!existsSync(shellGeneratedPath)) {
+  mismatches.push('packages/plugin-harness-shell/src/shell-contract.generated.ts: file is missing')
+} else {
+  const generated = readFileSync(shellGeneratedPath, 'utf8')
+  const generatedVersion = generated.match(/SHELL_VERSION\s*=\s*"([^"]+)"/)?.[1]
+  const generatedApi = Number(generated.match(/SHELL_API_VERSION\s*=\s*(\d+)/)?.[1])
+  if (generatedVersion !== rootVersion) {
+    mismatches.push(`packages/plugin-harness-shell/src/shell-contract.generated.ts: ${generatedVersion} (root: ${rootVersion})`)
   }
-  const value = readFileSync(filePath, 'utf8').match(pattern)?.[1]
-  if (value !== rootVersion) {
-    mismatches.push(`${relativePath}: ${value} (root: ${rootVersion})`)
+  if (generatedApi !== shellContract.apiVersion) {
+    mismatches.push(`packages/plugin-harness-shell/src/shell-contract.generated.ts apiVersion: ${generatedApi} (shell contract: ${shellContract.apiVersion})`)
   }
 }
 
-// The shell package intentionally checks in its publishable web asset and
-// compiled Node entry. Refuse source-only fixes that would leave a direct
-// repository/npm consumer on stale behavior until a later candidate build.
+// The checked-in compiled Node entry remains a direct package consumer, so its
+// version must still match even though the TypeScript source now consumes the
+// generated identity module.
+const shellLibPath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'lib', 'index.js')
+if (!existsSync(shellLibPath)) {
+  mismatches.push('packages/plugin-harness-shell/lib/index.js: file is missing')
+} else {
+  const bundledVersion = readFileSync(shellLibPath, 'utf8').match(/var version = "([^"]+)"/)?.[1]
+  if (bundledVersion !== rootVersion) {
+    mismatches.push(`packages/plugin-harness-shell/lib/index.js: ${bundledVersion} (root: ${rootVersion})`)
+  }
+}
+
+// The web source is now a template so the canonical Shell API/plugin identity
+// can be injected at build time. Compare the checked-in publishable asset with
+// the rendered template rather than with unresolved source placeholders.
 const shellWebSourcePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'src', 'web', 'shell.js')
 const shellWebBundlePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'web', 'shell.js')
 if (existsSync(shellWebSourcePath) && existsSync(shellWebBundlePath)) {
   const source = readFileSync(shellWebSourcePath, 'utf8')
+  const pluginLiteral = `'${String(shellContract.pluginId).replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`
+  const expectedBundle = source
+    .replaceAll('__SHELL_API_VERSION__', String(shellContract.apiVersion))
+    .replaceAll('__SHELL_PLUGIN_ID__', pluginLiteral)
   const bundle = readFileSync(shellWebBundlePath, 'utf8')
-  if (source !== bundle) {
+  if (expectedBundle !== bundle) {
     mismatches.push('packages/plugin-harness-shell/web/shell.js: stale generated web bundle; run the shell bundle step')
   }
 }
 
 const shellEntrySourcePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'src', 'index.ts')
-const shellEntryBundlePath = path.join(repoRoot, 'packages', 'plugin-harness-shell', 'lib', 'index.js')
-if (existsSync(shellEntrySourcePath) && existsSync(shellEntryBundlePath)) {
+if (existsSync(shellEntrySourcePath) && existsSync(shellLibPath)) {
   const source = readFileSync(shellEntrySourcePath, 'utf8')
-  const bundle = readFileSync(shellEntryBundlePath, 'utf8')
+  const bundle = readFileSync(shellLibPath, 'utf8')
   if (source.includes("register?.('harnessShell', service)") && !bundle.includes('register?.("harnessShell", service)')) {
     mismatches.push('packages/plugin-harness-shell/lib/index.js: missing current harnessShell registration contract')
   }
