@@ -3,7 +3,7 @@ import { accessSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import * as vscode from 'vscode'
 import { bootstrapRuntime, type BootstrapResult } from '@dsh/bootstrap'
-import type { DshRuntime } from '@dsh/client-runtime'
+import type { DshRuntime } from '@dsh/client-runtime/host'
 import { renderHarnessWebview, renderErrorWebview } from './webview.ts'
 import { HarnessSession } from './controller.ts'
 
@@ -139,7 +139,6 @@ function createPanel(context: vscode.ExtensionContext, url: string): void {
   panel.webview.html = renderHarnessWebview({ url, cspSource: panel.webview.cspSource })
   panel.onDidDispose(() => {
     panels.delete(panel)
-    // keep-alive off: stop the shared runtime once the LAST panel closes
     const shouldStop = session?.panelClosed() ?? false
     if (shouldStop) void stopRuntime('last panel closed (keep-alive off)')
   })
