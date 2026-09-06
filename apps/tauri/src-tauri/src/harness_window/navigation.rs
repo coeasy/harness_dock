@@ -233,6 +233,18 @@ pub fn claim_surface_operation(
     app: &AppHandle,
     operation: SurfaceOperation,
 ) -> Result<SurfaceOperationGuard, String> {
+    // Surface ownership is also the local-control shutdown admission point.
+    // Remote Host Protocol commands are rejected by Reconciler, while legacy
+    // local recovery invokes may call these helpers directly. Closing the gate
+    // here ensures neither path can start a new navigation/restart/diagnostics
+    // operation after Supervisor has begun draining resources.
+    if app
+        .state::<crate::AppState>()
+        .quitting
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("HarnessDock 正在退出，已拒绝新的界面操作。".into());
+    }
     app.state::<crate::AppState>()
         .surface_actor
         .lock()
