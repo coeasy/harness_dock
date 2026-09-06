@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "loopbackHost": "127.0.0.1",
+  "env": {
+    "readyFile": "DSH_EMBEDDED_READY_FILE",
+    "dshVersion": "DSH_EMBEDDED_VERSION",
+    "generation": "HARNESSDOCK_RUNTIME_GENERATION",
+    "nonce": "HARNESSDOCK_RUNTIME_NONCE",
+    "imageIdentity": "HARNESSDOCK_RUNTIME_IMAGE_IDENTITY"
+  },
+  "fields": [
+    "url",
+    "host",
+    "port",
+    "pid",
+    "dshVersion",
+    "generation",
+    "nonce",
+    "imageIdentity"
+  ]
+}
