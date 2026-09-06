@@ -292,11 +292,10 @@ impl RuntimeActor {
         image_identity: String,
     ) -> Result<RuntimeGeneration, String> {
         self.state.bind_image(generation, image_identity)?;
-        Ok(self
-            .state
+        self.state
             .generation()
-            .expect("generation must exist after image binding")
-            .clone())
+            .cloned()
+            .ok_or_else(|| "Runtime generation disappeared after image binding".to_string())
     }
 
     pub(crate) fn mark_starting(&mut self, generation: u64) -> Result<(), String> {
