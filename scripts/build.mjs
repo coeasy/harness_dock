@@ -92,7 +92,7 @@ function tauriVersion(extraPath = null) {
   return match?.[1] ?? null
 }
 
-function run(command, args, label, options = {}) {
+function runStatus(command, args, label, options = {}) {
   console.log(`\n> ${label}`)
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repoRoot,
@@ -100,7 +100,13 @@ function run(command, args, label, options = {}) {
     shell: process.platform === 'win32',
     env: { ...process.env, ...(options.env ?? {}) },
   })
-  if (result.status !== 0) fail(`${label} failed with exit code ${result.status}`)
+  if (result.error) console.error(`[build] ${label}: ${result.error.message}`)
+  return result.status ?? 1
+}
+
+function run(command, args, label, options = {}) {
+  const status = runStatus(command, args, label, options)
+  if (status !== 0) fail(`${label} failed with exit code ${status}`)
 }
 
 function prependPath(directory) {
@@ -167,15 +173,30 @@ if (!values['skip-runtime']) {
   if (values['force-runtime']) runtimeArgs.push('--force')
   if (values['source-runtime']) runtimeArgs.push('--source-only')
   run(process.execPath, runtimeArgs, 'prepare sealed local Harness Runtime')
-  run(
+
+  const smokeArgs = [
+    '--filter', '@dsh/client-runtime', 'smoke-runtime', '--',
+    '--runtime-dir', 'apps/tauri/src-tauri/resources/dsh-runtime',
+    '--plugin', 'packages/plugin-embedded-client/lib/index.js',
+  ]
+  const firstSmoke = runStatus(
     pnpmCommand,
-    [
-      '--filter', '@dsh/client-runtime', 'smoke-runtime', '--',
-      '--runtime-dir', 'apps/tauri/src-tauri/resources/dsh-runtime',
-      '--plugin', 'packages/plugin-embedded-client/lib/index.js',
-    ],
+    smokeArgs,
     'verify sealed Runtime + Harness Web readiness',
   )
+  if (firstSmoke !== 0) {
+    console.warn(
+      '[build] Runtime verification failed; discarding/re-preparing the sealed Runtime once to self-heal stale or corrupted local cache.',
+    )
+    const repairArgs = ['scripts/prepare-local-runtime.mjs', '--force']
+    if (values['source-runtime']) repairArgs.push('--source-only')
+    run(process.execPath, repairArgs, 'force-refresh sealed local Harness Runtime after verification failure')
+    run(
+      pnpmCommand,
+      smokeArgs,
+      'verify refreshed sealed Runtime + Harness Web readiness',
+    )
+  }
 }
 
 run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:check'], 'check Tauri Rust host')
