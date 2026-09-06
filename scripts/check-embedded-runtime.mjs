@@ -20,6 +20,7 @@ const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
 const platform = read('apps/tauri/src-tauri/src/platform.rs')
 const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
 const embeddedReadyProducer = read('packages/plugin-embedded-client/src/index.ts')
+const readyContract = readJson('protocol/runtime-ready-contract.json')
 const shellCapability = readJson('apps/tauri/src-tauri/capabilities/harness-shell.json')
 const runtimePackage = readJson('packages/client-runtime/package.json')
 const prepare = read('packages/client-runtime/src/prepare-cli.ts')
@@ -81,24 +82,39 @@ for (const forbidden of [
 ]) {
   forbidText(runtime, forbidden, 'normal desktop startup must not repeat packaged Node/dsh Runtime verification')
 }
+
+// Runtime readiness is a cross-host protocol, not a collection of copied env
+// strings. The canonical JSON/generator gate owns the literal names; this gate
+// verifies the native and embedded implementations actually consume those
+// generated bindings and enforce the semantic process/generation boundary.
+if (
+  readyContract.loopbackHost !== '127.0.0.1' ||
+  JSON.stringify(readyContract.fields) !== JSON.stringify([
+    'url', 'host', 'port', 'pid', 'dshVersion', 'generation', 'nonce', 'imageIdentity',
+  ])
+) {
+  fail('Runtime ready canonical contract drifted from the managed loopback eight-field boundary')
+}
 for (const marker of [
   'ready.generation != expected_generation.id',
   'ready.nonce != expected_generation.nonce',
   'ready.image_identity != expected_generation.image_identity',
   'ready.pid != expected_pid',
-  'ready.host != "127.0.0.1"',
+  'ready.host != RUNTIME_READY_LOOPBACK_HOST',
 ]) {
   requireText(runtime, marker, `Runtime ready handshake missing required binding: ${marker}`)
 }
 for (const marker of [
-  'HARNESSDOCK_RUNTIME_GENERATION',
-  'HARNESSDOCK_RUNTIME_NONCE',
-  'HARNESSDOCK_RUNTIME_IMAGE_IDENTITY',
+  'RUNTIME_READY_ENV.readyFile',
+  'RUNTIME_READY_ENV.dshVersion',
+  'RUNTIME_READY_ENV.generation',
+  'RUNTIME_READY_ENV.nonce',
+  'RUNTIME_READY_ENV.imageIdentity',
   'generation,',
   'nonce,',
   'imageIdentity,',
 ]) {
-  requireText(embeddedReadyProducer, marker, `embedded ready producer missing generation binding: ${marker}`)
+  requireText(embeddedReadyProducer, marker, `embedded ready producer missing canonical generation binding: ${marker}`)
 }
 for (const forbidden of ['resolve_system_node', 'HARNESSDOCK_USE_SYSTEM_NODE', 'HARNESSDOCK_NODE_BIN']) {
   forbidText(runtime, forbidden, 'formal desktop Runtime must not fall back to a system Node installation')
