@@ -1,0 +1,38 @@
+name: pr85-rustfmt
+
+on:
+  push:
+    branches:
+      - fix/complete-local-one-click-build
+    paths:
+      - '.github/workflows/pr85-rustfmt.yml'
+      - 'apps/tauri/src-tauri/**/*.rs'
+
+permissions:
+  contents: write
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/complete-local-one-click-build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+      - name: Format Tauri Rust tree deterministically
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml
+          if git diff --quiet -- apps/tauri/src-tauri; then
+            echo 'Rust tree already formatted.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/tauri/src-tauri
+          git commit -m 'style: format Tauri Rust tree with rustfmt 1.98'
+          git push origin HEAD:fix/complete-local-one-click-build
