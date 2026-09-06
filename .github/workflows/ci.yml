@@ -36,6 +36,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm check:versions
+      - run: pnpm check:release
+      - run: node scripts/check-mobile-contract.mjs
       - run: pnpm check:embedded-runtime
       # Gateway integration requests use an 8s production timeout and Windows
       # can also need bounded fs.rm retries while Defender/indexers release
@@ -62,7 +64,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/tauri/src-tauri
@@ -73,10 +75,14 @@ jobs:
       - run: pnpm --filter @dsh/plugin-harness-shell build
       - name: Verify publishable Harness Shell package
         run: node scripts/check-shell-package.mjs
+      - name: Verify canonical Tauri module layout
+        run: node scripts/check-tauri-source-layout.mjs
       - name: Check Tauri Rust formatting
         run: cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml -- --check
       - name: Check Tauri Native Host
         run: cargo check --locked --manifest-path apps/tauri/src-tauri/Cargo.toml
+      - name: Clippy Tauri Native Host
+        run: cargo clippy --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Test Runtime/Surface/Gateway/Update actors
         run: cargo test --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --lib
       - name: Verify Tauri version contract
@@ -88,14 +94,26 @@ jobs:
           cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/tauri/src-tauri/Cargo.toml | head -1)"
           test "$tauri_version" = "$root_version"
           test "$cargo_version" = "$root_version"
-          test -s apps/tauri/src-tauri/Cargo.lock
-          # runtime / gateway_host / harness_window are directory modules since the
-          # R3-R5 split, so assert on the module roots rather than single files.
-          test -s apps/tauri/src-tauri/src/runtime/mod.rs
-          test -s apps/tauri/src-tauri/src/gateway_host/mod.rs
-          test -s apps/tauri/src-tauri/src/harness_window/mod.rs
-          test -s apps/tauri/src-tauri/src/util.rs
-          test -s apps/tauri/src-tauri/src/error.rs
+
+  vscode-package:
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Build and package VS Code companion
+        run: pnpm --filter ./apps/vscode run pack:vsix
+      - name: Verify VSIX output contract
+        run: node scripts/check-vscode-package.mjs
 
   # The portable-Node bootstrap has historically been validated only with
   # `bash -n` / a PowerShell parse, never actually downloaded anything. Run it
