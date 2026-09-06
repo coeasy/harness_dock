@@ -132,8 +132,16 @@ impl RuntimeProcess {
     pub(crate) fn stop(&mut self) {
         if !self.stopped {
             self.stopped = true;
+            // StartingProcessGuard owns the process-tree boundary: a Windows
+            // Runtime is in a KILL_ON_JOB_CLOSE Job Object and a Unix Runtime
+            // is in its own process group. After terminating that owned tree,
+            // reap the direct Child by handle. Do not call `stop_child_tree`
+            // here: on Windows that would immediately issue a second
+            // `taskkill /PID /T /F`, expanding the PID-reuse race after the
+            // Job Object has already terminated the correct process tree.
             self.registration.terminate_tree();
-            process_control::stop_child_tree(&mut self.child);
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
         let _ = fs::remove_dir_all(&self.work_dir);
     }
