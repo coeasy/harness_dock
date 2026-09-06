@@ -300,12 +300,7 @@ async fn process_kernel_request(
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
         };
-        complete_kernel_request(
-            &mut state,
-            &request_id,
-            fingerprint,
-            response.clone(),
-        )
+        complete_kernel_request(&mut state, &request_id, fingerprint, response.clone())
     };
 
     let _ = request.reply.send(response.clone());
@@ -440,7 +435,10 @@ pub(crate) fn public_state(app: &AppHandle) -> KernelPublicState {
 mod tests {
     use super::*;
 
-    fn request(request_id: &str, command: HostCommand) -> (KernelRequest, std::sync::mpsc::Receiver<ResponseEnvelope>) {
+    fn request(
+        request_id: &str,
+        command: HostCommand,
+    ) -> (KernelRequest, std::sync::mpsc::Receiver<ResponseEnvelope>) {
         let (reply, receiver) = std::sync::mpsc::sync_channel(1);
         (
             KernelRequest {
@@ -489,12 +487,7 @@ mod tests {
             request_id: "req-1".into(),
             result: Ok(HostResponse::Ack),
         };
-        let waiters = complete_kernel_request(
-            &mut state,
-            "req-1",
-            fingerprint,
-            response.clone(),
-        );
+        let waiters = complete_kernel_request(&mut state, "req-1", fingerprint, response.clone());
         for waiter in waiters {
             let _ = waiter.send(response.clone());
         }
@@ -515,7 +508,9 @@ mod tests {
         let conflict_fingerprint = command_fingerprint(&conflict.envelope);
         assert!(admit_kernel_request(&mut state, &conflict, &conflict_fingerprint).is_none());
         let response = conflict_rx.recv().expect("conflict response");
-        let error = response.result.expect_err("conflicting request id must fail");
+        let error = response
+            .result
+            .expect_err("conflicting request id must fail");
         assert_eq!(error.code, "REQUEST_ID_REUSED");
         assert_eq!(state.inflight.len(), 1);
     }
