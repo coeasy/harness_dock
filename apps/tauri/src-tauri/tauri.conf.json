@@ -5,8 +5,8 @@
   "identifier": "com.harnessdock.client",
   "build": {
     "frontendDist": "../web",
-    "beforeDevCommand": "pnpm prepare:icons",
-    "beforeBuildCommand": "pnpm prepare:icons"
+    "beforeDevCommand": "pnpm --filter @dsh/tauri prepare:icons",
+    "beforeBuildCommand": "pnpm --filter @dsh/tauri prepare:icons"
   },
   "app": {
     "withGlobalTauri": true,
