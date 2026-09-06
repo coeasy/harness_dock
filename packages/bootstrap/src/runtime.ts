@@ -1,12 +1,12 @@
 import path from 'node:path'
 import {
   DshRuntime,
-  inspectBundledRuntime,
   resolveRuntimeMode,
   type ReadyInfo,
   type RuntimeMode,
   type RuntimeProgressEvent,
-} from '@dsh/client-runtime'
+} from '@dsh/client-runtime/host'
+import { inspectBundledRuntime } from '@dsh/client-runtime/packaging'
 import { readOriginFile, type Origin } from '@dsh/docs-sync'
 import { backupOrigin, readPreviousOrigin } from './rollback.ts'
 
