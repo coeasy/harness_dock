@@ -4,45 +4,40 @@
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
 
-pub fn launch_attempt(
-    image: &RuntimeImage,
-    patches: &[&Path],
-    dsh_home: Option<&Path>,
-    ready_file: &Path,
-    dir: &Path,
-    attempt: &str,
-    generation: &RuntimeGeneration,
-    token: &CancellationToken,
-    starting_processes: &process_control::StartingProcessRegistry,
-    quitting: &std::sync::atomic::AtomicBool,
-) -> Result<RuntimeProcess, AttemptFailure> {
-    let (mut child, stdout, stderr, registration) = spawn_runtime(
-        image,
-        patches,
-        dsh_home,
-        ready_file,
-        dir,
-        attempt,
-        generation,
-        token,
-        starting_processes,
-        quitting,
-    )
-    .map_err(|message| AttemptFailure {
-        message,
-        diagnostic: String::new(),
+/// Owned handoff from the async RuntimeActor controller to the blocking launch
+/// worker. All values belong to one immutable generation; passing one object
+/// prevents later recovery attempts from accidentally mixing generation,
+/// cancellation, process-registry or shutdown state from another start.
+pub struct RuntimeStartRequest {
+    pub image: RuntimeImage,
+    pub plugin_path: PathBuf,
+    pub compatibility_path: PathBuf,
+    pub shell_plugin_path: PathBuf,
+    pub quarantine_state_path: PathBuf,
+    pub generation: RuntimeGeneration,
+    pub token: CancellationToken,
+    pub force_safe_mode: bool,
+    pub starting_processes: process_control::StartingProcessRegistry,
+    pub quitting: Arc<std::sync::atomic::AtomicBool>,
+}
+
+pub fn launch_attempt(request: SpawnRequest<'_>) -> Result<RuntimeProcess, AttemptFailure> {
+    let context = request.context;
+    let (mut child, stdout, stderr, registration) = spawn_runtime(request).map_err(|message| {
+        AttemptFailure {
+            message,
+            diagnostic: String::new(),
+        }
     })?;
     let pid = child.id();
     let ready = match wait_for_ready(
         &mut child,
-        ready_file,
-        &image.origin.dsh_version,
-        pid,
-        generation,
-        &stdout,
-        &stderr,
-        token,
-        quitting,
+        ReadyProbe {
+            context,
+            expected_pid: pid,
+            stdout_path: &stdout,
+            stderr_path: &stderr,
+        },
     ) {
         Ok(ready) => ready,
         Err(error) => {
@@ -56,7 +51,7 @@ pub fn launch_attempt(
         child,
         stopped: false,
         registration,
-        work_dir: dir.to_path_buf(),
+        work_dir: context.dir.to_path_buf(),
         ready,
         recovery_source: "none".into(),
         isolated_plugins: Vec::new(),
@@ -67,30 +62,19 @@ pub fn launch_attempt(
 }
 
 pub fn safe_profile(
-    image: &RuntimeImage,
+    context: &AttemptContext<'_>,
     embedded_patch_file: &Path,
-    ready_file: &Path,
-    dir: &Path,
-    generation: &RuntimeGeneration,
-    token: &CancellationToken,
-    starting_processes: &process_control::StartingProcessRegistry,
-    quitting: &std::sync::atomic::AtomicBool,
 ) -> Result<RuntimeProcess, String> {
-    let safe_home = dir.join("safe-dsh-home");
+    let safe_home = context.dir.join("safe-dsh-home");
     fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建安全 DSH_HOME: {error}"))?;
-    let _ = fs::remove_file(ready_file);
-    let mut process = launch_attempt(
-        image,
-        &[embedded_patch_file],
-        Some(&safe_home),
-        ready_file,
-        dir,
-        "safe",
-        generation,
-        token,
-        starting_processes,
-        quitting,
-    )
+    let _ = fs::remove_file(context.ready_file);
+    let patches = [embedded_patch_file];
+    let mut process = launch_attempt(SpawnRequest {
+        context,
+        patches: &patches,
+        dsh_home: Some(&safe_home),
+        attempt: "safe",
+    })
     .map_err(|error| {
         format!(
             "安全配置启动失败: {}\n{}",
@@ -103,47 +87,43 @@ pub fn safe_profile(
     Ok(process)
 }
 
-pub fn start_blocking(
-    image: RuntimeImage,
-    plugin_path: PathBuf,
-    compatibility_path: PathBuf,
-    shell_plugin_path: PathBuf,
-    quarantine_state_path: PathBuf,
-    generation: RuntimeGeneration,
-    token: CancellationToken,
-    force_safe_mode: bool,
-    starting_processes: process_control::StartingProcessRegistry,
-    quitting: Arc<std::sync::atomic::AtomicBool>,
-) -> Result<RuntimeProcess, String> {
+pub fn start_blocking(request: RuntimeStartRequest) -> Result<RuntimeProcess, String> {
     let dir = work_dir()?;
     let mut work_dir_guard = WorkDirGuard::new(dir.clone());
     let patch_file = dir.join("embedded.patch.yml");
     let ready_file = dir.join("ready.json");
-    let patch = embedded_patch(&plugin_path, &compatibility_path, &shell_plugin_path)?;
+    let patch = embedded_patch(
+        &request.plugin_path,
+        &request.compatibility_path,
+        &request.shell_plugin_path,
+    )?;
     fs::write(&patch_file, patch).map_err(|error| format!("无法写入 embedded patch: {error}"))?;
-    if cancelled(&token, &quitting) {
+
+    let context = AttemptContext {
+        image: &request.image,
+        ready_file: &ready_file,
+        dir: &dir,
+        generation: &request.generation,
+        token: &request.token,
+        starting_processes: &request.starting_processes,
+        quitting: &request.quitting,
+    };
+
+    if cancelled(context.token, context.quitting) {
         return Err("Runtime generation cancelled before startup".into());
     }
 
-    if force_safe_mode {
-        return work_dir_guard.retain_result(safe_profile(
-            &image,
-            &patch_file,
-            &ready_file,
-            &dir,
-            &generation,
-            &token,
-            &starting_processes,
-            &quitting,
-        ));
+    if request.force_safe_mode {
+        return work_dir_guard.retain_result(safe_profile(&context, &patch_file));
     }
 
     let recovery_enabled =
         std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
     if recovery_enabled {
-        if let Some(quarantine) =
-            plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version)
-        {
+        if let Some(quarantine) = plugin_quarantine::read(
+            &request.quarantine_state_path,
+            &request.image.origin.dsh_version,
+        ) {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
             fs::write(
                 &quarantine_file,
@@ -151,18 +131,13 @@ pub fn start_blocking(
             )
             .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
-            if let Ok(mut process) = launch_attempt(
-                &image,
-                &[patch_file.as_path(), quarantine_file.as_path()],
-                None,
-                &ready_file,
-                &dir,
-                "quarantine",
-                &generation,
-                &token,
-                &starting_processes,
-                &quitting,
-            ) {
+            let patches = [patch_file.as_path(), quarantine_file.as_path()];
+            if let Ok(mut process) = launch_attempt(SpawnRequest {
+                context: &context,
+                patches: &patches,
+                dsh_home: None,
+                attempt: "quarantine",
+            }) {
                 process.recovery_source = "quarantine".into();
                 process.isolated_plugins = quarantine.isolated_plugins;
                 process.suspected_plugins = quarantine.suspected_plugins;
@@ -170,66 +145,46 @@ pub fn start_blocking(
                 work_dir_guard.retain();
                 return Ok(process);
             }
-            let _ = plugin_quarantine::clear(&quarantine_state_path);
+            let _ = plugin_quarantine::clear(&request.quarantine_state_path);
         }
     }
 
     let _ = fs::remove_file(&ready_file);
-    match launch_attempt(
-        &image,
-        &[patch_file.as_path()],
-        None,
-        &ready_file,
-        &dir,
-        "normal",
-        &generation,
-        &token,
-        &starting_processes,
-        &quitting,
-    ) {
+    let normal_patches = [patch_file.as_path()];
+    match launch_attempt(SpawnRequest {
+        context: &context,
+        patches: &normal_patches,
+        dsh_home: None,
+        attempt: "normal",
+    }) {
         Ok(process) => {
             work_dir_guard.retain();
             Ok(process)
         }
         Err(first_failure) => {
-            if cancelled(&token, &quitting) {
+            if cancelled(context.token, context.quitting) {
                 return Err("Runtime generation cancelled during startup".into());
             }
             if !recovery_enabled {
                 let summary = public_diagnostic(&first_failure.diagnostic);
                 return Err(format!("{}\n{}", first_failure.message, summary));
             }
-            let rows =
-                match recovery_rows(&image, &patch_file, &token, &starting_processes, &quitting) {
-                    Ok(rows) => rows,
-                    Err(error) => {
-                        eprintln!(
-                            "Plugin recovery config discovery failed; using safe profile: {error}"
-                        );
-                        return work_dir_guard.retain_result(safe_profile(
-                            &image,
-                            &patch_file,
-                            &ready_file,
-                            &dir,
-                            &generation,
-                            &token,
-                            &starting_processes,
-                            &quitting,
-                        ));
-                    }
-                };
+            let rows = match recovery_rows(
+                context.image,
+                &patch_file,
+                context.token,
+                context.starting_processes,
+                context.quitting,
+            ) {
+                Ok(rows) => rows,
+                Err(error) => {
+                    eprintln!("Plugin recovery config discovery failed; using safe profile: {error}");
+                    return work_dir_guard.retain_result(safe_profile(&context, &patch_file));
+                }
+            };
             let (selected, suspected, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
-                return work_dir_guard.retain_result(safe_profile(
-                    &image,
-                    &patch_file,
-                    &ready_file,
-                    &dir,
-                    &generation,
-                    &token,
-                    &starting_processes,
-                    &quitting,
-                ));
+                return work_dir_guard.retain_result(safe_profile(&context, &patch_file));
             }
             let recovery_file = dir.join("plugin-recovery.patch.yml");
             fs::write(&recovery_file, recovery_patch(&selected)?)
@@ -239,22 +194,17 @@ pub fn start_blocking(
                 .map(|row| row.id.clone())
                 .collect::<Vec<_>>();
             let _ = fs::remove_file(&ready_file);
-            match launch_attempt(
-                &image,
-                &[patch_file.as_path(), recovery_file.as_path()],
-                None,
-                &ready_file,
-                &dir,
-                "recovery",
-                &generation,
-                &token,
-                &starting_processes,
-                &quitting,
-            ) {
+            let recovery_patches = [patch_file.as_path(), recovery_file.as_path()];
+            match launch_attempt(SpawnRequest {
+                context: &context,
+                patches: &recovery_patches,
+                dsh_home: None,
+                attempt: "recovery",
+            }) {
                 Ok(mut process) => {
                     let quarantine = plugin_quarantine::write(
-                        &quarantine_state_path,
-                        &image.origin.dsh_version,
+                        &request.quarantine_state_path,
+                        &request.image.origin.dsh_version,
                         isolated.clone(),
                         suspected.clone(),
                         &reason,
@@ -272,16 +222,7 @@ pub fn start_blocking(
                         "Plugin quarantine attempt failed: {} / {}",
                         first_failure.message, recovery_failure.message
                     );
-                    work_dir_guard.retain_result(safe_profile(
-                        &image,
-                        &patch_file,
-                        &ready_file,
-                        &dir,
-                        &generation,
-                        &token,
-                        &starting_processes,
-                        &quitting,
-                    ))
+                    work_dir_guard.retain_result(safe_profile(&context, &patch_file))
                 }
             }
         }
