@@ -51,6 +51,7 @@ describe('local one-click build hardening', () => {
     expect(build).toContain('activeTauriCliVersion')
     expect(build).toContain('globalVersion === tauriCliVersion')
     expect(build).toContain('cachedVersion === tauriCliVersion')
+    expect(build).toContain('macOS/Linux: bash scripts/build.sh')
     expect(requiredPnpm).toBe('10.12.1')
   })
 
@@ -65,7 +66,8 @@ describe('local one-click build hardening', () => {
     expect(workflow).toContain('os: [windows-latest, ubuntu-latest, macos-latest]')
     expect(workflow).toContain("HARNESSDOCK_FORCE_PORTABLE_NODE: '1'")
     expect(workflow).toContain('scripts\\build.bat --skip-tests')
-    expect(workflow).toContain('./scripts/build.sh --skip-tests')
+    expect(workflow).toContain('bash scripts/build.sh --skip-tests')
+    expect(workflow).not.toContain('run: ./scripts/build.sh --skip-tests')
     expect(workflow).toContain('Verify exact-pinned Runtime manifest')
     expect(workflow).toContain('Verify Windows NSIS installer')
     expect(workflow).toContain('Verify Linux bundle')
