@@ -5,6 +5,64 @@
 use super::*;
 
 #[cfg(not(mobile))]
+pub fn show_harness_bootstrap(app: &AppHandle) -> Result<(), String> {
+    if app
+        .state::<crate::AppState>()
+        .quitting
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("HarnessDock 正在退出，已拒绝创建启动主窗口。".into());
+    }
+
+    if let Some(window) = app.get_webview_window("harness") {
+        window
+            .show()
+            .map_err(|error| format!("无法显示 Harness 启动主窗口: {error}"))?;
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let navigation_app = app.clone();
+    WebviewWindowBuilder::new(app, "harness", WebviewUrl::App("splash.html".into()))
+        .title("HarnessDock · DeepSeek Harness")
+        .initialization_script(init_script())
+        .on_navigation(move |url| allowed_harness_navigation(&navigation_app, url))
+        .on_page_load(|window, payload| {
+            if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                return;
+            }
+            if is_harness_bootstrap_url(payload.url()) {
+                if window
+                    .app_handle()
+                    .state::<crate::AppState>()
+                    .quitting
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    return;
+                }
+                // Native decorations are the fail-open controls while the
+                // Runtime is still starting. The managed Harness document
+                // removes them only after the shell bridge is installed.
+                let _ = window.set_decorations(true);
+                let _ = window.show();
+                let _ = window.set_focus();
+                hide_splash(window.app_handle());
+                crate::startup_trace::mark(crate::startup_trace::StartupPhase::BootstrapVisible);
+                return;
+            }
+            finish_harness_load(&window, payload.url());
+        })
+        .inner_size(1180.0, 780.0)
+        .min_inner_size(720.0, 560.0)
+        .resizable(true)
+        .decorations(true)
+        .visible(false)
+        .build()
+        .map_err(|error| format!("无法创建 Harness 启动主窗口: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(mobile))]
 pub async fn harness_open_impl(
     app: AppHandle,
     url: String,
@@ -22,10 +80,6 @@ pub async fn harness_open_impl(
     if runtime_url.origin().ascii_serialization() != lease.origin {
         return Err("Harness Web URL 与当前 RuntimeLease origin 不一致。".into());
     }
-    // A published URL is not enough to navigate. A failed Loader can tear down
-    // the HTTP listener while leaving the Node supervisor process alive. Catch
-    // that state before creating/reusing a WebView so users never see the
-    // browser's raw 127.0.0.1 connection-refused page.
     if !runtime_listener_reachable(&runtime_url) {
         return Err(
             "Harness Runtime 已发布地址，但本地 Web 监听不可达（127.0.0.1 拒绝连接）。".into(),
@@ -68,6 +122,9 @@ pub async fn harness_open_impl(
         if show_loading_surface {
             show_splash(&app, "正在打开 Harness Web…");
         } else {
+            // Startup keeps the already-visible bootstrap document in this
+            // same WebView while navigation to the Runtime begins. The legacy
+            // auxiliary splash window stays hidden.
             hide_splash(&app);
         }
         let result = if same_origin
@@ -101,7 +158,7 @@ pub async fn harness_open_impl(
     let _window = WebviewWindowBuilder::new(&app, "harness", WebviewUrl::External(runtime_url))
         .title("HarnessDock · DeepSeek Harness")
         .initialization_script(init_script())
-        .on_navigation(move |url| allowed_runtime_navigation(&navigation_app, url))
+        .on_navigation(move |url| allowed_harness_navigation(&navigation_app, url))
         .on_page_load(|window, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 finish_harness_load(&window, payload.url());
