@@ -91,10 +91,6 @@ impl RuntimeActorState {
         self.generation.as_ref()
     }
 
-    pub(crate) fn desired_generation(&self) -> u64 {
-        self.desired_generation
-    }
-
     pub(crate) fn is_transitioning(&self) -> bool {
         matches!(
             self.phase,
@@ -107,9 +103,6 @@ impl RuntimeActorState {
     }
 
     fn begin(&mut self, mode: RuntimeMode) -> Result<RuntimeGeneration, String> {
-        // The nonce is part of the Runtime ready-file trust boundary. It must be
-        // unpredictable; PID/time hashing is not sufficient because another
-        // local process could pre-create a plausible stale ready file.
         let nonce = generation_nonce()?;
         self.desired_generation = self.desired_generation.saturating_add(1);
         let id = self.desired_generation;
@@ -174,11 +167,6 @@ impl RuntimeActorState {
         let Some(current) = self.generation.as_ref() else {
             return Err("Runtime generation disappeared before ready publish".into());
         };
-        // RuntimeLease is a trust boundary, not just a sequence number. A
-        // matching id with a stale nonce, image identity or mode must never
-        // transition the actor to Ready. Validate the complete immutable
-        // generation before mutating phase so rejected publications are
-        // side-effect free.
         if current.id != generation || current != lease_generation {
             return Err("stale Runtime ready generation binding".into());
         }
@@ -186,10 +174,6 @@ impl RuntimeActorState {
     }
 
     fn mark_failed(&mut self, generation: u64, message: String) {
-        // A start failure is allowed to settle only the start operation that
-        // still owns this generation. Cancellation/stop is a higher-priority
-        // lifecycle decision: a late spawn/probe error must never overwrite
-        // Cancelling/Stopping (or an already-published Ready generation).
         let owns_active_start = self
             .generation
             .as_ref()
@@ -259,10 +243,6 @@ pub(crate) struct RuntimeActor {
 }
 
 impl RuntimeActor {
-    pub(crate) fn state(&self) -> &RuntimeActorState {
-        &self.state
-    }
-
     pub(crate) fn phase(&self) -> RuntimePhase {
         self.state.phase()
     }
@@ -330,7 +310,7 @@ impl RuntimeActor {
         process: RuntimeProcess,
         lease: RuntimeLease,
         degraded: bool,
-    ) -> Result<(), RuntimeProcess> {
+    ) -> Result<(), Box<RuntimeProcess>> {
         let cancelled = self
             .cancellation
             .as_ref()
@@ -341,7 +321,7 @@ impl RuntimeActor {
                 .accept_ready_generation(generation, &lease.generation, degraded)
                 .is_err()
         {
-            return Err(process);
+            return Err(Box::new(process));
         }
         self.process = Some(process);
         self.lease = Some(lease);
@@ -385,14 +365,6 @@ impl RuntimeActor {
         self.process.take()
     }
 
-    /// Explicit liveness reaper. Checks the owned process once and, only when
-    /// it has actually exited, invalidates the actor state and returns the
-    /// dead process so the caller can release its native resources.
-    ///
-    /// Callers are explicit lifecycle paths (status reconciliation, supervisor
-    /// shutdown). Read-only status/probe paths use `runtime::status_snapshot_readonly`
-    /// and must never call this, otherwise a snapshot read could revoke the
-    /// lease consumed by the very navigation it is reporting on.
     pub(crate) fn reap_if_dead(&mut self) -> Option<RuntimeProcess> {
         let dead = self
             .process_mut()
@@ -403,21 +375,9 @@ impl RuntimeActor {
             None
         }
     }
-
-    pub(crate) fn lease_is_current(&self, generation: u64) -> bool {
-        self.lease
-            .as_ref()
-            .is_some_and(|lease| lease.generation.id == generation)
-            && matches!(
-                self.state.phase(),
-                RuntimePhase::Ready | RuntimePhase::Degraded
-            )
-    }
 }
 
 fn generation_nonce() -> Result<String, String> {
-    // `secure_random` and the hex encoding it feeds are shared with the Gateway
-    // pairing flow, so both surfaces benefit from the same CSPRNG hardening.
     crate::crypto::random_hex(16)
 }
 
@@ -503,11 +463,7 @@ mod tests {
         state.begin_stop();
         assert_eq!(state.phase(), RuntimePhase::Cancelling);
         state.mark_failed(generation.id, "late probe failure".into());
-        assert_eq!(
-            state.phase(),
-            RuntimePhase::Cancelling,
-            "late start failures must not override cancellation"
-        );
+        assert_eq!(state.phase(), RuntimePhase::Cancelling);
         state.settle_stopped();
         assert_eq!(state.phase(), RuntimePhase::Stopped);
     }
