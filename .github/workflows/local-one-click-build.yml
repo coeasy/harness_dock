@@ -1,0 +1,171 @@
+name: local-one-click-build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/build.bat'
+      - 'scripts/build.sh'
+      - 'scripts/build.mjs'
+      - 'scripts/bootstrap.mjs'
+      - 'scripts/bootstrap-node.ps1'
+      - 'scripts/bootstrap-node.sh'
+      - 'scripts/prepare-local-runtime.mjs'
+      - 'scripts/versions.json'
+      - 'packages/client-runtime/**'
+      - 'packages/plugin-embedded-client/**'
+      - 'packages/plugin-harness-shell/**'
+      - 'apps/tauri/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/local-one-click-build.yml'
+  pull_request:
+    paths:
+      - 'scripts/build.bat'
+      - 'scripts/build.sh'
+      - 'scripts/build.mjs'
+      - 'scripts/bootstrap.mjs'
+      - 'scripts/bootstrap-node.ps1'
+      - 'scripts/bootstrap-node.sh'
+      - 'scripts/prepare-local-runtime.mjs'
+      - 'scripts/versions.json'
+      - 'packages/client-runtime/**'
+      - 'packages/plugin-embedded-client/**'
+      - 'packages/plugin-harness-shell/**'
+      - 'apps/tauri/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/local-one-click-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: local-one-click-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-node-bootstrap:
+    name: windows portable Node (${{ matrix.mirror }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mirror: [nodejs, npmmirror]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download and verify portable Node from ${{ matrix.mirror }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item .local-tools,.local-cache -Recurse -Force -ErrorAction SilentlyContinue
+          $version = [string](Get-Content scripts/versions.json -Raw | ConvertFrom-Json).node
+          if ('${{ matrix.mirror }}' -eq 'nodejs') {
+            $env:NODE_DOWNLOAD_BASES = "https://nodejs.org/dist/v$version"
+          } else {
+            $env:NODE_DOWNLOAD_BASES = "https://npmmirror.com/mirrors/node/v$version"
+          }
+          & .\scripts\bootstrap-node.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nodeHome = (Get-Content .local-tools\node-home.txt -Raw).Trim()
+          $node = Join-Path $nodeHome 'node.exe'
+          if (-not (Test-Path $node)) { throw "portable Node missing: $node" }
+          & $node scripts\node-version-check.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $archive = Get-ChildItem .local-cache\node\node-v*-win-x64.zip | Select-Object -First 1
+          if (-not $archive) { throw 'portable Node archive was not cached' }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive.FullName).Hash
+          if ($hash -notmatch '^[A-Fa-f0-9]{64}$') { throw 'portable Node SHA-256 was not computed' }
+
+  one-click-client:
+    name: one-click client (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+
+      - name: Reset local build state
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          rm -rf .local-tools .local-cache .local-logs apps/tauri/src-tauri/resources/dsh-runtime apps/tauri/src-tauri/target/release/bundle
+
+      - name: Reset local build state
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Remove-Item .local-tools,.local-cache,.local-logs,apps\tauri\src-tauri\resources\dsh-runtime,apps\tauri\src-tauri\target\release\bundle -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Run Windows one-click build from clean local state
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          HARNESSDOCK_FORCE_PORTABLE_NODE: '1'
+        run: scripts\build.bat --skip-tests
+
+      - name: Run POSIX one-click build from clean local state
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          HARNESSDOCK_FORCE_PORTABLE_NODE: '1'
+        run: ./scripts/build.sh --skip-tests
+
+      - name: Verify exact-pinned Runtime manifest
+        shell: pwsh
+        run: |
+          $manifest = Get-Content apps/tauri/src-tauri/resources/dsh-runtime/manifest.json -Raw | ConvertFrom-Json
+          $origin = Get-Content packages/docs-sync/origin.json -Raw | ConvertFrom-Json
+          $product = Get-Content package.json -Raw | ConvertFrom-Json
+          $tag = if ($manifest.dshGitTag) { $manifest.dshGitTag } else { $manifest.gitTag }
+          $commit = if ($manifest.dshGitCommit) { $manifest.dshGitCommit } else { $manifest.gitCommit }
+          if ($manifest.schemaVersion -ne 1) { throw 'runtime schemaVersion is not 1' }
+          if ($manifest.clientVersion -ne $product.version) { throw 'runtime clientVersion mismatch' }
+          if ($manifest.dshVersion -ne $origin.dshVersion) { throw 'runtime dshVersion mismatch' }
+          if ($tag -ne $origin.gitTag) { throw 'runtime gitTag mismatch' }
+          if ($commit -ne $origin.gitCommit) { throw 'runtime gitCommit mismatch' }
+          if ($manifest.imageIdentityAlgorithm -ne 'sha256-v1') { throw 'runtime imageIdentityAlgorithm mismatch' }
+          if ($manifest.imageIdentity -notmatch '^sha256:[a-fA-F0-9]{64}$') { throw 'runtime imageIdentity invalid' }
+          if ($manifest.runtimeEmbedded -ne $true) { throw 'runtimeEmbedded must be true' }
+          if ($manifest.firstLaunchRuntimeDownloadRequired -ne $false) { throw 'firstLaunchRuntimeDownloadRequired must be false' }
+
+      - name: Verify Windows NSIS installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $installer = Get-ChildItem apps\tauri\src-tauri\target\release\bundle\nsis\*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installer) { throw 'one-click build produced no Windows NSIS installer' }
+          Write-Host "installer=$($installer.FullName)"
+
+      - name: Verify Linux bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          find apps/tauri/src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' \) -print | tee /tmp/harnessdock-bundles.txt
+          test -s /tmp/harnessdock-bundles.txt
+
+      - name: Verify macOS bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          find apps/tauri/src-tauri/target/release/bundle -type f \( -name '*.dmg' -o -name '*.app.tar.gz' \) -print | tee /tmp/harnessdock-bundles.txt
+          test -s /tmp/harnessdock-bundles.txt
