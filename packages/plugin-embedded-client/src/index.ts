@@ -1,5 +1,9 @@
 import { writeFileSync } from 'node:fs'
 import { findListenAddress } from './listen.ts'
+import {
+  RUNTIME_READY_ENV,
+  RUNTIME_READY_LOOPBACK_HOST,
+} from './runtime-ready-contract.generated.ts'
 import { browserUrlFor, probeBrowserUrl } from './web-auth.ts'
 
 export const name = 'embedded-client'
@@ -43,16 +47,16 @@ function runtimeServicesPresent(ctx: PluginCtx): boolean {
 }
 
 export function apply(ctx: PluginCtx): void {
-  const readyFile = process.env.DSH_EMBEDDED_READY_FILE
+  const readyFile = process.env[RUNTIME_READY_ENV.readyFile]
   if (!readyFile) return
 
-  const generation = Number.parseInt(process.env.HARNESSDOCK_RUNTIME_GENERATION ?? '', 10)
-  const nonce = process.env.HARNESSDOCK_RUNTIME_NONCE ?? ''
-  const imageIdentity = process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY ?? ''
+  const generation = Number.parseInt(process.env[RUNTIME_READY_ENV.generation] ?? '', 10)
+  const nonce = process.env[RUNTIME_READY_ENV.nonce] ?? ''
+  const imageIdentity = process.env[RUNTIME_READY_ENV.imageIdentity] ?? ''
   if (!Number.isSafeInteger(generation) || generation <= 0 || !nonce || !imageIdentity) {
-    // A packaged Runtime must never publish an unbound ready file. Refusing to
-    // write here makes the native host fail closed instead of accepting stale
-    // readiness from another process/generation.
+    // A managed Runtime must never publish an unbound ready file. Refusing to
+    // write here makes every host fail closed instead of accepting readiness
+    // from another process/generation.
     return
   }
 
@@ -87,7 +91,7 @@ export function apply(ctx: PluginCtx): void {
     // performs. One successful response is not enough: the Web listener can be
     // transient while the Loader is still settling/tearing down. Require three
     // consecutive successful probes before publishing a RuntimeLease boundary.
-    const baseUrl = `http://127.0.0.1:${addr.port}`
+    const baseUrl = `http://${RUNTIME_READY_LOOPBACK_HOST}:${addr.port}`
     const browserUrl = browserUrlFor(ctx, baseUrl)
     checking = true
     void probeBrowserUrl(browserUrl).then((ready) => {
@@ -102,10 +106,10 @@ export function apply(ctx: PluginCtx): void {
       try {
         const payload = {
           url: browserUrl,
-          host: '127.0.0.1',
+          host: RUNTIME_READY_LOOPBACK_HOST,
           port: addr.port,
           pid: process.pid,
-          dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'unknown',
+          dshVersion: process.env[RUNTIME_READY_ENV.dshVersion] ?? 'unknown',
           generation,
           nonce,
           imageIdentity,
