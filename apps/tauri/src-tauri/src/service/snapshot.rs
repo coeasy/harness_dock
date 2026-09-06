@@ -1,18 +1,9 @@
-//! Single read-only state access layer.
+//! Read-only service snapshot derived from the canonical Host read model.
 //!
-//! Status readers used to spread direct `Mutex<Actor>` locks across `bridge.rs`
-//! with an ad-hoc ordering, which makes the lock order easy to break by adding
-//! a new reader later. `ReadOnlySnapshot` centralizes the read path and
-//! documents the canonical lock order:
-//!
-//!   1. `runtime_actor`
-//!   2. `surface_actor`
-//!   3. `gateway`
-//!   4. `update_actor`
-//!
-//! Nothing in this module mutates actor state: it is the read-only counterpart
-//! of the Host Kernel / Reconciler mutation path.
+//! The lock order and poison policy live in `read_model.rs`; this module only
+//! presents the subset required by service/status readers.
 
+use crate::read_model::HostReadModel;
 use crate::runtime_actor::{RuntimeLease, RuntimePhase};
 use crate::AppState;
 
@@ -25,39 +16,14 @@ pub(crate) struct ReadOnlySnapshot {
 }
 
 impl ReadOnlySnapshot {
-    /// Collect the current state of all actors without mutating any of them.
-    ///
-    /// Lock ordering is intentionally the same everywhere this module is used
-    /// (runtime -> surface -> gateway). Never reorder these locks in a new
-    /// reader; add the new state to this snapshot instead.
     pub(crate) fn collect(state: &AppState) -> Self {
-        let (runtime_phase, runtime_generation, runtime_lease) = {
-            let actor = match state.runtime_actor.lock() {
-                Ok(actor) => actor,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            (
-                actor.phase(),
-                actor.generation_id(),
-                actor.lease(),
-            )
-        };
-        let harness_visible = state
-            .surface_actor
-            .lock()
-            .map(|actor| actor.primary_visible())
-            .unwrap_or(false);
-        let gateway_enabled = state
-            .gateway
-            .lock()
-            .map(|actor| actor.phase() == crate::gateway_host::GatewayPhase::Ready)
-            .unwrap_or(false);
+        let model = HostReadModel::collect(state);
         Self {
-            runtime_phase,
-            runtime_generation,
-            runtime_lease,
-            harness_visible,
-            gateway_enabled,
+            runtime_phase: model.runtime_phase,
+            runtime_generation: model.runtime_generation,
+            runtime_lease: model.runtime_lease,
+            harness_visible: model.harness_visible,
+            gateway_enabled: model.gateway_phase == crate::gateway_host::GatewayPhase::Ready,
         }
     }
 }
