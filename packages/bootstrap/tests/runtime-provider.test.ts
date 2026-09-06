@@ -13,7 +13,7 @@ afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
- describe('RemoteRuntimeProvider', () => {
+describe('RemoteRuntimeProvider', () => {
   it('requires HTTPS outside loopback development', () => {
     expect(() => normalizeRemoteGatewayUrl('http://example.com')).toThrow(/HTTPS/)
     expect(normalizeRemoteGatewayUrl('http://127.0.0.1:8080').toString()).toBe('http://127.0.0.1:8080/')
@@ -83,10 +83,22 @@ describe('LocalRuntimeProvider', () => {
       fake,
       `
 import { createServer } from 'node:http'
+import { writeFileSync } from 'node:fs'
 const server = createServer((_req, res) => { res.end('ok') })
 server.listen(0, '127.0.0.1', () => {
   const addr = server.address()
-  process.stdout.write('dsh web: http://127.0.0.1:' + addr.port + '\\n')
+  const port = addr.port
+  process.stdout.write('dsh web: http://127.0.0.1:' + port + '\\n')
+  writeFileSync(process.env.DSH_EMBEDDED_READY_FILE, JSON.stringify({
+    url: 'http://127.0.0.1:' + port,
+    host: '127.0.0.1',
+    port,
+    pid: process.pid,
+    dshVersion: process.env.DSH_EMBEDDED_VERSION,
+    generation: Number(process.env.HARNESSDOCK_RUNTIME_GENERATION),
+    nonce: process.env.HARNESSDOCK_RUNTIME_NONCE,
+    imageIdentity: process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY,
+  }))
 })
 setInterval(() => {}, 1 << 30)
 `,
@@ -113,6 +125,7 @@ setInterval(() => {}, 1 << 30)
     const [first, second] = await Promise.all([provider.connect(), provider.connect()])
     expect(second.appUrl).toBe(first.appUrl)
     expect(provider.bootstrapResult?.ready.url).toBe(first.appUrl)
+    expect(provider.bootstrapResult?.ready.generation).toBeGreaterThan(0)
     await provider.disconnect()
     expect((await provider.health()).ok).toBe(false)
   }, 25_000)
