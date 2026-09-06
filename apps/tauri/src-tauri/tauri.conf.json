@@ -29,7 +29,7 @@
       }
     ],
     "security": {
-      "capabilities": ["local-main", "harness-shell", "shell-settings"],
+      "capabilities": ["local-main", "harness-shell", "shell-settings", "mobile-remote"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     }
   },
