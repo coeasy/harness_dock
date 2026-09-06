@@ -25,20 +25,19 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 use crate::error::lock_err;
 use crate::surface_actor::{SurfaceOperation, SurfacePhase};
 
-mod splash;
-mod navigation;
-mod window;
 mod commands;
+mod navigation;
+mod splash;
+mod window;
 
-pub(crate) use splash::*;
-pub(crate) use navigation::*;
-pub(crate) use window::*;
 pub(crate) use commands::*;
+pub(crate) use navigation::*;
+pub(crate) use splash::*;
+pub(crate) use window::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     pub fn runtime_url_matches_the_exact_loopback_capability_boundary() {

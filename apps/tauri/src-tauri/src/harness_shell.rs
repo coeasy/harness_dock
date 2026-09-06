@@ -5,8 +5,8 @@
 //! The remote Harness document never receives direct Runtime/update/quit IPC.
 
 use crate::shell_contract_generated::{
-    SHELL_API_VERSION, SHELL_DIRECT_WINDOW_MAP_JSON, SHELL_HOST_COMMAND_MAP_JSON,
-    SHELL_PLUGIN_ID, SHELL_VERSION,
+    SHELL_API_VERSION, SHELL_DIRECT_WINDOW_MAP_JSON, SHELL_HOST_COMMAND_MAP_JSON, SHELL_PLUGIN_ID,
+    SHELL_VERSION,
 };
 use tauri::Manager;
 
@@ -166,14 +166,20 @@ fn bridge_script() -> String {
         .replace("__DIRECT_WINDOW_MAP__", SHELL_DIRECT_WINDOW_MAP_JSON)
         .replace("__HOST_COMMAND_MAP__", SHELL_HOST_COMMAND_MAP_JSON)
         .replace("__SHELL_API_VERSION__", &SHELL_API_VERSION.to_string())
-        .replace("__SHELL_PLUGIN_ID__", &json_string(SHELL_PLUGIN_ID, "harness-shell"))
+        .replace(
+            "__SHELL_PLUGIN_ID__",
+            &json_string(SHELL_PLUGIN_ID, "harness-shell"),
+        )
         .replace("__SHELL_VERSION__", &json_string(SHELL_VERSION, "0.1.2"))
 }
 
 fn shell_web_script() -> String {
     SHELL_WEB_SCRIPT_TEMPLATE
         .replace("__SHELL_API_VERSION__", &SHELL_API_VERSION.to_string())
-        .replace("__SHELL_PLUGIN_ID__", &json_string(SHELL_PLUGIN_ID, "harness-shell"))
+        .replace(
+            "__SHELL_PLUGIN_ID__",
+            &json_string(SHELL_PLUGIN_ID, "harness-shell"),
+        )
 }
 
 /// The custom shell close button hides to tray only when a tray actually

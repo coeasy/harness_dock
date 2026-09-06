@@ -459,38 +459,30 @@ mod tests {
 
         let mut stale_id = current.clone();
         stale_id.id += 1;
-        assert!(
-            state
-                .accept_ready_generation(allocated.id, &stale_id, false)
-                .is_err()
-        );
+        assert!(state
+            .accept_ready_generation(allocated.id, &stale_id, false)
+            .is_err());
         assert_eq!(state.phase(), RuntimePhase::Starting);
 
         let mut stale_nonce = current.clone();
         stale_nonce.nonce.push_str("-stale");
-        assert!(
-            state
-                .accept_ready_generation(allocated.id, &stale_nonce, false)
-                .is_err()
-        );
+        assert!(state
+            .accept_ready_generation(allocated.id, &stale_nonce, false)
+            .is_err());
         assert_eq!(state.phase(), RuntimePhase::Starting);
 
         let mut stale_image = current.clone();
         stale_image.image_identity = "sha256:other-image".into();
-        assert!(
-            state
-                .accept_ready_generation(allocated.id, &stale_image, false)
-                .is_err()
-        );
+        assert!(state
+            .accept_ready_generation(allocated.id, &stale_image, false)
+            .is_err());
         assert_eq!(state.phase(), RuntimePhase::Starting);
 
         let mut stale_mode = current.clone();
         stale_mode.mode = RuntimeMode::Safe;
-        assert!(
-            state
-                .accept_ready_generation(allocated.id, &stale_mode, false)
-                .is_err()
-        );
+        assert!(state
+            .accept_ready_generation(allocated.id, &stale_mode, false)
+            .is_err());
         assert_eq!(state.phase(), RuntimePhase::Starting);
 
         state

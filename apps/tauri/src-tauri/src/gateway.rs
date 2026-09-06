@@ -248,4 +248,3 @@ mod tests {
         assert_eq!(health.origin(), base.origin());
     }
 }
-

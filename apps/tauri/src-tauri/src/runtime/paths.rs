@@ -1,10 +1,8 @@
 //! Runtime image resolution and private working-directory plumbing.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub fn resource_path(app: &AppHandle, relative: &str) -> Result<PathBuf, String> {
     app.path()

@@ -39,9 +39,7 @@ pub(crate) trait LockRecover<'a, T> {
     fn recover(self, actor: &str) -> MutexGuard<'a, T>;
 }
 
-impl<'a, T> LockRecover<'a, T>
-    for Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>
-{
+impl<'a, T> LockRecover<'a, T> for Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>> {
     fn recover(self, actor: &str) -> MutexGuard<'a, T> {
         self.unwrap_or_else(|error| {
             // Observable, but non-fatal: the actor state is preserved.

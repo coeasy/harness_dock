@@ -4,9 +4,8 @@
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
 use crate::runtime_ready_contract_generated::{
-    RUNTIME_READY_ENV_DSH_VERSION, RUNTIME_READY_ENV_GENERATION,
-    RUNTIME_READY_ENV_IMAGE_IDENTITY, RUNTIME_READY_ENV_NONCE,
-    RUNTIME_READY_ENV_READY_FILE, RUNTIME_READY_LOOPBACK_HOST,
+    RUNTIME_READY_ENV_DSH_VERSION, RUNTIME_READY_ENV_GENERATION, RUNTIME_READY_ENV_IMAGE_IDENTITY,
+    RUNTIME_READY_ENV_NONCE, RUNTIME_READY_ENV_READY_FILE, RUNTIME_READY_LOOPBACK_HOST,
 };
 
 pub struct WorkDirGuard {
@@ -168,7 +167,13 @@ pub fn spawn_runtime(
         command.arg("--patch").arg(platform::node_cli_path(patch));
     }
     command
-        .args(["--host", RUNTIME_READY_LOOPBACK_HOST, "--port", "0", "--no-open"])
+        .args([
+            "--host",
+            RUNTIME_READY_LOOPBACK_HOST,
+            "--port",
+            "0",
+            "--no-open",
+        ])
         .env(
             RUNTIME_READY_ENV_READY_FILE,
             platform::node_cli_path(ready_file),
@@ -176,10 +181,7 @@ pub fn spawn_runtime(
         .env(RUNTIME_READY_ENV_DSH_VERSION, &image.origin.dsh_version)
         .env(RUNTIME_READY_ENV_GENERATION, generation.id.to_string())
         .env(RUNTIME_READY_ENV_NONCE, &generation.nonce)
-        .env(
-            RUNTIME_READY_ENV_IMAGE_IDENTITY,
-            &generation.image_identity,
-        )
+        .env(RUNTIME_READY_ENV_IMAGE_IDENTITY, &generation.image_identity)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));

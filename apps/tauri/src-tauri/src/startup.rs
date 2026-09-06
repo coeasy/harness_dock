@@ -8,8 +8,7 @@
 
 use crate::{
     constants::{
-        STARTUP_PRIMARY_RETRY_ATTEMPTS, STARTUP_RECOVERY_RETRY_ATTEMPTS,
-        STARTUP_RETRY_DELAY_MS,
+        STARTUP_PRIMARY_RETRY_ATTEMPTS, STARTUP_RECOVERY_RETRY_ATTEMPTS, STARTUP_RETRY_DELAY_MS,
     },
     harness_window, reconciler,
     startup_trace::{self, StartupPhase},

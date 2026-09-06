@@ -196,8 +196,18 @@ mod tests {
             "diagnostic-match",
         )
         .unwrap();
-        assert_eq!(read(&file, "0.1.2").expect("rc -> stable keeps quarantine").isolated_plugins, vec!["bad-a"]);
-        assert_eq!(read(&file, "0.1.2-rc.2").expect("rc -> rc keeps quarantine").isolated_plugins, vec!["bad-a"]);
+        assert_eq!(
+            read(&file, "0.1.2")
+                .expect("rc -> stable keeps quarantine")
+                .isolated_plugins,
+            vec!["bad-a"]
+        );
+        assert_eq!(
+            read(&file, "0.1.2-rc.2")
+                .expect("rc -> rc keeps quarantine")
+                .isolated_plugins,
+            vec!["bad-a"]
+        );
         // Cross-base upgrade invalidates and removes.
         assert!(read(&file, "0.2.0").is_none());
         assert!(!file.exists());

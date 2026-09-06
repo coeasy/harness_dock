@@ -43,23 +43,23 @@ use crate::lease::{is_current_generation, require_live_lease};
 use crate::util::{is_loopback, rfc3339};
 use crate::{runtime_actor::RuntimeLease, AppState};
 
-mod types;
-mod server;
-mod lifecycle;
+mod commands;
 mod connection;
-mod request;
 mod handler;
 mod http_io;
-mod commands;
+mod lifecycle;
+mod request;
+mod server;
+mod types;
 
-pub(crate) use types::*;
-pub(crate) use server::*;
-pub(crate) use lifecycle::*;
+pub(crate) use commands::*;
 pub(crate) use connection::*;
-pub(crate) use request::*;
 pub(crate) use handler::*;
 pub(crate) use http_io::*;
-pub(crate) use commands::*;
+pub(crate) use lifecycle::*;
+pub(crate) use request::*;
+pub(crate) use server::*;
+pub(crate) use types::*;
 
 #[cfg(test)]
 mod tests {

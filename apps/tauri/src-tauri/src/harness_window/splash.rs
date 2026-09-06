@@ -1,10 +1,8 @@
 //! Splash, control surface and startup-recovery panel presentation.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 #[cfg(not(mobile))]
 pub(crate) fn hide_splash(app: &AppHandle) {
@@ -36,7 +34,11 @@ pub(crate) fn show_splash(app: &AppHandle, status: &str) {
 }
 
 #[cfg(not(mobile))]
-pub fn set_control_surface(window: &tauri::WebviewWindow<tauri::Wry>, mode: &str, error: Option<&str>) {
+pub fn set_control_surface(
+    window: &tauri::WebviewWindow<tauri::Wry>,
+    mode: &str,
+    error: Option<&str>,
+) {
     if let Ok(value) = serde_json::to_string(mode) {
         let _ = window.eval(format!("window.__harnessDockSetSurface?.({value})"));
     }
@@ -48,7 +50,11 @@ pub fn set_control_surface(window: &tauri::WebviewWindow<tauri::Wry>, mode: &str
 }
 
 #[cfg(not(mobile))]
-pub fn show_control_surface(app: &AppHandle, mode: &str, error: Option<&str>) -> Result<(), String> {
+pub fn show_control_surface(
+    app: &AppHandle,
+    mode: &str,
+    error: Option<&str>,
+) -> Result<(), String> {
     hide_splash(app);
     if let Some(window) = app.get_webview_window("control") {
         set_control_surface(&window, mode, error);
