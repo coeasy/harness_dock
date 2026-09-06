@@ -13,13 +13,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 node_ok=false
-if command -v node >/dev/null 2>&1 && node scripts/node-version-check.cjs >/dev/null 2>&1; then
+if [[ "${HARNESSDOCK_FORCE_PORTABLE_NODE:-0}" != "1" ]] && command -v node >/dev/null 2>&1 && node scripts/node-version-check.cjs >/dev/null 2>&1; then
   node_ok=true
 fi
 
 if [[ "$node_ok" != true ]]; then
   command -v curl >/dev/null 2>&1 || { echo "[build] ERROR: curl is required to bootstrap portable Node" >&2; exit 1; }
   command -v tar >/dev/null 2>&1 || { echo "[build] ERROR: tar is required to bootstrap portable Node" >&2; exit 1; }
+  if [[ "${HARNESSDOCK_FORCE_PORTABLE_NODE:-0}" == "1" ]]; then
+    echo "[build] HARNESSDOCK_FORCE_PORTABLE_NODE=1; preparing verified portable Node..."
+  fi
   bash scripts/bootstrap-node.sh
   [[ -s .local-tools/node-home.txt ]] || { echo "[build] ERROR: bootstrap-node.sh did not write .local-tools/node-home.txt" >&2; exit 1; }
   node_home="$(cat .local-tools/node-home.txt)"
