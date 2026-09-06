@@ -39,6 +39,8 @@ mod runtime;
 #[cfg(not(mobile))]
 mod runtime_actor;
 #[cfg(not(mobile))]
+mod runtime_ready_contract_generated;
+#[cfg(not(mobile))]
 mod service;
 #[cfg(not(mobile))]
 mod shell_contract_generated;
