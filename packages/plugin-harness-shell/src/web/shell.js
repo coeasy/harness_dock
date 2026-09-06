@@ -2,7 +2,7 @@
   'use strict'
 
   const bridge = window.__DSH_SHELL_BRIDGE__
-  const compatibleBridge = bridge?.apiVersion === 2 && bridge?.pluginId === 'harness-shell'
+  const compatibleBridge = bridge?.apiVersion === __SHELL_API_VERSION__ && bridge?.pluginId === __SHELL_PLUGIN_ID__
   const commands = [
     ['web.reload', '刷新 Harness Web'],
     ['web.restart', '重启 Harness Web'],
