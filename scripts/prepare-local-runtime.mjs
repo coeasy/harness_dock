@@ -99,15 +99,27 @@ async function readRuntimeManifest(root = runtimeDir) {
 }
 
 function manifestMatches(manifest) {
+  const pinnedTag = manifest?.dshGitTag ?? manifest?.gitTag
+  const pinnedCommit = manifest?.dshGitCommit ?? manifest?.gitCommit
+  const imageIdentity = manifest?.imageIdentity
   return Boolean(
     manifest &&
+      manifest.schemaVersion === 1 &&
       manifest.platform === process.platform &&
       manifest.arch === arch &&
+      manifest.clientVersion === product.version &&
       manifest.dshVersion === origin.dshVersion &&
+      pinnedTag === origin.gitTag &&
+      pinnedCommit === origin.gitCommit &&
       manifest.runtimeEmbedded === true &&
       manifest.firstLaunchRuntimeDownloadRequired === false &&
-      typeof manifest.imageIdentity === 'string' &&
-      manifest.imageIdentity.length > 0,
+      manifest.imageIdentityAlgorithm === 'sha256-v1' &&
+      typeof imageIdentity === 'string' &&
+      /^sha256:[a-f0-9]{64}$/i.test(imageIdentity) &&
+      Number.isInteger(Number(manifest.contentFileCount)) &&
+      Number(manifest.contentFileCount) > 0 &&
+      Number.isFinite(Number(manifest.contentBytes)) &&
+      Number(manifest.contentBytes) > 0,
   )
 }
 
@@ -245,7 +257,7 @@ async function installReleaseBundle(url) {
     run(tarCommand, ['-xzf', archive, '-C', temp])
     const manifest = await readRuntimeManifest(temp)
     if (!manifestMatches(manifest)) {
-      throw new Error(`downloaded runtime manifest does not match ${key} / dsh ${origin.dshVersion}`)
+      throw new Error(`downloaded runtime manifest does not match ${key} / dsh ${origin.dshVersion} / ${origin.gitTag} @ ${origin.gitCommit}`)
     }
     await rm(runtimeDir, { recursive: true, force: true })
     await rename(temp, runtimeDir)
@@ -336,14 +348,14 @@ async function buildRuntimeFromSource() {
 
   const manifest = await readRuntimeManifest()
   if (!manifestMatches(manifest)) {
-    throw new Error(`source-built runtime manifest does not match ${key} / dsh ${origin.dshVersion}`)
+    throw new Error(`source-built runtime manifest does not match ${key} / dsh ${origin.dshVersion} / ${origin.gitTag} @ ${origin.gitCommit}`)
   }
   console.log(`[runtime] source-built sealed runtime ready: ${runtimeDir}`)
 }
 
 const existingManifest = await readRuntimeManifest()
 if (!values.force && manifestMatches(existingManifest)) {
-  console.log(`[runtime] existing sealed runtime is valid for ${key}, dsh ${origin.dshVersion}; reusing it`)
+  console.log(`[runtime] existing sealed runtime is exact-pinned for ${key}, dsh ${origin.dshVersion}, ${origin.gitTag} @ ${origin.gitCommit}; reusing it`)
   process.exit(0)
 }
 
