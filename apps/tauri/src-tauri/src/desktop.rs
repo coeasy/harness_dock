@@ -101,12 +101,29 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     if let Err(error) = install_shell_menu(app) {
         eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
     }
+    crate::harness_window::show_splash(app.handle(), "正在启动 Harness Web Runtime…");
     crate::startup::spawn(app.handle().clone());
     Ok(())
 }
 
 pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } if !app_handle
+            .state::<AppState>()
+            .quitting
+            .load(Ordering::SeqCst)
+            && label == "splash" =>
+        {
+            // The WebFirst loading surface is the primary application window
+            // until Harness HTML is ready. Closing it means the user asked to
+            // exit; never leave a background Runtime starting with no surface.
+            api.prevent_close();
+            crate::supervisor::request_exit(app_handle);
+        }
         tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { api, .. },
