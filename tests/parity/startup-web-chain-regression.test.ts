@@ -12,7 +12,7 @@ function rustFiles(relative: string): string[] {
   return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
     const child = path.join(relative, entry.name)
     if (entry.isDirectory()) return rustFiles(child)
-    return entry.isFile() && entry.name.endsWith('.rs') ? [child] : []
+    // Keep repository-relative paths stable across POSIX and Windows. The lifecycle\n    // allow-list below intentionally uses forward slashes, while path.join()\n    // uses the host separator.\n    return entry.isFile() && entry.name.endsWith('.rs') ? [child.split(path.sep).join('/')] : []
   })
 }
 
