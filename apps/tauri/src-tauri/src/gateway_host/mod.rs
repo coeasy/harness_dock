@@ -64,7 +64,7 @@ pub(crate) use commands::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::runtime_actor::{RuntimeGeneration, RuntimeMode};
 
     #[test]
     pub fn gateway_public_url_is_https_or_loopback_debug_only() {
@@ -137,6 +137,70 @@ mod tests {
     }
 
     #[test]
+    pub fn connect_ticket_is_not_consumed_by_unsupported_http_methods() {
+        let shared = test_gateway_shared();
+        let now = SystemTime::now();
+        {
+            let mut registry = shared.registry.lock().unwrap();
+            registry.sessions.insert(
+                "session-1".into(),
+                SessionState {
+                    id: "device-1".into(),
+                    name: "test device".into(),
+                    paired_at: now,
+                    last_seen_at: now,
+                    expires_at: now + Duration::from_secs(600),
+                    bootstrapped: false,
+                },
+            );
+            registry.connect_tickets.insert(
+                "ticket-1".into(),
+                ConnectTicket {
+                    token: "ticket-1".into(),
+                    session_token: "session-1".into(),
+                    expires_at: now + Duration::from_secs(90),
+                },
+            );
+        }
+
+        let rejected = gateway_exchange(&shared, "POST", "/api/harnessdock/connect?token=ticket-1");
+        assert!(rejected.starts_with("HTTP/1.1 405 Method Not Allowed"));
+        assert!(shared
+            .registry
+            .lock()
+            .unwrap()
+            .connect_tickets
+            .contains_key("ticket-1"));
+
+        let redeemed = gateway_exchange(&shared, "GET", "/api/harnessdock/connect?token=ticket-1");
+        assert!(redeemed.starts_with("HTTP/1.1 303 See Other"));
+        assert!(redeemed.contains("Set-Cookie: hd_session=session-1;"));
+        assert!(!shared
+            .registry
+            .lock()
+            .unwrap()
+            .connect_tickets
+            .contains_key("ticket-1"));
+    }
+
+    #[test]
+    pub fn stop_during_gateway_start_invalidates_the_old_generation() {
+        let mut actor = GatewayActorState::default();
+        let first = actor.begin_start().unwrap();
+        assert_eq!(actor.phase(), GatewayPhase::Starting);
+
+        assert!(actor.begin_stop().is_none());
+        assert_eq!(actor.phase(), GatewayPhase::Stopping);
+        actor.settle_stopped();
+        actor.fail(first);
+        assert_eq!(actor.phase(), GatewayPhase::Stopped);
+
+        let second = actor.begin_start().unwrap();
+        assert!(second > first);
+        assert_eq!(actor.phase(), GatewayPhase::Starting);
+    }
+
+    #[test]
     pub fn cookies_are_parsed_without_exposing_other_values() {
         assert_eq!(
             cookie_value("a=1; hd_session=abc; b=2", "hd_session"),
@@ -151,5 +215,46 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let connected = connect_upstream("127.0.0.1", port).unwrap();
         assert_eq!(connected.peer_addr().unwrap().port(), port);
+    }
+
+    fn test_gateway_shared() -> Arc<GatewayShared> {
+        Arc::new(GatewayShared {
+            registry: Mutex::new(GatewayRegistry::default()),
+            runtime_lease: RuntimeLease {
+                generation: RuntimeGeneration {
+                    id: 1,
+                    nonce: "test-nonce".into(),
+                    image_identity: "test-image".into(),
+                    mode: RuntimeMode::Normal,
+                },
+                pid: 1,
+                origin: "http://127.0.0.1:43138".into(),
+                launch_url: "http://127.0.0.1:43138/launch".into(),
+                dsh_version: "test".into(),
+            },
+            public_url: "http://127.0.0.1:43137/".into(),
+            secure_cookie: false,
+            stop: Arc::new(AtomicBool::new(false)),
+            active_connections: AtomicUsize::new(0),
+            next_connection_id: AtomicUsize::new(1),
+            connection_streams: Mutex::new(HashMap::new()),
+            connection_workers: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn gateway_exchange(shared: &Arc<GatewayShared>, method: &str, target: &str) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        let (server, peer) = listener.accept().unwrap();
+        let request = format!(
+            "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        handle_connection(server, peer, 1, Arc::clone(shared)).unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        response
     }
 }
