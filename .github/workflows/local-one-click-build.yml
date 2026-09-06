@@ -86,7 +86,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # Matches every supported local desktop Runtime target:
+        # win32-x64, linux-x64, darwin-x64, darwin-arm64.
+        os: [windows-latest, ubuntu-latest, macos-15-intel, macos-latest]
     steps:
       - uses: actions/checkout@v7
 
