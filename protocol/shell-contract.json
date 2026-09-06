@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 2,
+  "pluginId": "harness-shell",
+  "commands": [
+    { "name": "window.minimize", "route": "direct", "target": "harness_minimize" },
+    { "name": "window.toggleMaximize", "route": "direct", "target": "harness_toggle_maximize" },
+    { "name": "window.state", "route": "direct", "target": "harness_window_state" },
+    { "name": "window.close", "route": "direct", "target": "harness_shell_close" },
+    { "name": "web.reload", "route": "host", "target": "refresh-harness" },
+    { "name": "web.restart", "route": "host", "target": "restart-runtime" },
+    { "name": "runtime.safe-mode", "route": "host", "target": "start-safe-mode" },
+    { "name": "gateway.manage", "route": "host", "target": "show-gateway" },
+    { "name": "diagnostics.open", "route": "host", "target": "show-diagnostics" }
+  ]
+}
