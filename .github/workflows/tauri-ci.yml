@@ -42,9 +42,49 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  auto-clippy-fix:
+    if: github.event_name == 'push' && github.ref_name == 'refactor/v4-full-implementation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/v4-full-implementation
+      - name: Install Linux Tauri dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/tauri/src-tauri
+      - name: Apply machine-applicable Clippy fixes
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --fix --allow-dirty --allow-staged --locked --manifest-path apps/tauri/src-tauri/Cargo.toml --all-targets -- -D warnings
+          status=$?
+          set -e
+          cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml --all
+          echo "clippy --fix exit status: $status (non-machine-applicable lints are handled manually)"
+      - name: Commit compiler-approved fixes if needed
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/tauri/src-tauri; then
+            echo "no machine-applicable fixes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/tauri/src-tauri
+          git diff --cached --check
+          git commit -m "style: apply Rust 1.98 Clippy fixes"
+          git push origin HEAD:refactor/v4-full-implementation
+
   shared-core:
     runs-on: ubuntu-latest
     steps:
