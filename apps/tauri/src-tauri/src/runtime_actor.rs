@@ -242,22 +242,12 @@ impl RuntimeActorState {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct RuntimeActor {
     state: RuntimeActorState,
     process: Option<RuntimeProcess>,
     lease: Option<RuntimeLease>,
     cancellation: Option<(u64, CancellationToken)>,
-}
-
-impl Default for RuntimeActor {
-    fn default() -> Self {
-        Self {
-            state: RuntimeActorState::default(),
-            process: None,
-            lease: None,
-            cancellation: None,
-        }
-    }
 }
 
 impl RuntimeActor {

@@ -189,7 +189,7 @@ pub fn start_blocking(
     ) {
         Ok(process) => {
             work_dir_guard.retain();
-            return Ok(process);
+            Ok(process)
         }
         Err(first_failure) => {
             if cancelled(&token, &quitting) {

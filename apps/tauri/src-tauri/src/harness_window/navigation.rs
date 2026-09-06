@@ -66,7 +66,7 @@ pub fn current_runtime_lease(
     //
     // The lookup itself is shared with the Gateway via `crate::lease` so both
     // surfaces report the same message when no Runtime is ready.
-    crate::lease::require_current_lease(&*app.state::<crate::AppState>())
+    crate::lease::require_current_lease(&app.state::<crate::AppState>())
 }
 
 #[cfg(not(mobile))]
@@ -105,7 +105,7 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
     // replacing generations. Do not convert that transition into recovery from
     // a page-load callback; the generation-aware watchdog/startup fallback will
     // either publish the current navigation or report the real timeout.
-    let Ok(lease) = current_runtime_lease(&app) else {
+    let Ok(lease) = current_runtime_lease(app) else {
         eprintln!("Ignoring Harness page-load callback while RuntimeLease is transitioning");
         return;
     };
@@ -121,12 +121,12 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
 
     let Ok(candidate) = validated_runtime_url(loaded_url.as_str()) else {
         let _ = window.hide();
-        show_startup_recovery(&app, "Harness Web 导航到了无效的 Runtime URL，已阻止加载。");
+        show_startup_recovery(app, "Harness Web 导航到了无效的 Runtime URL，已阻止加载。");
         return;
     };
     if candidate.origin().ascii_serialization() != lease.origin {
         let _ = window.hide();
-        show_startup_recovery(&app, "Harness Web 导航到了不受管理的 origin，已阻止加载。");
+        show_startup_recovery(app, "Harness Web 导航到了不受管理的 origin，已阻止加载。");
         return;
     }
     // WebView2/Chromium emits PageLoadEvent::Finished for its own network error
@@ -135,7 +135,7 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
     if !runtime_listener_reachable(&candidate) {
         let _ = window.hide();
         show_startup_recovery(
-            &app,
+            app,
             "Harness Runtime 已发布地址，但本地 Web 监听已经失效（127.0.0.1 拒绝连接）。",
         );
         return;
@@ -169,15 +169,15 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
         return;
     }
     if let Err(error) = window.show() {
-        show_startup_recovery(&app, &format!("无法显示 Harness Web 窗口: {error}"));
+        show_startup_recovery(app, &format!("无法显示 Harness Web 窗口: {error}"));
         return;
     }
-    clear_startup_recovery(&app);
+    clear_startup_recovery(app);
     let _ = window.set_focus();
     if let Some(control) = app.get_webview_window("control") {
         let _ = control.close();
     }
-    hide_splash(&app);
+    hide_splash(app);
     crate::startup_trace::mark(crate::startup_trace::StartupPhase::PrimaryVisible);
 }
 

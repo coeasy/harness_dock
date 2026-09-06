@@ -7,7 +7,7 @@ use tauri::{
 use url::Url;
 
 fn show_primary(app: &AppHandle) {
-    let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>());
+    let lease = crate::runtime::live_lease(&app.state::<crate::AppState>());
     if let Some(window) = app.get_webview_window("harness") {
         // SurfaceActor is the only source of truth for Harness navigation.
         // Never reintroduce a parallel harness_loading AtomicBool.
@@ -134,7 +134,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                show_primary(&tray.app_handle());
+                show_primary(tray.app_handle());
             }
         });
 

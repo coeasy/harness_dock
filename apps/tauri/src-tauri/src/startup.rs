@@ -67,7 +67,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
         // wait for the current generation instead of turning the transient into
         // a recovery window. The generation-aware watchdog remains the bounded
         // failure path if the lease never returns.
-        let Some(lease) = crate::runtime::current_lease(&*app.state::<AppState>()) else {
+        let Some(lease) = crate::runtime::current_lease(&app.state::<AppState>()) else {
             stable_clean_polls = 0;
             tokio::time::sleep(Duration::from_millis(STARTUP_RETRY_DELAY_MS)).await;
             continue;

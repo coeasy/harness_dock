@@ -58,7 +58,7 @@ fn trusted_subject(
                 ));
             }
             let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                crate::runtime::live_lease(&app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -134,7 +134,7 @@ fn snapshot_subject(
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
             let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                crate::runtime::live_lease(&app.state::<crate::AppState>()).ok_or_else(|| {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
@@ -186,9 +186,9 @@ pub fn host_snapshot(
     // This fixes one canonical lock order for status readers (runtime ->
     // surface -> gateway) instead of letting each bridge command lock actors
     // ad hoc.
-    let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&*state);
+    let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&state);
     let runtime_phase = snapshot.runtime_phase;
-    let lease = crate::runtime::live_lease(&*state);
+    let lease = crate::runtime::live_lease(&state);
     let capabilities = crate::capability_broker::allowed_capabilities(
         subject,
         surface,
@@ -227,7 +227,7 @@ pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
     // Read-only snapshot: this command only reports state. It must never
     // reap a dead process or stop the gateway as a side effect of a status
     // query issued from the diagnostics Surface.
-    let mut status = crate::runtime::status_snapshot_readonly(&*app.state::<crate::AppState>());
+    let mut status = crate::runtime::status_snapshot_readonly(&app.state::<crate::AppState>());
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
             parsed.set_username("").ok();

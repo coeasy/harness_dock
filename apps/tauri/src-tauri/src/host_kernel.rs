@@ -160,20 +160,11 @@ fn record_event(
 /// consumers. Fast/slow consumers run concurrently, so the dedupe window must
 /// be shared behind a mutex; event ordering remains a single monotonic
 /// sequence inside `record_event`.
+#[derive(Default)]
 struct SharedKernelState {
     dedupe: HashMap<String, (String, ResponseEnvelope)>,
     dedupe_order: VecDeque<String>,
     operation_sequence: u64,
-}
-
-impl Default for SharedKernelState {
-    fn default() -> Self {
-        Self {
-            dedupe: HashMap::new(),
-            dedupe_order: VecDeque::new(),
-            operation_sequence: 0,
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -151,9 +151,8 @@ pub async fn restart_harness_web_impl(
         let _ = window.hide();
     }
     if clear_quarantine {
-        crate::runtime::runtime_clear_plugin_quarantine(app.clone()).map_err(|error| {
-            show_startup_recovery(&app, &error);
-            error
+        crate::runtime::runtime_clear_plugin_quarantine(app.clone()).inspect_err(|error| {
+            show_startup_recovery(&app, error);
         })?;
     }
     let status = if safe_mode {
@@ -161,9 +160,8 @@ pub async fn restart_harness_web_impl(
     } else {
         crate::runtime::restart_managed(app.clone()).await
     }
-    .map_err(|error| {
-        show_startup_recovery(&app, &error);
-        error
+    .inspect_err(|error| {
+        show_startup_recovery(&app, error);
     })?;
     let current_epoch = app
         .state::<crate::AppState>()
@@ -180,9 +178,8 @@ pub async fn restart_harness_web_impl(
         show_startup_recovery(&app, &error);
         return Err(error);
     };
-    harness_open(app.clone(), url).await.map_err(|error| {
-        show_startup_recovery(&app, &error);
-        error
+    harness_open(app.clone(), url).await.inspect_err(|error| {
+        show_startup_recovery(&app, error);
     })?;
     Ok(status)
 }

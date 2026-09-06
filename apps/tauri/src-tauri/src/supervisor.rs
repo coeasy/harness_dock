@@ -28,7 +28,7 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
         stop_managed_processes(&app);
         let idle = {
             let state = app.state::<AppState>();
-            let current = lifecycle::snapshot(&*state);
+            let current = lifecycle::snapshot(&state);
             process::starting_processes_empty(&state.starting_processes)
                 && current.managed_operations_idle()
         };

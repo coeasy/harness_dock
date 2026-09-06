@@ -59,7 +59,7 @@ pub(crate) fn status_snapshot_readonly(state: &AppState) -> RuntimeStatus {
 
 #[tauri::command]
 pub fn runtime_status(state: State<'_, AppState>) -> RuntimeStatus {
-    status_snapshot(&*state)
+    status_snapshot(&state)
 }
 
 async fn start_impl(
@@ -79,7 +79,7 @@ async fn start_impl(
     // but the pre-check below only describes current state. Use the read-only
     // snapshot so a healthy running Runtime (degraded via safe-mode, for
     // example) is reported as-is instead of being torn down by inspection.
-    let existing = status_snapshot_readonly(&*state);
+    let existing = status_snapshot_readonly(&state);
     if existing.app_url.is_some() {
         return Ok(existing);
     }
@@ -94,7 +94,7 @@ async fn start_impl(
     let image = match load_runtime_image(&app) {
         Ok(image) => image,
         Err(error) => {
-            return Err(mark_start_failed(&*state, generation.id, error));
+            return Err(mark_start_failed(&state, generation.id, error));
         }
     };
     let generation = {
@@ -122,19 +122,19 @@ async fn start_impl(
 
     let plugin_path = match resource_path(&app, "plugin-embedded-client/index.js") {
         Ok(path) => path,
-        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+        Err(error) => return Err(mark_start_failed(&state, generation.id, error)),
     };
     let compatibility_path = match resource_path(&app, "dsh-client-runtime-compat/index.js") {
         Ok(path) => path,
-        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+        Err(error) => return Err(mark_start_failed(&state, generation.id, error)),
     };
     let shell_plugin_path = match resource_path(&app, "plugin-harness-shell/index.js") {
         Ok(path) => path,
-        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+        Err(error) => return Err(mark_start_failed(&state, generation.id, error)),
     };
     let quarantine_state_path = match quarantine_path(&app) {
         Ok(path) => path,
-        Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
+        Err(error) => return Err(mark_start_failed(&state, generation.id, error)),
     };
     for required in [&plugin_path, &compatibility_path, &shell_plugin_path] {
         if !required.is_file() {
@@ -142,7 +142,7 @@ async fn start_impl(
                 "Tauri Runtime integration resource missing: {}",
                 required.display()
             );
-            return Err(mark_start_failed(&*state, generation.id, error));
+            return Err(mark_start_failed(&state, generation.id, error));
         }
     }
     let starting_processes = Arc::clone(&state.starting_processes);
@@ -169,7 +169,7 @@ async fn start_impl(
         Ok(process) => process,
         Err(error) => {
             return Err(mark_start_failed(
-                &*state,
+                &state,
                 generation.id,
                 format!("Runtime 启动任务失败: {error}"),
             ));
@@ -179,7 +179,7 @@ async fn start_impl(
     let mut process = match process {
         Ok(process) => process,
         Err(error) => {
-            return Err(mark_start_failed(&*state, generation.id, error));
+            return Err(mark_start_failed(&state, generation.id, error));
         }
     };
     if state.quitting.load(Ordering::Acquire) || token.is_cancelled() {
@@ -203,7 +203,7 @@ async fn start_impl(
         Ok(lease) => lease,
         Err(error) => {
             process.stop();
-            return Err(mark_start_failed(&*state, generation.id, error));
+            return Err(mark_start_failed(&state, generation.id, error));
         }
     };
     let degraded = process.safe_mode || !process.isolated_plugins.is_empty();
@@ -277,7 +277,7 @@ pub fn stop_impl(state: &AppState) -> Result<RuntimeStatus, String> {
 
 #[tauri::command]
 pub fn runtime_stop(state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
-    stop_impl(&*state)
+    stop_impl(&state)
 }
 
 pub(crate) async fn restart_managed(app: AppHandle) -> Result<RuntimeStatus, String> {
@@ -293,7 +293,7 @@ async fn restart_managed_mode(app: AppHandle, mode: RuntimeMode) -> Result<Runti
     if state.quitting.load(Ordering::Acquire) {
         return Err("HarnessDock 正在退出，已拒绝 Runtime 重启。".into());
     }
-    stop_impl(&*state)?;
+    stop_impl(&state)?;
     let state = app.state::<AppState>();
     start_impl(app.clone(), state, mode).await
 }

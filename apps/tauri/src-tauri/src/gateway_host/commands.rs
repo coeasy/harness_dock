@@ -23,7 +23,7 @@ pub fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStat
             .map(|server| server.runtime_generation)
     });
     if let Some(generation) = generation {
-        if !is_current_generation(&*state, generation) {
+        if !is_current_generation(&state, generation) {
             stop_managed(&state.gateway);
             return Ok(stopped());
         }
@@ -49,7 +49,7 @@ pub fn gateway_host_start(
     if state.quitting.load(Ordering::Acquire) {
         return Err("HarnessDock 正在退出，已拒绝新的 Gateway 启动。".into());
     }
-    let lease = require_live_lease(&*state)?;
+    let lease = require_live_lease(&state)?;
     let port = validated_gateway_port(local_port)?;
     let lifecycle = lifecycle_lock(&state.gateway)?;
     let generation = {
@@ -82,8 +82,7 @@ pub fn gateway_host_start(
             return Err(error);
         }
     };
-    if !is_current_generation(&*state, lease.generation.id)
-        || state.quitting.load(Ordering::Acquire)
+    if !is_current_generation(&state, lease.generation.id) || state.quitting.load(Ordering::Acquire)
     {
         let mut server = server;
         server.stop();
@@ -108,7 +107,7 @@ pub fn gateway_host_start(
     // A Runtime stop can race between the pre-spawn lease check and publish.
     // Re-check after publication and tear down a server that was published
     // after the Runtime actor had already become unavailable.
-    if !is_current_generation(&*state, lease.generation.id) {
+    if !is_current_generation(&state, lease.generation.id) {
         stop_managed(&state.gateway);
         return Err("RuntimeLease 在 Gateway 发布期间已失效。".into());
     }
@@ -119,7 +118,7 @@ pub fn gateway_host_start(
 pub fn gateway_host_create_pairing(
     state: State<'_, AppState>,
 ) -> Result<GatewayPairingTicket, String> {
-    let current = require_live_lease(&*state)?;
+    let current = require_live_lease(&state)?;
     let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     let server = actor
         .server
@@ -149,7 +148,7 @@ pub fn gateway_host_create_pairing(
 
 #[tauri::command]
 pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Result<bool, String> {
-    let current = require_live_lease(&*state)?;
+    let current = require_live_lease(&state)?;
     let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     let server = actor
         .server
@@ -181,7 +180,7 @@ pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Res
 
 #[tauri::command]
 pub fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize, String> {
-    let current = require_live_lease(&*state)?;
+    let current = require_live_lease(&state)?;
     let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     let server = actor
         .server

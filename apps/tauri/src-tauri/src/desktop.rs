@@ -83,7 +83,7 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     crate::host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
 
-    match crate::tray::create_tray(&app.handle()) {
+    match crate::tray::create_tray(app.handle()) {
         Ok(()) => app
             .state::<AppState>()
             .tray_available
