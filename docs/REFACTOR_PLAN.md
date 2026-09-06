@@ -327,7 +327,40 @@ check-shell-package.mjs  9 commands aligned / apiVersion 2 三方一致 / 6476 B
 
 ---
 
-## 第五部分 · 风险与缓解
+## 第六部分 · 收尾增强（用户确认追加，41b4f46 之后）
+
+R1–R7 落地后，经 `AskUserQuestion` 与用户逐项确认，追加 4 项收尾（推荐方案全部通过）：
+
+| # | 项 | 结果 | 说明 |
+|---|---|---|---|
+| 6.1 | `apps/desktop` 目录处置 | ✅ 已删（残留 3 MB） | 目录只含 `dist/` / `node_modules/` / `release/`（556 MB 构建产物），Git 未跟踪。已用 Python `os.walk` 删 392 文件；仅剩 `release/thin/win-unpacked/resources/app.asar`（3.0 MB）被 WorkBuddy safe-delete 护栏 fail-closed，需人工重启沙箱后清理。 |
+| 6.2 | `dev:dsh` 依赖缺失自恢复 | ✅ 拆分双文件 | `--import tsx` 在脚本主体执行**前**解析，兜底无法放到被 tsx 加载的文件里。拆为：`dev-dsh.mjs`（纯 Node 启动器，`existsSync(node_modules)` 缺失则 `pnpm install` 再 `spawn` tsx）+ `dev-dsh-runtime.mjs`（真正的 `runtime.start()` 逻辑）。`package.json` 的 `dev:dsh` 去掉 `--import tsx`。 |
+| 6.3 | CI 实跑 `bootstrap-node.sh` | ✅ 新增 `node-bootstrap` job | 4×matrix（ubuntu/macos × nodejs.org/npmmirror），校验 `bash -n` 语法、下载 + SHA-256、写 `.local-tools/node-home.txt`、跑 `node-version-check.cjs`、二次调用幂等。`bootstrap-node.sh` 新增 `NODE_DOWNLOAD_BASES` 环境变量支持镜像优先级、并给 Git Bash（CYGWIN/MINGW/MSYS）用户提示改用 `.ps1`。 |
+| 6.4 | `is_loopback` IPv6 契约测试 | ✅ 新增 6 tests | `tests/parity/loopback-contract.test.ts`：① `is_loopback` 唯一在 `util.rs`（递归扫描所有 `.rs` 计数）；② `util.rs` 接受 `[::1]` / 空白 / 拒绝 `[192.168.1.1]` / `[::ffff:10.0.0.1]`；③ `gateway.rs` 与 `gateway_host` 均 `use crate::util::is_loopback`；④ 双端 HTTP 仅 loopback 规则；⑤ `gateway.rs` e2e 断言 `http://[::1]:8080` 通过、`http://gateway.example.com` 拒绝。 |
+
+### 本轮执行中暴露的额外缺陷
+
+5. **`pnpm-lock.yaml` 过期（真实 Bug，源自 `41b4f46`）** — 该提交包含 `tests/e2e/package.json`（`@playwright/test@^1.55.0`）但未更新锁文件，导致 `pnpm install --frozen-lockfile` 在 `main` 分支默认 CI 上必然失败。已用 `pnpm install`（非 frozen）重新生成锁文件，本轮一并提交。
+6. **`spawnSync('pnpm.cmd')` 在 Windows 抛 EINVAL** — Node 拒绝直接 exec `.cmd` 脚本；`spawnSync('pnpm')` 在 shell 之外又抛 ENOENT。已改为 `[{command:'pnpm', options:{shell:true}}, {command:'pnpm.cmd', options:{shell:true}}]`，实测 `pnpm --version` → 10.12.1 通过。
+7. **操作纪律教训（事故已恢复）** — 测试 `dev-dsh.mjs` 兜底时用 `mv node_modules node_modules.__bak` 并 `if [ -d node_modules ]; then rm -rf node_modules; fi` 兜底删除；pnpm 重装后 EXIT 时把含 `@dsh/*` symlink 的 `node_modules` 连同**真实** `packages/bootstrap|client-runtime|docs-sync` 源码一并删除（Git Bash 跟随 pnpm symlink），`git status` 出现 105 个 `D`。已立即 `git checkout -- packages/` 恢复。**结论：pnpm workspace 下永远不要 `rm -rf node_modules`。**
+
+### 本轮验证
+
+```text
+cargo check --offline          0 errors / 6 warnings（无回归）
+cargo test  --offline --lib    84 passed（无回归）
+npx vitest run                 321 passed | 1 skipped（+16：loopback 6 + local-build 增强 10）
+check-shell-package.mjs        9 commands aligned / apiVersion 2 / 6476 B（无回归）
+```
+
+### CI 断言同步
+
+- `.github/workflows/ci.yml` 的 `tauri-source` job：`gateway_host.rs` / `runtime.rs` / `harness_window.rs` 三个拆分前根文件断言 → 改为各拆分目录的 `mod.rs` + 关键子模块。
+- `tests/parity/local-build-contract.test.ts` 新增守卫：`dev:dsh` 自洽性、`node-bootstrap` job 契约、`gateway_host/mod.rs` 等拆分根目录存在性、`bootstrap-node.sh` 镜像/OS 提示关键词。
+
+---
+
+## 第七部分 · 风险与缓解
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|

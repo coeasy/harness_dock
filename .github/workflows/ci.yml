@@ -89,7 +89,61 @@ jobs:
           test "$tauri_version" = "$root_version"
           test "$cargo_version" = "$root_version"
           test -s apps/tauri/src-tauri/Cargo.lock
-          test -s apps/tauri/src-tauri/src/gateway_host.rs
+          # runtime / gateway_host / harness_window are directory modules since the
+          # R3-R5 split, so assert on the module roots rather than single files.
+          test -s apps/tauri/src-tauri/src/runtime/mod.rs
+          test -s apps/tauri/src-tauri/src/gateway_host/mod.rs
+          test -s apps/tauri/src-tauri/src/harness_window/mod.rs
+          test -s apps/tauri/src-tauri/src/util.rs
+          test -s apps/tauri/src-tauri/src/error.rs
+
+  # The portable-Node bootstrap has historically been validated only with
+  # `bash -n` / a PowerShell parse, never actually downloaded anything. Run it
+  # for real on POSIX, once per mirror primary, so a nodejs.org manifest change
+  # cannot fail only on a bare dev machine.
+  node-bootstrap:
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            mirror: nodejs
+          - os: macos-latest
+            mirror: nodejs
+          - os: ubuntu-latest
+            mirror: npmmirror
+          - os: macos-latest
+            mirror: npmmirror
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bootstrap portable Node and verify the published artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version="$(sed -n 's/.*"node"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' scripts/versions.json | head -1)"
+          test -n "$node_version"
+          case "${{ matrix.mirror }}" in
+            npmmirror)
+              export NODE_DOWNLOAD_BASES="https://npmmirror.com/mirrors/node/v${node_version} https://nodejs.org/dist/v${node_version}"
+              ;;
+            *)
+              export NODE_DOWNLOAD_BASES="https://nodejs.org/dist/v${node_version} https://npmmirror.com/mirrors/node/v${node_version}"
+              ;;
+          esac
+          bash -n scripts/bootstrap-node.sh
+          bash scripts/bootstrap-node.sh
+          test -s .local-tools/node-home.txt
+          node_home="$(cat .local-tools/node-home.txt)"
+          test -x "$node_home/bin/node"
+          test -d ".local-cache/node"
+          portable_version="$($node_home/bin/node --version | sed 's/^v//')"
+          test "$portable_version" = "$node_version"
+          "$node_home/bin/node" scripts/node-version-check.cjs
+          # A second invocation must be a no-op on the already-installed tree.
+          bash scripts/bootstrap-node.sh
 
   sync:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

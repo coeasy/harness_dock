@@ -34,6 +34,17 @@ describe('self-contained local client build', () => {
     expect(posixBootstrap).toContain('sha256sum')
     expect(posixBootstrap).toContain('node-home.txt')
     expect(posixBootstrap).not.toContain('build.mjs')
+
+    // Both mirrors must stay reachable; CI drives the primary order through
+    // NODE_DOWNLOAD_BASES so a nodejs.org manifest change cannot surface only on
+    // a bare developer machine.
+    expect(posixBootstrap).toContain('NODE_DOWNLOAD_BASES')
+    expect(posixBootstrap).toContain('https://nodejs.org/dist/v')
+    expect(posixBootstrap).toContain('https://npmmirror.com/mirrors/node/v')
+    // Windows developers reaching this script through Git Bash must be pointed at
+    // the PowerShell counterpart instead of failing on an opaque uname value.
+    expect(posixBootstrap).toContain('CYGWIN*|MINGW*|MSYS*')
+    expect(posixBootstrap).toContain('bootstrap-node.ps1')
   })
 
   it('prepares the exact sealed runtime instead of assuming resources/dsh-runtime exists', () => {
@@ -117,5 +128,66 @@ describe('self-contained local client build', () => {
     const build = read('scripts/build.mjs')
     expect(build).toContain("'smoke-runtime'")
     expect(build).toContain('verify sealed Runtime + Harness Web readiness')
+  })
+
+  it('runs the portable Node bootstrap for real in CI, on both POSIX hosts', () => {
+    const workflow = read('.github/workflows/ci.yml')
+
+    // The bootstrap used to be validated only with `bash -n`; a real download is
+    // the only check that catches a mirror layout or manifest change.
+    expect(workflow).toContain('node-bootstrap:')
+    expect(workflow).toContain('bash scripts/bootstrap-node.sh')
+    expect(workflow).toContain('test "$portable_version" = "$node_version"')
+    expect(workflow).toContain('"$node_home/bin/node" scripts/node-version-check.cjs')
+    // Both mirrors act as primary in some cell of the matrix.
+    expect(workflow).toContain('mirror: nodejs')
+    expect(workflow).toContain('mirror: npmmirror')
+    expect(workflow).toContain('os: ubuntu-latest')
+    expect(workflow).toContain('os: macos-latest')
+    // Artifacts must not leak into git; the bootstrap writes under ignored roots.
+    expect(workflow).toContain('.local-tools/node-home.txt')
+    expect(workflow).toContain('.local-cache/node')
+  })
+
+  it('asserts the split module roots rather than the pre-R3 single files', () => {
+    const workflow = read('.github/workflows/ci.yml')
+    for (const relative of [
+      'apps/tauri/src-tauri/src/runtime/mod.rs',
+      'apps/tauri/src-tauri/src/gateway_host/mod.rs',
+      'apps/tauri/src-tauri/src/harness_window/mod.rs',
+      'apps/tauri/src-tauri/src/util.rs',
+      'apps/tauri/src-tauri/src/error.rs',
+    ]) {
+      expect(workflow).toContain(`test -s ${relative}`)
+    }
+    // The single-file paths no longer exist; a stale assertion would fail CI the
+    // moment the split is reproduced.
+    expect(workflow).not.toContain('test -s apps/tauri/src-tauri/src/gateway_host.rs')
+  })
+
+  it('keeps the dev-only dsh runner self-sufficient after the dev-dsh.sh removal', () => {
+    // The launcher must not require tsx itself: `node --import tsx` resolves the
+    // loader before any script body runs, so a missing node_modules would abort
+    // the process before a dependency fallback had a chance to run.
+    const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
+    expect(pkg.scripts['dev:dsh']).toBe('node scripts/dev-dsh.mjs')
+    expect(pkg.scripts['dev:dsh']).not.toContain('--import tsx')
+
+    const launcher = read('scripts/dev-dsh.mjs')
+    const runtime = read('scripts/dev-dsh-runtime.mjs')
+
+    // Restored behaviour from the deleted dev-dsh.sh.
+    expect(launcher).toContain('pnpm install')
+    expect(launcher).toContain('node_modules')
+    expect(launcher).toContain('dev-dsh-runtime.mjs')
+    expect(launcher).toContain("'--import', 'tsx'")
+    // The launcher itself stays tsx-free.
+    expect(launcher).not.toMatch(/^import \{ DshRuntime \}/m)
+    expect(launcher).not.toContain('client-runtime/src')
+
+    // The runtime body keeps the original imports and shutdown behaviour.
+    expect(runtime).toContain("await import('../packages/client-runtime/src/runtime.ts')")
+    expect(runtime).toContain('new DshRuntime(')
+    expect(runtime).toContain("process.on('SIGINT', shutdown)")
   })
 })

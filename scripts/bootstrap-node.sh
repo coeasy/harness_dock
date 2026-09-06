@@ -20,6 +20,12 @@ fi
 case "$(uname -s)" in
   Darwin) node_platform=darwin ;;
   Linux) node_platform=linux ;;
+  CYGWIN*|MINGW*|MSYS*)
+    echo "[bootstrap-node] ERROR: this shell is a POSIX emulation on Windows" >&2
+    echo "[bootstrap-node] Use scripts/bootstrap-node.ps1 instead:" >&2
+    echo "[bootstrap-node]   powershell -ExecutionPolicy Bypass -File scripts/bootstrap-node.ps1" >&2
+    exit 1
+    ;;
   *) echo "[bootstrap-node] ERROR: unsupported host OS: $(uname -s)" >&2; exit 1 ;;
 esac
 case "$(uname -m)" in
@@ -85,9 +91,12 @@ install_from_mirror() {
 }
 
 mkdir -p "$tool_root"
+# `NODE_DOWNLOAD_BASES` lets CI exercise both mirrors explicitly (space separated,
+# first entry is primary). Without it the script keeps the default order.
+sources="${NODE_DOWNLOAD_BASES:-https://nodejs.org/dist/v${node_version} https://npmmirror.com/mirrors/node/v${node_version}}"
 if ! node_ready; then
   installed=false
-  for base in "https://nodejs.org/dist/v${node_version}" "https://npmmirror.com/mirrors/node/v${node_version}"; do
+  for base in $sources; do
     if install_from_mirror "$base"; then
       installed=true
       break
