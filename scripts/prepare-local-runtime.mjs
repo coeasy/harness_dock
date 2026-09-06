@@ -35,6 +35,9 @@ const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 const gitCommand = process.platform === 'win32' ? 'git.exe' : 'git'
 const tarCommand = process.platform === 'win32' ? 'tar.exe' : 'tar'
+const RUNTIME_SCHEMA_VERSION = 1
+const RUNTIME_LAYOUT_VERSION = 4
+const RUNTIME_IMAGE_IDENTITY_ALGORITHM = 'sha256-v1'
 
 const { values } = parseArgs({
   options: {
@@ -98,17 +101,49 @@ async function readRuntimeManifest(root = runtimeDir) {
   }
 }
 
+function manifestMismatchReasons(manifest) {
+  if (!manifest || typeof manifest !== 'object') return ['manifest missing or invalid']
+
+  const expected = {
+    platform: process.platform,
+    arch,
+    dshVersion: origin.dshVersion,
+    gitTag: origin.gitTag,
+    gitCommit: origin.gitCommit,
+    dshGitTag: origin.gitTag,
+    dshGitCommit: origin.gitCommit,
+    clientVersion: product.version,
+    schemaVersion: RUNTIME_SCHEMA_VERSION,
+    runtimeLayoutVersion: RUNTIME_LAYOUT_VERSION,
+    imageIdentityAlgorithm: RUNTIME_IMAGE_IDENTITY_ALGORITHM,
+    runtimeEmbedded: true,
+    firstLaunchRuntimeDownloadRequired: false,
+  }
+  const reasons = []
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (manifest[field] !== expectedValue) {
+      reasons.push(`${field}=${String(manifest[field] ?? 'missing')} expected ${String(expectedValue)}`)
+    }
+  }
+
+  if (typeof manifest.imageIdentity !== 'string' || !/^sha256:[a-f0-9]{64}$/i.test(manifest.imageIdentity)) {
+    reasons.push('imageIdentity missing or malformed')
+  }
+  if (!Number.isInteger(Number(manifest.contentFileCount)) || Number(manifest.contentFileCount) <= 0) {
+    reasons.push('contentFileCount missing or invalid')
+  }
+  if (!Number.isFinite(Number(manifest.contentBytes)) || Number(manifest.contentBytes) <= 0) {
+    reasons.push('contentBytes missing or invalid')
+  }
+  return reasons
+}
+
 function manifestMatches(manifest) {
-  return Boolean(
-    manifest &&
-      manifest.platform === process.platform &&
-      manifest.arch === arch &&
-      manifest.dshVersion === origin.dshVersion &&
-      manifest.runtimeEmbedded === true &&
-      manifest.firstLaunchRuntimeDownloadRequired === false &&
-      typeof manifest.imageIdentity === 'string' &&
-      manifest.imageIdentity.length > 0,
-  )
+  return manifestMismatchReasons(manifest).length === 0
+}
+
+function manifestMismatchSummary(manifest) {
+  return manifestMismatchReasons(manifest).join('; ')
 }
 
 async function hasPackedTarballs() {
@@ -245,7 +280,7 @@ async function installReleaseBundle(url) {
     run(tarCommand, ['-xzf', archive, '-C', temp])
     const manifest = await readRuntimeManifest(temp)
     if (!manifestMatches(manifest)) {
-      throw new Error(`downloaded runtime manifest does not match ${key} / dsh ${origin.dshVersion}`)
+      throw new Error(`downloaded runtime manifest mismatch: ${manifestMismatchSummary(manifest)}`)
     }
     await rm(runtimeDir, { recursive: true, force: true })
     await rename(temp, runtimeDir)
@@ -253,7 +288,7 @@ async function installReleaseBundle(url) {
     await rm(temp, { recursive: true, force: true })
   }
 
-  console.log(`[runtime] verified sealed runtime installed: ${runtimeDir}`)
+  console.log(`[runtime] verified exact sealed runtime installed: ${runtimeDir}`)
 }
 
 async function ensurePinnedUpstreamCheckout() {
@@ -336,15 +371,20 @@ async function buildRuntimeFromSource() {
 
   const manifest = await readRuntimeManifest()
   if (!manifestMatches(manifest)) {
-    throw new Error(`source-built runtime manifest does not match ${key} / dsh ${origin.dshVersion}`)
+    throw new Error(`source-built runtime manifest mismatch: ${manifestMismatchSummary(manifest)}`)
   }
-  console.log(`[runtime] source-built sealed runtime ready: ${runtimeDir}`)
+  console.log(`[runtime] source-built exact sealed runtime ready: ${runtimeDir}`)
 }
 
 const existingManifest = await readRuntimeManifest()
 if (!values.force && manifestMatches(existingManifest)) {
-  console.log(`[runtime] existing sealed runtime is valid for ${key}, dsh ${origin.dshVersion}; reusing it`)
+  console.log(
+    `[runtime] existing sealed runtime exactly matches ${key}, dsh ${origin.dshVersion} @ ${origin.gitCommit}; reusing it`,
+  )
   process.exit(0)
+}
+if (!values.force && existingManifest) {
+  console.log(`[runtime] cached runtime is stale or incompatible; refreshing: ${manifestMismatchSummary(existingManifest)}`)
 }
 
 let bundleError = null
