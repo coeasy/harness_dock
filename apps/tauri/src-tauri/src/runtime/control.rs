@@ -148,17 +148,17 @@ async fn start_impl(
         starting_processes: Arc::clone(&state.starting_processes),
         quitting: Arc::clone(&state.quitting),
     };
-    let process = match tauri::async_runtime::spawn_blocking(move || start_blocking(start_request)).await
-    {
-        Ok(process) => process,
-        Err(error) => {
-            return Err(mark_start_failed(
-                &state,
-                generation.id,
-                format!("Runtime 启动任务失败: {error}"),
-            ));
-        }
-    };
+    let process =
+        match tauri::async_runtime::spawn_blocking(move || start_blocking(start_request)).await {
+            Ok(process) => process,
+            Err(error) => {
+                return Err(mark_start_failed(
+                    &state,
+                    generation.id,
+                    format!("Runtime 启动任务失败: {error}"),
+                ));
+            }
+        };
 
     let mut process = match process {
         Ok(process) => process,

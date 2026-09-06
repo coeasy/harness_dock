@@ -23,12 +23,11 @@ pub struct RuntimeStartRequest {
 
 pub fn launch_attempt(request: SpawnRequest<'_>) -> Result<RuntimeProcess, AttemptFailure> {
     let context = request.context;
-    let (mut child, stdout, stderr, registration) = spawn_runtime(request).map_err(|message| {
-        AttemptFailure {
+    let (mut child, stdout, stderr, registration) =
+        spawn_runtime(request).map_err(|message| AttemptFailure {
             message,
             diagnostic: String::new(),
-        }
-    })?;
+        })?;
     let pid = child.id();
     let ready = match wait_for_ready(
         &mut child,
@@ -178,7 +177,9 @@ pub fn start_blocking(request: RuntimeStartRequest) -> Result<RuntimeProcess, St
             ) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    eprintln!("Plugin recovery config discovery failed; using safe profile: {error}");
+                    eprintln!(
+                        "Plugin recovery config discovery failed; using safe profile: {error}"
+                    );
                     return work_dir_guard.retain_result(safe_profile(&context, &patch_file));
                 }
             };

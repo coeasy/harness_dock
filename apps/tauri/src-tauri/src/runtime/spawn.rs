@@ -229,7 +229,10 @@ pub fn spawn_runtime(
     Ok((result.0, stdout_path, stderr_path, result.1))
 }
 
-pub fn wait_for_ready(child: &mut Child, probe: ReadyProbe<'_>) -> Result<ReadyInfo, AttemptFailure> {
+pub fn wait_for_ready(
+    child: &mut Child,
+    probe: ReadyProbe<'_>,
+) -> Result<ReadyInfo, AttemptFailure> {
     let context = probe.context;
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -268,27 +271,18 @@ pub fn wait_for_ready(child: &mut Child, probe: ReadyProbe<'_>) -> Result<ReadyI
                         process_control::stop_child_tree(child);
                         return Err(AttemptFailure {
                             message: "Runtime generation cancelled during stability probe".into(),
-                            diagnostic: read_attempt_logs(
-                                probe.stdout_path,
-                                probe.stderr_path,
-                            ),
+                            diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
                         });
                     }
                     return match child.try_wait() {
                         Ok(None) => Ok(ready),
                         Ok(Some(status)) => Err(AttemptFailure {
                             message: format!("dsh Runtime 在稳定窗口内退出: {status}"),
-                            diagnostic: read_attempt_logs(
-                                probe.stdout_path,
-                                probe.stderr_path,
-                            ),
+                            diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
                         }),
                         Err(error) => Err(AttemptFailure {
                             message: error.to_string(),
-                            diagnostic: read_attempt_logs(
-                                probe.stdout_path,
-                                probe.stderr_path,
-                            ),
+                            diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
                         }),
                     };
                 }

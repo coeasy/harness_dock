@@ -6,11 +6,8 @@
 //! Reconciler path.
 
 use crate::{
-    gateway_host::GatewayPhase,
-    runtime_actor::RuntimePhase,
-    surface_actor::SurfaceOperation,
-    update_actor::UpdatePhase,
-    AppState,
+    gateway_host::GatewayPhase, runtime_actor::RuntimePhase, surface_actor::SurfaceOperation,
+    update_actor::UpdatePhase, AppState,
 };
 
 #[derive(Clone)]
