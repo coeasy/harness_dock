@@ -41,9 +41,13 @@ impl GatewayActorState {
         Ok(self.generation)
     }
 
-    pub fn publish(&mut self, generation: u64, server: NativeGateway) -> Result<(), NativeGateway> {
+    pub fn publish(
+        &mut self,
+        generation: u64,
+        server: NativeGateway,
+    ) -> Result<(), Box<NativeGateway>> {
         if self.phase != GatewayPhase::Starting || self.generation != generation {
-            return Err(server);
+            return Err(Box::new(server));
         }
         self.server = Some(server);
         self.phase = GatewayPhase::Ready;
