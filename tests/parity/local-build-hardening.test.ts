@@ -36,15 +36,28 @@ describe('local one-click build hardening', () => {
     expect(windowsBootstrap).toContain("-split '\\s+'")
   })
 
-  it('enforces packageManager pnpm and the exact local Tauri CLI', () => {
+  it('enforces packageManager pnpm without requiring global install permission', () => {
     const bootstrap = read('scripts/bootstrap.mjs')
-    const build = read('scripts/build.mjs')
+    const batch = read('scripts/build.bat')
+    const shell = read('scripts/build.sh')
     const pkg = JSON.parse(read('package.json')) as { packageManager: string }
     const requiredPnpm = pkg.packageManager.replace(/^pnpm@/, '').split('+')[0]
 
     expect(bootstrap).toContain('const requiredPnpm = pnpmMatch[1]')
     expect(bootstrap).toContain('pnpm !== requiredPnpm')
-    expect(bootstrap).toContain('`pnpm@${requiredPnpm}`')
+    expect(bootstrap).toContain('localPnpmRoot')
+    expect(bootstrap).toContain("'--prefix', localPnpmRoot")
+    expect(bootstrap).toContain('pnpm-home.txt')
+    expect(bootstrap).not.toContain("'install', '-g'")
+    expect(batch).toContain('.local-tools\\pnpm-home.txt')
+    expect(batch).toContain('set "PATH=%PNPM_HOME%;%PATH%"')
+    expect(shell).toContain('.local-tools/pnpm-home.txt')
+    expect(shell).toContain('export PATH="$pnpm_home:$PATH"')
+    expect(requiredPnpm).toBe('10.12.1')
+  })
+
+  it('enforces the exact local Tauri CLI', () => {
+    const build = read('scripts/build.mjs')
     expect(build).toContain('const requiredPnpmVersion = pnpmMatch[1]')
     expect(build).toContain('activePnpmVersion !== requiredPnpmVersion')
     expect(build).toContain("const tauriCliVersion = '2.11.4'")
@@ -52,7 +65,6 @@ describe('local one-click build hardening', () => {
     expect(build).toContain('globalVersion === tauriCliVersion')
     expect(build).toContain('cachedVersion === tauriCliVersion')
     expect(build).toContain('macOS/Linux: bash scripts/build.sh')
-    expect(requiredPnpm).toBe('10.12.1')
   })
 
   it('runs real Windows mirror downloads and full clean-state client packaging in CI', () => {
