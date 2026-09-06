@@ -165,6 +165,26 @@ impl RuntimeActorState {
         Ok(())
     }
 
+    fn accept_ready_generation(
+        &mut self,
+        generation: u64,
+        lease_generation: &RuntimeGeneration,
+        degraded: bool,
+    ) -> Result<(), String> {
+        let Some(current) = self.generation.as_ref() else {
+            return Err("Runtime generation disappeared before ready publish".into());
+        };
+        // RuntimeLease is a trust boundary, not just a sequence number. A
+        // matching id with a stale nonce, image identity or mode must never
+        // transition the actor to Ready. Validate the complete immutable
+        // generation before mutating phase so rejected publications are
+        // side-effect free.
+        if current.id != generation || current != lease_generation {
+            return Err("stale Runtime ready generation binding".into());
+        }
+        self.mark_ready(generation, degraded)
+    }
+
     fn mark_failed(&mut self, generation: u64, message: String) {
         if self
             .generation
@@ -318,8 +338,10 @@ impl RuntimeActor {
             .as_ref()
             .is_some_and(|(id, token)| *id != generation || token.is_cancelled());
         if cancelled
-            || self.state.mark_ready(generation, degraded).is_err()
-            || lease.generation.id != generation
+            || self
+                .state
+                .accept_ready_generation(generation, &lease.generation, degraded)
+                .is_err()
         {
             return Err(process);
         }
@@ -423,6 +445,58 @@ mod tests {
         state.mark_starting(second.id).unwrap();
         assert!(state.mark_ready(first.id, false).is_err());
         assert_eq!(state.phase(), RuntimePhase::Starting);
+    }
+
+    #[test]
+    fn ready_publish_requires_the_complete_bound_generation() {
+        let mut state = RuntimeActorState::default();
+        let allocated = state.begin(RuntimeMode::Normal).unwrap();
+        state
+            .bind_image(allocated.id, "sha256:runtime-image".into())
+            .unwrap();
+        state.mark_starting(allocated.id).unwrap();
+        let current = state.generation().unwrap().clone();
+
+        let mut stale_id = current.clone();
+        stale_id.id += 1;
+        assert!(
+            state
+                .accept_ready_generation(allocated.id, &stale_id, false)
+                .is_err()
+        );
+        assert_eq!(state.phase(), RuntimePhase::Starting);
+
+        let mut stale_nonce = current.clone();
+        stale_nonce.nonce.push_str("-stale");
+        assert!(
+            state
+                .accept_ready_generation(allocated.id, &stale_nonce, false)
+                .is_err()
+        );
+        assert_eq!(state.phase(), RuntimePhase::Starting);
+
+        let mut stale_image = current.clone();
+        stale_image.image_identity = "sha256:other-image".into();
+        assert!(
+            state
+                .accept_ready_generation(allocated.id, &stale_image, false)
+                .is_err()
+        );
+        assert_eq!(state.phase(), RuntimePhase::Starting);
+
+        let mut stale_mode = current.clone();
+        stale_mode.mode = RuntimeMode::Safe;
+        assert!(
+            state
+                .accept_ready_generation(allocated.id, &stale_mode, false)
+                .is_err()
+        );
+        assert_eq!(state.phase(), RuntimePhase::Starting);
+
+        state
+            .accept_ready_generation(allocated.id, &current, false)
+            .unwrap();
+        assert_eq!(state.phase(), RuntimePhase::Ready);
     }
 
     #[test]
