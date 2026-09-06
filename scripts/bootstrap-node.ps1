@@ -46,15 +46,19 @@ function Install-FromMirror([string]$BaseUrl) {
     }
 
     if ($needsDownload) {
-        $partial = "$Archive.partial"
+        $partial = "$Archive.partial-$PID"
         Remove-Item $partial -Force -ErrorAction SilentlyContinue
-        Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/$ArchiveName" -OutFile $partial -TimeoutSec 180
-        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $partial).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) {
-            Remove-Item $partial -Force -ErrorAction SilentlyContinue
-            throw "Node archive SHA-256 mismatch: expected $expected, got $actual"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/$ArchiveName" -OutFile $partial -TimeoutSec 180
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $partial).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+                throw "Node archive SHA-256 mismatch: expected $expected, got $actual"
+            }
+            Move-Item -Force $partial $Archive
         }
-        Move-Item -Force $partial $Archive
+        finally {
+            Remove-Item $partial -Force -ErrorAction SilentlyContinue
+        }
     }
 
     Remove-Item $NodeHome -Recurse -Force -ErrorAction SilentlyContinue
@@ -68,14 +72,23 @@ function Install-FromMirror([string]$BaseUrl) {
 
 New-Item -ItemType Directory -Path $ToolRoot -Force | Out-Null
 if (-not (Test-Node $NodeExe)) {
-    $sources = @(
-        "https://nodejs.org/dist/v$Version",
-        "https://npmmirror.com/mirrors/node/v$Version"
-    )
+    if ($env:NODE_DOWNLOAD_BASES) {
+        $sources = @($env:NODE_DOWNLOAD_BASES -split '\s+' | Where-Object { $_ -and $_.Trim() })
+    }
+    else {
+        $sources = @(
+            "https://nodejs.org/dist/v$Version",
+            "https://npmmirror.com/mirrors/node/v$Version"
+        )
+    }
+    if ($sources.Count -eq 0) {
+        throw 'NODE_DOWNLOAD_BASES was set but contained no usable mirror URLs.'
+    }
+
     $lastError = $null
     foreach ($source in $sources) {
         try {
-            Install-FromMirror $source
+            Install-FromMirror $source.TrimEnd('/')
             $lastError = $null
             break
         }
