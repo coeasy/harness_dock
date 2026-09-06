@@ -59,6 +59,30 @@ mod tests {
 
     #[cfg(not(mobile))]
     #[test]
+    pub fn bootstrap_navigation_is_exactly_the_local_tauri_asset() {
+        for value in [
+            "tauri://localhost/splash.html",
+            "http://tauri.localhost/splash.html",
+            "https://tauri.localhost/splash.html",
+        ] {
+            assert!(is_harness_bootstrap_url(&Url::parse(value).unwrap()));
+        }
+        for value in [
+            "https://example.com/splash.html",
+            "http://127.0.0.1:4321/splash.html",
+            "http://tauri.localhost/splash.html?token=x",
+            "http://tauri.localhost/../splash.html",
+            "http://user@tauri.localhost/splash.html",
+        ] {
+            assert!(
+                !is_harness_bootstrap_url(&Url::parse(value).unwrap()),
+                "accepted non-local bootstrap URL: {value}"
+            );
+        }
+    }
+
+    #[cfg(not(mobile))]
+    #[test]
     pub fn listener_probe_distinguishes_live_and_refused_loopback_ports() {
         let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
