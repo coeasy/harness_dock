@@ -5,12 +5,14 @@
  *
  * Responsibilities:
  *   1. Ensure the exact pnpm version declared by packageManager
- *   2. Run `pnpm install --frozen-lockfile --prefer-offline` when node_modules is missing
+ *   2. Reconcile the workspace with `pnpm install --frozen-lockfile --prefer-offline`
+ *      on every normal invocation. This keeps an existing node_modules correct
+ *      after git pulls/branch switches instead of trusting directory presence.
  *
  * Usage: node scripts/bootstrap.mjs [--skip-install]
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -77,15 +79,13 @@ if (pnpm !== expectedPnpmVersion) {
 console.log(`[bootstrap] pnpm ${pnpm} (exact packageManager match)`)
 
 if (skipInstall) {
-  console.log('[bootstrap] --skip-install: skip dependency check')
-} else if (!existsSync(path.join(repoRoot, 'node_modules'))) {
-  console.log('[bootstrap] node_modules missing, running pnpm install --frozen-lockfile --prefer-offline ...')
+  console.log('[bootstrap] --skip-install: skip workspace reconciliation')
+} else {
+  console.log('[bootstrap] reconciling workspace with frozen lockfile (prefer offline) ...')
   if (!run('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'])) {
     console.error('[bootstrap] ERROR: pnpm install failed.')
     process.exit(1)
   }
-} else {
-  console.log('[bootstrap] node_modules present, skip install')
 }
 
 console.log('[bootstrap] toolchain ready.')
