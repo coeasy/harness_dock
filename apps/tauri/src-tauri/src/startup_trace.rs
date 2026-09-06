@@ -13,22 +13,24 @@ static WRITTEN_PHASES: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StartupPhase {
     ProcessStarted = 0,
-    RuntimeSpawned = 1,
-    RuntimeReady = 2,
-    WebviewRequested = 3,
-    PrimaryVisible = 4,
-    ShellReady = 5,
-    NativeFallback = 6,
-    Recovery = 7,
+    WebviewRequested = 1,
+    BootstrapVisible = 2,
+    RuntimeSpawned = 3,
+    RuntimeReady = 4,
+    PrimaryVisible = 5,
+    ShellReady = 6,
+    NativeFallback = 7,
+    Recovery = 8,
 }
 
 impl StartupPhase {
     fn name(self) -> &'static str {
         match self {
             Self::ProcessStarted => "process_started",
+            Self::WebviewRequested => "webview_requested",
+            Self::BootstrapVisible => "bootstrap_visible",
             Self::RuntimeSpawned => "runtime_spawned",
             Self::RuntimeReady => "runtime_ready",
-            Self::WebviewRequested => "webview_requested",
             Self::PrimaryVisible => "primary_visible",
             Self::ShellReady => "shell_ready",
             Self::NativeFallback => "native_fallback",
@@ -86,8 +88,6 @@ fn resolved_trace_path() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
-/// Best-effort startup telemetry with no URLs, tokens, diagnostics or user data.
-/// This is also the executable Round-5 startup SLO contract.
 pub(crate) fn mark(phase: StartupPhase) {
     let bit = 1_u64 << phase as u64;
     if WRITTEN_PHASES.fetch_or(bit, Ordering::AcqRel) & bit != 0 {
@@ -115,12 +115,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round_five_phase_names_are_stable_and_secret_free() {
+    fn startup_phase_names_are_stable_and_secret_free() {
         let phases = [
             StartupPhase::ProcessStarted,
+            StartupPhase::WebviewRequested,
+            StartupPhase::BootstrapVisible,
             StartupPhase::RuntimeSpawned,
             StartupPhase::RuntimeReady,
-            StartupPhase::WebviewRequested,
             StartupPhase::PrimaryVisible,
             StartupPhase::ShellReady,
             StartupPhase::NativeFallback,
