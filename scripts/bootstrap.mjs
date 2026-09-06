@@ -4,14 +4,15 @@
  * (build.bat / build.sh guarantee that, downloading a portable Node if needed).
  *
  * Responsibilities:
- *   1. Ensure the exact pnpm version declared by packageManager
- *      (via corepack, fallback to npm -g)
- *   2. Run `pnpm install --frozen-lockfile --prefer-offline` when node_modules is missing
+ *   1. Ensure the exact pnpm version declared by packageManager.
+ *      Prefer an already-correct pnpm or Corepack, then fall back to an
+ *      isolated repo-local pnpm under .local-tools (never require npm -g).
+ *   2. Run `pnpm install --frozen-lockfile --prefer-offline` when node_modules is missing.
  *
  * Usage: node scripts/bootstrap.mjs [--skip-install]
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -25,19 +26,52 @@ if (!pnpmMatch) {
   process.exit(1)
 }
 const requiredPnpm = pnpmMatch[1]
+const localToolsRoot = path.join(repoRoot, '.local-tools')
+const localPnpmRoot = path.join(localToolsRoot, `pnpm-${requiredPnpm}`)
+const localPnpmBinDir = path.join(localPnpmRoot, 'node_modules', '.bin')
+const localPnpm = path.join(localPnpmBinDir, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm')
+const pnpmHomeFile = path.join(localToolsRoot, 'pnpm-home.txt')
 
 function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32', ...opts })
+  const r = spawnSync(cmd, args, {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env: process.env,
+    ...opts,
+  })
   return r.status === 0
 }
 
-// ---- 1. pnpm ------------------------------------------------------------
-function pnpmVersion() {
-  const r = spawnSync('pnpm', ['--version'], { shell: process.platform === 'win32', encoding: 'utf8' })
-  return r.status === 0 ? (r.stdout || '').trim() : null
+function commandVersion(command) {
+  const r = spawnSync(command, ['--version'], {
+    shell: process.platform === 'win32',
+    encoding: 'utf8',
+    env: process.env,
+  })
+  return r.status === 0 ? String(r.stdout || '').trim() : null
 }
 
-let pnpm = pnpmVersion()
+function publishLocalPnpmPath() {
+  mkdirSync(localToolsRoot, { recursive: true })
+  writeFileSync(pnpmHomeFile, `${localPnpmBinDir}\n`, 'utf8')
+  process.env.PATH = `${localPnpmBinDir}${path.delimiter}${process.env.PATH ?? ''}`
+}
+
+function clearLocalPnpmPathFile() {
+  rmSync(pnpmHomeFile, { force: true })
+}
+
+// ---- 1. pnpm ------------------------------------------------------------
+let pnpm = commandVersion('pnpm')
+if (pnpm !== requiredPnpm) {
+  const cachedLocal = existsSync(localPnpm) ? commandVersion(localPnpm) : null
+  if (cachedLocal === requiredPnpm) {
+    publishLocalPnpmPath()
+    pnpm = commandVersion('pnpm')
+    console.log(`[bootstrap] using cached repo-local pnpm ${requiredPnpm}`)
+  }
+}
+
 if (pnpm !== requiredPnpm) {
   if (pnpm) {
     console.log(`[bootstrap] pnpm ${pnpm} does not match required ${requiredPnpm}; activating the pinned version...`)
@@ -50,14 +84,30 @@ if (pnpm !== requiredPnpm) {
     activated = run('corepack', ['prepare', `pnpm@${requiredPnpm}`, '--activate'])
   }
 
-  pnpm = pnpmVersion()
-  if (!activated || pnpm !== requiredPnpm) {
-    console.log(`[bootstrap] corepack did not activate pnpm ${requiredPnpm}; falling back to npm install -g...`)
-    if (!run('npm', ['install', '-g', `pnpm@${requiredPnpm}`])) {
-      console.error(`[bootstrap] ERROR: unable to provision pnpm ${requiredPnpm}.`)
+  pnpm = commandVersion('pnpm')
+  if (activated && pnpm === requiredPnpm) {
+    clearLocalPnpmPathFile()
+  } else {
+    console.log(`[bootstrap] Corepack did not expose pnpm ${requiredPnpm}; installing an isolated repo-local copy...`)
+    rmSync(localPnpmRoot, { recursive: true, force: true })
+    mkdirSync(localPnpmRoot, { recursive: true })
+    if (!run('npm', [
+      'install',
+      '--prefix', localPnpmRoot,
+      '--no-package-lock',
+      '--no-save',
+      '--ignore-scripts',
+      `pnpm@${requiredPnpm}`,
+    ])) {
+      console.error(`[bootstrap] ERROR: unable to provision repo-local pnpm ${requiredPnpm}.`)
       process.exit(1)
     }
-    pnpm = pnpmVersion()
+    if (commandVersion(localPnpm) !== requiredPnpm) {
+      console.error(`[bootstrap] ERROR: repo-local pnpm ${requiredPnpm} was installed but is not runnable.`)
+      process.exit(1)
+    }
+    publishLocalPnpmPath()
+    pnpm = commandVersion('pnpm')
   }
 
   if (pnpm !== requiredPnpm) {
