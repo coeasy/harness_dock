@@ -46,9 +46,19 @@ set "PATH=%NODE_HOME%;%PATH%"
 node scripts\node-version-check.cjs
 if errorlevel 1 goto :fail
 
-rem bootstrap.mjs provisions pnpm 10 and installs workspace dependencies when needed.
+rem bootstrap.mjs provisions the exact packageManager pnpm and installs workspace
+rem dependencies when needed. If Corepack cannot expose it, bootstrap writes an
+rem isolated repo-local pnpm path for this parent shell to activate.
 node scripts\bootstrap.mjs
 if errorlevel 1 goto :fail
+if exist ".local-tools\pnpm-home.txt" (
+  set /p "PNPM_HOME="<".local-tools\pnpm-home.txt"
+  if not exist "%PNPM_HOME%\pnpm.cmd" (
+    echo [build] ERROR: repo-local pnpm path is invalid: "%PNPM_HOME%"
+    goto :fail
+  )
+  set "PATH=%PNPM_HOME%;%PATH%"
+)
 
 rem build.mjs prepares the sealed Runtime, verifies real Harness Web readiness,
 rem installs an isolated tauri-cli when needed, checks Rust, and builds NSIS.
