@@ -6,6 +6,9 @@ export interface ReadyInfo {
   port: number
   pid: number
   dshVersion: string
+  generation: number
+  nonce: string
+  imageIdentity: string
 }
 
 export interface ParsedUrl {
