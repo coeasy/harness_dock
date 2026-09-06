@@ -41,6 +41,36 @@ impl Drop for WorkDirGuard {
     }
 }
 
+/// Immutable references shared by every launch attempt belonging to one
+/// Runtime generation. Keeping them together makes the generation/nonce/image
+/// trust boundary explicit and prevents call sites from accidentally mixing a
+/// ready file or cancellation token from another generation.
+pub struct AttemptContext<'a> {
+    pub image: &'a RuntimeImage,
+    pub ready_file: &'a Path,
+    pub dir: &'a Path,
+    pub generation: &'a RuntimeGeneration,
+    pub token: &'a CancellationToken,
+    pub starting_processes: &'a process_control::StartingProcessRegistry,
+    pub quitting: &'a std::sync::atomic::AtomicBool,
+}
+
+/// Per-attempt process configuration layered on the immutable generation
+/// context. Recovery, quarantine and safe mode differ only in these fields.
+pub struct SpawnRequest<'a> {
+    pub context: &'a AttemptContext<'a>,
+    pub patches: &'a [&'a Path],
+    pub dsh_home: Option<&'a Path>,
+    pub attempt: &'a str,
+}
+
+pub struct ReadyProbe<'a> {
+    pub context: &'a AttemptContext<'a>,
+    pub expected_pid: u32,
+    pub stdout_path: &'a Path,
+    pub stderr_path: &'a Path,
+}
+
 pub fn validated_ready(
     raw: &str,
     expected_version: &str,
@@ -131,16 +161,7 @@ pub fn cancelled(token: &CancellationToken, quitting: &std::sync::atomic::Atomic
 }
 
 pub fn spawn_runtime(
-    image: &RuntimeImage,
-    patches: &[&Path],
-    dsh_home: Option<&Path>,
-    ready_file: &Path,
-    dir: &Path,
-    attempt: &str,
-    generation: &RuntimeGeneration,
-    token: &CancellationToken,
-    starting_processes: &process_control::StartingProcessRegistry,
-    quitting: &std::sync::atomic::AtomicBool,
+    request: SpawnRequest<'_>,
 ) -> Result<
     (
         Child,
@@ -150,20 +171,21 @@ pub fn spawn_runtime(
     ),
     String,
 > {
-    if cancelled(token, quitting) {
+    let context = request.context;
+    if cancelled(context.token, context.quitting) {
         return Err("Runtime generation was cancelled before spawn".into());
     }
-    let stdout_path = dir.join(format!("{attempt}.stdout.log"));
-    let stderr_path = dir.join(format!("{attempt}.stderr.log"));
+    let stdout_path = context.dir.join(format!("{}.stdout.log", request.attempt));
+    let stderr_path = context.dir.join(format!("{}.stderr.log", request.attempt));
     let stdout = fs::File::create(&stdout_path)
         .map_err(|error| format!("无法创建 Runtime stdout 日志: {error}"))?;
     let stderr = fs::File::create(&stderr_path)
         .map_err(|error| format!("无法创建 Runtime stderr 日志: {error}"))?;
-    let mut command = Command::new(platform::node_cli_path(&image.node));
+    let mut command = Command::new(platform::node_cli_path(&context.image.node));
     command
-        .arg(platform::node_cli_path(&image.dsh))
+        .arg(platform::node_cli_path(&context.image.dsh))
         .args(["--profile", "web"]);
-    for patch in patches {
+    for patch in request.patches {
         command.arg("--patch").arg(platform::node_cli_path(patch));
     }
     command
@@ -176,79 +198,97 @@ pub fn spawn_runtime(
         ])
         .env(
             RUNTIME_READY_ENV_READY_FILE,
-            platform::node_cli_path(ready_file),
+            platform::node_cli_path(context.ready_file),
         )
-        .env(RUNTIME_READY_ENV_DSH_VERSION, &image.origin.dsh_version)
-        .env(RUNTIME_READY_ENV_GENERATION, generation.id.to_string())
-        .env(RUNTIME_READY_ENV_NONCE, &generation.nonce)
-        .env(RUNTIME_READY_ENV_IMAGE_IDENTITY, &generation.image_identity)
+        .env(
+            RUNTIME_READY_ENV_DSH_VERSION,
+            &context.image.origin.dsh_version,
+        )
+        .env(
+            RUNTIME_READY_ENV_GENERATION,
+            context.generation.id.to_string(),
+        )
+        .env(RUNTIME_READY_ENV_NONCE, &context.generation.nonce)
+        .env(
+            RUNTIME_READY_ENV_IMAGE_IDENTITY,
+            &context.generation.image_identity,
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
-    if let Some(home) = dsh_home {
+    if let Some(home) = request.dsh_home {
         command.env("DSH_HOME", platform::node_cli_path(home));
     }
     platform::configure_child_command(&mut command);
-    let result = process_control::spawn_registered(&mut command, starting_processes, quitting)?;
+    let result = process_control::spawn_registered(
+        &mut command,
+        context.starting_processes,
+        context.quitting,
+    )?;
     startup_trace::mark(StartupPhase::RuntimeSpawned);
     Ok((result.0, stdout_path, stderr_path, result.1))
 }
 
-pub fn wait_for_ready(
-    child: &mut Child,
-    ready_file: &Path,
-    expected_version: &str,
-    expected_pid: u32,
-    expected_generation: &RuntimeGeneration,
-    stdout_path: &Path,
-    stderr_path: &Path,
-    token: &CancellationToken,
-    quitting: &std::sync::atomic::AtomicBool,
-) -> Result<ReadyInfo, AttemptFailure> {
+pub fn wait_for_ready(child: &mut Child, probe: ReadyProbe<'_>) -> Result<ReadyInfo, AttemptFailure> {
+    let context = probe.context;
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
-        if cancelled(token, quitting) {
+        if cancelled(context.token, context.quitting) {
             process_control::stop_child_tree(child);
             return Err(AttemptFailure {
                 message: "Runtime generation cancelled while waiting for ready".into(),
-                diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
             });
         }
         match child.try_wait() {
             Ok(Some(status)) => {
                 return Err(AttemptFailure {
                     message: format!("dsh Runtime 在 ready 前退出: {status}"),
-                    diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                    diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
                 })
             }
             Ok(None) => {}
             Err(error) => {
                 return Err(AttemptFailure {
                     message: format!("无法检查 dsh Runtime 状态: {error}"),
-                    diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                    diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
                 })
             }
         }
-        if let Ok(raw) = fs::read_to_string(ready_file) {
-            match validated_ready(&raw, expected_version, expected_pid, expected_generation) {
+        if let Ok(raw) = fs::read_to_string(context.ready_file) {
+            match validated_ready(
+                &raw,
+                &context.image.origin.dsh_version,
+                probe.expected_pid,
+                context.generation,
+            ) {
                 Ok(ready) => {
                     thread::sleep(Duration::from_millis(500));
-                    if cancelled(token, quitting) {
+                    if cancelled(context.token, context.quitting) {
                         process_control::stop_child_tree(child);
                         return Err(AttemptFailure {
                             message: "Runtime generation cancelled during stability probe".into(),
-                            diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                            diagnostic: read_attempt_logs(
+                                probe.stdout_path,
+                                probe.stderr_path,
+                            ),
                         });
                     }
                     return match child.try_wait() {
                         Ok(None) => Ok(ready),
                         Ok(Some(status)) => Err(AttemptFailure {
                             message: format!("dsh Runtime 在稳定窗口内退出: {status}"),
-                            diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                            diagnostic: read_attempt_logs(
+                                probe.stdout_path,
+                                probe.stderr_path,
+                            ),
                         }),
                         Err(error) => Err(AttemptFailure {
                             message: error.to_string(),
-                            diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                            diagnostic: read_attempt_logs(
+                                probe.stdout_path,
+                                probe.stderr_path,
+                            ),
                         }),
                     };
                 }
@@ -256,7 +296,7 @@ pub fn wait_for_ready(
                     process_control::stop_child_tree(child);
                     return Err(AttemptFailure {
                         message: error,
-                        diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                        diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
                     });
                 }
                 Err(_) => {}
@@ -266,7 +306,7 @@ pub fn wait_for_ready(
             process_control::stop_child_tree(child);
             return Err(AttemptFailure {
                 message: "等待 dsh Runtime ready 超时。".into(),
-                diagnostic: read_attempt_logs(stdout_path, stderr_path),
+                diagnostic: read_attempt_logs(probe.stdout_path, probe.stderr_path),
             });
         }
         thread::sleep(Duration::from_millis(100));
