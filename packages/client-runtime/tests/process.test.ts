@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -218,20 +218,28 @@ describe('shutdownLadder verification sweep', () => {
 })
 
 describe('ready file', () => {
-  it('round-trips the ready payload', async () => {
+  it('accepts only a complete generation-bound ready payload', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-ready-'))
     temps.push(dir)
     const file = path.join(dir, 'ready.json')
-    const { parseReadyFile, writeReadyFile } = await import('../src/ready.ts')
-    await writeReadyFile(file, {
+    const { parseReadyFile } = await import('../src/ready.ts')
+    const expected = {
+      dshVersion: '0.1.1-rc.2',
+      pid: 99,
+      generation: 7,
+      nonce: 'nonce-7',
+      imageIdentity: 'image-identity-7',
+    }
+    const payload = {
       url: 'http://127.0.0.1:4010',
       host: '127.0.0.1',
       port: 4010,
-      pid: 99,
-      dshVersion: '0.1.1-rc.2',
-    })
+      ...expected,
+    }
+    await writeFile(file, `${JSON.stringify(payload)}\n`, 'utf8')
     const raw = await readFile(file, 'utf8')
     expect(JSON.parse(raw).url).toBe('http://127.0.0.1:4010')
-    expect(parseReadyFile(raw)?.port).toBe(4010)
+    expect(parseReadyFile(raw, expected)?.port).toBe(4010)
+    expect(parseReadyFile(raw, { ...expected, nonce: 'wrong' })).toBeNull()
   })
 })
