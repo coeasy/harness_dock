@@ -7,6 +7,10 @@
 //! are created only when explicitly needed.
 
 use crate::{
+    constants::{
+        STARTUP_PRIMARY_RETRY_ATTEMPTS, STARTUP_RECOVERY_RETRY_ATTEMPTS,
+        STARTUP_RETRY_DELAY_MS,
+    },
     harness_window, reconciler,
     startup_trace::{self, StartupPhase},
     AppState,
@@ -38,8 +42,8 @@ fn runtime_listener_reachable(url: &url::Url) -> bool {
 /// The current Runtime listener therefore has to remain reachable for every
 /// stability poll before this path may publish the primary surface.
 async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
-    let mut stable_clean_polls = 0_u8;
-    for _ in 0..50 {
+    let mut stable_clean_polls = 0_usize;
+    for _ in 0..STARTUP_PRIMARY_RETRY_ATTEMPTS {
         if app.state::<AppState>().quitting.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -56,7 +60,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
 
         let Some(window) = app.get_webview_window("harness") else {
             stable_clean_polls = 0;
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(STARTUP_RETRY_DELAY_MS)).await;
             continue;
         };
         // Runtime replacement and WebView redirect callbacks can briefly cross.
@@ -66,7 +70,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
         // failure path if the lease never returns.
         let Some(lease) = crate::runtime::current_lease(&*app.state::<AppState>()) else {
             stable_clean_polls = 0;
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(STARTUP_RETRY_DELAY_MS)).await;
             continue;
         };
 
@@ -83,7 +87,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
             stable_clean_polls = 0;
         }
 
-        if stable_clean_polls >= 5 {
+        if stable_clean_polls >= STARTUP_RECOVERY_RETRY_ATTEMPTS {
             let claimed = app
                 .state::<AppState>()
                 .surface_actor
@@ -117,7 +121,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(STARTUP_RETRY_DELAY_MS)).await;
     }
     Ok(())
 }
