@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-/** A fake dsh: http server + stdout URL + ready file + keep-alive. */
+/** A fake dsh: http server + authoritative ready file + keep-alive. */
 async function fakeGoodScript(dir: string): Promise<string> {
   const fake = path.join(dir, 'fake-dsh.mjs')
   await writeFile(
@@ -19,17 +19,31 @@ async function fakeGoodScript(dir: string): Promise<string> {
     `
 import { createServer } from 'node:http'
 import { writeFileSync } from 'node:fs'
+const requiredEnv = [
+  'DSH_EMBEDDED_READY_FILE',
+  'DSH_EMBEDDED_VERSION',
+  'HARNESSDOCK_RUNTIME_GENERATION',
+  'HARNESSDOCK_RUNTIME_NONCE',
+  'HARNESSDOCK_RUNTIME_IMAGE_IDENTITY',
+]
+for (const key of requiredEnv) {
+  if (!process.env[key]) throw new Error('missing runtime binding env: ' + key)
+}
 const server = createServer((_req, res) => { res.end('ok') })
 server.listen(0, '127.0.0.1', () => {
   const addr = server.address()
   const port = addr.port
   process.stdout.write('dsh web: http://127.0.0.1:' + port + '\\n')
-  if (process.env.DSH_EMBEDDED_READY_FILE) {
-    writeFileSync(process.env.DSH_EMBEDDED_READY_FILE, JSON.stringify({
-      url: 'http://127.0.0.1:' + port, host: '127.0.0.1', port,
-      pid: process.pid, dshVersion: process.env.DSH_EMBEDDED_VERSION ?? 'test',
-    }))
-  }
+  writeFileSync(process.env.DSH_EMBEDDED_READY_FILE, JSON.stringify({
+    url: 'http://127.0.0.1:' + port,
+    host: '127.0.0.1',
+    port,
+    pid: process.pid,
+    dshVersion: process.env.DSH_EMBEDDED_VERSION,
+    generation: Number(process.env.HARNESSDOCK_RUNTIME_GENERATION),
+    nonce: process.env.HARNESSDOCK_RUNTIME_NONCE,
+    imageIdentity: process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY,
+  }))
 })
 setInterval(() => {}, 1 << 30)
 `,
@@ -88,6 +102,9 @@ describe('bootstrapRuntime', () => {
       expect(result.rolledBack).toBeNull()
       expect(result.ready.port).toBeGreaterThan(0)
       expect(result.ready.url).toContain('127.0.0.1')
+      expect(result.ready.generation).toBeGreaterThan(0)
+      expect(result.ready.nonce.length).toBeGreaterThan(0)
+      expect(result.ready.imageIdentity.length).toBeGreaterThan(0)
 
       // last-known-good recorded AFTER success
       const prev = JSON.parse(await readFile(path.join(dir, 'previous-origin.json'), 'utf8'))
@@ -126,6 +143,7 @@ describe('bootstrapRuntime', () => {
       expect(result.rolledBack).toEqual({ from: 'bad', to: 'good' })
       expect(rolledBackEvent).toEqual({ from: 'bad', to: 'good' })
       expect(result.ready.port).toBeGreaterThan(0)
+      expect(result.ready.dshVersion).toBe('good')
 
       // the failing 'bad' version must NOT have overwritten last-known-good
       const prev = JSON.parse(await readFile(prevPath, 'utf8'))
