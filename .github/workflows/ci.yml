@@ -40,10 +40,11 @@ jobs:
       - run: node scripts/check-mobile-contract.mjs
       - run: pnpm check:embedded-runtime
       # Gateway integration requests use an 8s production timeout and Windows
-      # can also need bounded fs.rm retries while Defender/indexers release
-      # package directories. Keep the test harness above those real bounds;
-      # this changes only the Vitest failure ceiling, not production timeouts.
-      - run: pnpm test -- --testTimeout=20000 --hookTimeout=20000
+      # can also need bounded fs.rm / PowerShell cold-start time while Defender
+      # and indexers release package/script resources. `test:ci` owns the real
+      # Vitest timeout flags; do not pass them behind a literal `--`, which
+      # Vitest treats as the end of options and silently leaves the 5s default.
+      - run: pnpm test:ci
 
   tauri-source:
     needs: test
