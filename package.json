@@ -11,9 +11,10 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:versions": "node scripts/check-tauri-only.mjs && node scripts/check-tauri-source-layout.mjs && node scripts/check-versions.mjs && node scripts/generate-host-protocol.mjs --check && node scripts/generate-shell-contract.mjs --check && node scripts/generate-runtime-ready-contract.mjs --check",
+    "check:versions": "node scripts/check-tauri-only.mjs && node scripts/check-tauri-source-layout.mjs && node scripts/check-versions.mjs && node scripts/generate-host-protocol.mjs --check && node scripts/generate-shell-contract.mjs --check && node scripts/generate-runtime-ready-contract.mjs --check && node scripts/check-mobile-contract.mjs",
     "check:tauri-only": "node scripts/check-tauri-only.mjs",
     "check:tauri-layout": "node scripts/check-tauri-source-layout.mjs",
+    "check:mobile-contract": "node scripts/check-mobile-contract.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check:size": "node scripts/check-size.mjs",
     "check:embedded-runtime": "node scripts/check-embedded-runtime.mjs",
