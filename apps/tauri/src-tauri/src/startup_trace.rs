@@ -13,21 +13,19 @@ static WRITTEN_PHASES: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StartupPhase {
     ProcessStarted = 0,
-    RuntimeVerified = 1,
-    RuntimeSpawned = 2,
-    RuntimeReady = 3,
-    WebviewRequested = 4,
-    PrimaryVisible = 5,
-    ShellReady = 6,
-    NativeFallback = 7,
-    Recovery = 8,
+    RuntimeSpawned = 1,
+    RuntimeReady = 2,
+    WebviewRequested = 3,
+    PrimaryVisible = 4,
+    ShellReady = 5,
+    NativeFallback = 6,
+    Recovery = 7,
 }
 
 impl StartupPhase {
     fn name(self) -> &'static str {
         match self {
             Self::ProcessStarted => "process_started",
-            Self::RuntimeVerified => "runtime_verified",
             Self::RuntimeSpawned => "runtime_spawned",
             Self::RuntimeReady => "runtime_ready",
             Self::WebviewRequested => "webview_requested",
@@ -120,7 +118,6 @@ mod tests {
     fn round_five_phase_names_are_stable_and_secret_free() {
         let phases = [
             StartupPhase::ProcessStarted,
-            StartupPhase::RuntimeVerified,
             StartupPhase::RuntimeSpawned,
             StartupPhase::RuntimeReady,
             StartupPhase::WebviewRequested,
