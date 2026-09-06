@@ -99,13 +99,66 @@ HarnessDock
 
 菜单业务操作通过 Host Protocol 进入统一 Host Kernel/Reconciler，而不是由远程 Web 页面直接持有高权限 Tauri API。插件异常、Tray/Updater/菜单初始化异常采用 fail-open 策略，不得阻断正常 Harness Web 启动。
 
+## 本地一键构建自己的客户端
+
+普通用户不需要手动准备 `resources/dsh-runtime`，也不需要提前全局安装 pnpm 或 Tauri CLI。先安装当前平台的 Rust/Tauri 2 系统依赖，然后从仓库根目录执行对应入口。
+
+Windows：
+
+```bat
+scripts\build.bat
+```
+
+macOS / Linux：
+
+```bash
+./scripts/build.sh
+```
+
+一键入口会按顺序完成：
+
+1. 检查构建期 Node；不符合要求时下载仓库锁定的 portable Node，并按官方 `SHASUMS256.txt` 校验 SHA-256；
+2. 使用根 `packageManager` 声明的**精确 pnpm 版本**，并以 `--frozen-lockfile --prefer-offline` 幂等校准 workspace，避免 `git pull` 后继续误用旧 `node_modules`；
+3. 使用 `scripts/versions.json` 锁定的**精确 Tauri CLI**；本机全局版本不一致时使用 `.local-tools/` 下的隔离版本；
+4. 构建 embedded client 与独立 Harness Shell 插件；
+5. 准备当前平台的 sealed Runtime。只允许复用与当前 `platform / arch / clientVersion / dshVersion / dsh tag / dsh commit / layout / schema / image identity` 全部一致的 Runtime；
+6. 对 Runtime 重新计算整棵 payload 的 SHA-256 image identity，并实际启动 dsh，完成 Harness Web token→cookie→HTML 健康验证；本地 Runtime 损坏时只进行一次强制刷新后复验，不会无限重试；
+7. 执行 Tauri Rust host check；
+8. 生成当前平台原生安装包/Bundle。
+
+常用模式：
+
+```text
+scripts\build.bat --check-only
+scripts\build.bat --force-runtime
+scripts\build.bat --source-runtime --force-runtime
+
+./scripts/build.sh --check-only
+./scripts/build.sh --force-runtime
+./scripts/build.sh --source-runtime --force-runtime
+```
+
+`--check-only` 会完成工具链、Runtime、Harness Web 和 Rust host 校验但不生成最终安装包；`--source-runtime` 强制从锁定的 DeepSeek Harness tag+commit 构建 official dsh/vendor packs，而不是优先使用已发布 Runtime bundle。
+
+默认产物目录：
+
+```text
+Windows: apps/tauri/src-tauri/target/release/bundle/nsis/
+macOS/Linux: apps/tauri/src-tauri/target/release/bundle/
+```
+
+`.local-tools/`、`.local-cache/`、本地 `resources/dsh-runtime/` 和构建产物均不进入 Git。CI 另外从清空这些目录的 fresh checkout 直接执行上述用户入口；Windows 还会安装**这次一键构建本身生成的 NSIS**，从中立工作目录启动，并要求 `runtime_ready -> webview_requested -> primary_visible` 与稳定的 cookie-authenticated Harness HTML 同时成立。
+
+注意：这里的 Node/pnpm/Rust/Tauri 都只属于**源码构建工具链**。生成并安装 HarnessDock 后，客户端只使用安装包内 sealed Node+dsh Runtime，不检查或依赖用户系统 Node。
+
 ## 开发
 
 要求：
 
 - Node.js `^22.19.0` 或 `>=24`
-- pnpm `10.12.1`
+- pnpm 版本以根 `package.json#packageManager` 为准（当前 `10.12.1`）
 - Rust toolchain 由 `rust-toolchain.toml` 固定
+- Tauri CLI 由 `scripts/versions.json` 固定（当前 `2.11.4`）
 - Tauri 2 系统依赖
 
 ```bash
@@ -130,7 +183,8 @@ v0.1.2 beta 只有在同一个 `main` SHA 上满足以下条件才允许发布�
 5. HarnessDock 产品版本等于 pinned dsh 的基础 SemVer；
 6. Windows/Linux/macOS/Android/iOS 候选产物全部生成并通过校验；
 7. 发布资产来自同一个绿色 candidate，不允许用不同 SHA 的产物覆盖；
-8. 同一 candidate 的 Windows 安装包必须完成真实安装启动 smoke，并到达 `primary_visible`。
+8. 同一 candidate 的 Windows 安装包必须完成真实安装启动 smoke，并到达 `primary_visible`；
+9. 涉及本地构建链的变更还必须通过 `local-one-click-build` clean-clone 门禁。
 
 当前 beta 契约发布 15 个资产：桌面/移动端候选包、4 个平台 Runtime bundle 与 `SHA256SUMS`。
 
