@@ -6,11 +6,24 @@ use std::{
 };
 
 const DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
+const HOST_OWNED_PLUGIN_IDS: [&str; 3] = [
+    "embedded-client",
+    "harnessdock-client-runtime-compat",
+    "harness-shell",
+];
 
 /// Schema v2: quarantine records carry a `dsh_base_version` and survive
 /// prerelease-only upgrades of the same base SemVer (e.g. 0.1.2-rc.1 ->
 /// 0.1.2), while still invalidating across base-version changes.
 const SCHEMA_VERSION: u8 = 2;
+
+fn is_host_owned_plugin(id: &str) -> bool {
+    HOST_OWNED_PLUGIN_IDS.contains(&id)
+}
+
+fn isolation_set_is_safe(ids: &[String]) -> bool {
+    !ids.iter().any(|id| is_host_owned_plugin(id))
+}
 
 /// Extract the `MAJOR.MINOR.PATCH` base version from a full SemVer-ish string
 /// such as `0.1.2-rc.1` or `0.1.2`. Falls back to the input when it has no
@@ -72,9 +85,13 @@ pub(crate) fn read(path: &Path, dsh_version: &str) -> Option<PluginQuarantineRec
         let _ = fs::remove_file(path);
         return None;
     };
+    // Persisted quarantine is untrusted host state. Even a manually edited or
+    // partially corrupted file must never be able to disable the plugins that
+    // establish the ready contract, compatibility bridge or Harness shell.
     if !record_applies(&record, dsh_version)
         || record.expires_at <= now_secs()
         || record.isolated_plugins.is_empty()
+        || !isolation_set_is_safe(&record.isolated_plugins)
         || !valid_reason(&record.reason)
     {
         let _ = fs::remove_file(path);
@@ -116,6 +133,9 @@ pub(crate) fn write(
 ) -> Result<PluginQuarantineRecord, String> {
     if isolated_plugins.is_empty() {
         return Err("plugin quarantine requires at least one plugin id".into());
+    }
+    if !isolation_set_is_safe(&isolated_plugins) {
+        return Err("plugin quarantine cannot isolate HarnessDock host-owned plugins".into());
     }
     if !valid_reason(reason) {
         return Err(format!("invalid plugin quarantine reason: {reason}"));
@@ -182,8 +202,6 @@ mod tests {
 
     #[test]
     fn newest_quarantine_survives_prerelease_ignored_upgrade() {
-        // v0.1.2-rc.1 and v0.1.2 share the same base SemVer: the isolation
-        // policy must outlive a prerelease-only runtime upgrade.
         let root = test_root("prerelease-upgrade");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -208,8 +226,49 @@ mod tests {
                 .isolated_plugins,
             vec!["bad-a"]
         );
-        // Cross-base upgrade invalidates and removes.
         assert!(read(&file, "0.2.0").is_none());
+        assert!(!file.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn host_owned_plugins_can_never_be_quarantined() {
+        let root = test_root("protected-write");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        let error = write(
+            &file,
+            "0.1.2",
+            vec!["legacy".into(), "harness-shell".into()],
+            vec!["legacy".into()],
+            "diagnostic-match",
+        )
+        .expect_err("host-owned plugin must be protected");
+        assert!(error.contains("host-owned"));
+        assert!(!file.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tampered_quarantine_cannot_disable_host_owned_plugins() {
+        let root = test_root("protected-read");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        let now = now_secs();
+        let tampered = PluginQuarantineRecord {
+            schema_version: SCHEMA_VERSION,
+            dsh_version: "0.1.2".into(),
+            dsh_base_version: "0.1.2".into(),
+            created_at: now,
+            expires_at: now.saturating_add(3600),
+            isolated_plugins: vec!["embedded-client".into()],
+            suspected_plugins: vec!["embedded-client".into()],
+            reason: "diagnostic-match".into(),
+        };
+        fs::write(&file, serde_json::to_vec(&tampered).unwrap()).unwrap();
+        assert!(read(&file, "0.1.2").is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }

@@ -15,11 +15,15 @@ export interface PluginRecoveryPlan {
   reason: PluginRecoveryReason
 }
 
-const HOST_OWNED_PLUGIN_IDS = new Set([
+export const HOST_OWNED_PLUGIN_IDS: ReadonlySet<string> = new Set([
   'embedded-client',
   'harnessdock-client-runtime-compat',
   'harness-shell',
 ])
+
+export function isHostOwnedPluginId(id: string): boolean {
+  return HOST_OWNED_PLUGIN_IDS.has(id)
+}
 
 function decodeYamlScalar(raw: string): string {
   const value = raw.trim()
@@ -51,11 +55,7 @@ function parseSourceLabel(line: string): { source: string; patchedBy: string[] }
   return { source, patchedBy }
 }
 
-/**
- * Parse the boot-free `dsh --dump-config` output without evaluating any plugin.
- * The dump annotates each effective top-level row with `# == <origin>` comments,
- * which lets the host distinguish official bundle rows from user/third-party rows.
- */
+/** Parse the boot-free dsh config without evaluating plugins. */
 export function parseConfigDumpRows(dump: string): ConfigDumpRow[] {
   const rows: ConfigDumpRow[] = []
   let source = ''
@@ -87,9 +87,7 @@ export function parseConfigDumpRows(dump: string): ConfigDumpRow[] {
       continue
     }
     const nameMatch = /^  name:\s*(.+?)\s*$/.exec(line)
-    if (current && nameMatch?.[1]) {
-      current.name = decodeYamlScalar(nameMatch[1])
-    }
+    if (current && nameMatch?.[1]) current.name = decodeYamlScalar(nameMatch[1])
   }
   finish()
   return rows
@@ -108,10 +106,7 @@ function isOfficialPluginRow(row: Pick<ConfigDumpRow, 'source' | 'name'>): boole
 
 export function pluginRecoveryCandidates(rows: readonly ConfigDumpRow[]): ConfigDumpRow[] {
   return rows.filter(
-    (row) =>
-      !HOST_OWNED_PLUGIN_IDS.has(row.id) &&
-      row.source !== '' &&
-      !isOfficialPluginRow(row),
+    (row) => !isHostOwnedPluginId(row.id) && row.source !== '' && !isOfficialPluginRow(row),
   )
 }
 
@@ -130,14 +125,8 @@ function diagnosticMatches(row: ConfigDumpRow, diagnostic: string): boolean {
 
 /**
  * Build a bounded, session-safe recovery plan after a normal startup failure.
- *
- * A dsh/Cordis startup diagnostic commonly identifies only the first stale
- * plugin. Narrowly disabling only that row lets a second incompatible plugin
- * fail the recovery boot and still keep the service offline. Therefore the
- * actual recovery isolation set is always the complete third-party/user-added
- * set. Diagnostic matches are retained separately as `suspectedRows` so the UI
- * and quarantine layer can explain what most likely caused the failure without
- * weakening the safety set.
+ * The recovery isolation set is always the complete third-party/user-added set;
+ * host-owned and official plugins are outside this fault domain by definition.
  */
 export function buildPluginRecoveryPlan(
   rows: readonly ConfigDumpRow[],
@@ -152,7 +141,6 @@ export function buildPluginRecoveryPlan(
   }
 }
 
-/** Backwards-compatible helper used by existing callers. */
 export function selectPluginRecoveryRows(
   rows: readonly ConfigDumpRow[],
   diagnostic: string,
@@ -162,5 +150,9 @@ export function selectPluginRecoveryRows(
 
 export function renderPluginRecoveryPatch(rows: readonly Pick<ConfigDumpRow, 'id'>[]): string {
   const unique = [...new Set(rows.map((row) => row.id).filter(Boolean))]
+  const protectedId = unique.find(isHostOwnedPluginId)
+  if (protectedId) {
+    throw new Error(`plugin recovery cannot isolate HarnessDock host-owned plugin: ${protectedId}`)
+  }
   return unique.map((id) => `- id: ${JSON.stringify(id)}\n  disabled: true\n`).join('')
 }
