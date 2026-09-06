@@ -16,6 +16,7 @@ on:
       - 'release-manifest.json'
       - 'tests/parity/**'
       - 'scripts/check-versions.mjs'
+      - 'scripts/check-tauri-source-layout.mjs'
       - 'scripts/check-embedded-runtime.mjs'
       - 'scripts/generate-host-protocol.mjs'
       - 'scripts/check-tauri-size-budget.mjs'
@@ -70,13 +71,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/check-tauri-source-layout.mjs
           test -s packages/plugin-embedded-client/lib/index.js
           test -s packages/plugin-harness-shell/lib/index.js
           test -s packages/plugin-harness-shell/web/shell.js
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/package.json
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/index.js
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/client.js
-          test -s apps/tauri/src-tauri/src/gateway_host.rs
           test -s apps/tauri/src-tauri/icons/app-icon.png
           test -s scripts/build-macos-dmg.sh
           test -s scripts/verify-windows-installer-icon.mjs
@@ -281,13 +282,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/check-tauri-source-layout.mjs
           test -s packages/plugin-embedded-client/lib/index.js
           test -s packages/plugin-harness-shell/lib/index.js
           test -s packages/plugin-harness-shell/web/shell.js
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/package.json
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/index.js
           test -s apps/tauri/src-tauri/resources/dsh-client-runtime-compat/client.js
-          test -s apps/tauri/src-tauri/src/gateway_host.rs
           pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime --plugin packages/plugin-embedded-client/lib/index.js
           if [ "${{ runner.os }}" = Linux ]; then
             test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@koromix/koffi-linux-x64/musl_x64
