@@ -356,9 +356,7 @@ mod tests {
                 },
                 pid: 1,
                 origin: format!("http://127.0.0.1:{runtime_port}"),
-                launch_url: format!(
-                    "http://127.0.0.1:{runtime_port}/launch?token=test-launch"
-                ),
+                launch_url: format!("http://127.0.0.1:{runtime_port}/launch?token=test-launch"),
                 dsh_version: "test".into(),
             },
             public_url: "http://127.0.0.1:43137/".into(),
