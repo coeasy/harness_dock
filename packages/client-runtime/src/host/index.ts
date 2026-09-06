@@ -19,4 +19,8 @@ export {
   shutdownLadder,
 } from './process.ts'
 export type { ProcessTreeOptions, ShutdownResult } from './process.ts'
+export { buildSpawnRequest, isWindowsScriptCommand, quoteForCmd } from './shell.ts'
+export type { SpawnRequest } from './shell.ts'
+export { openWebUiSession, probeWebUiSession } from './web-auth.ts'
+export type { WebUiProbeOptions, WebUiSession } from './web-auth.ts'
 export type { ReadyInfo, RuntimeMode } from '../types.ts'
