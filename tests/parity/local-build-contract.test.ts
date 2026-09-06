@@ -14,18 +14,16 @@ describe('self-contained local client build', () => {
     const windowsBootstrap = read('scripts/bootstrap-node.ps1')
     const posixBootstrap = read('scripts/bootstrap-node.sh')
 
-    // Windows: build.bat delegates portable Node provisioning to bootstrap-node.ps1
-    // and then forwards to the same build.mjs entrypoint as every other host.
     expect(batch).toContain('bootstrap-node.ps1')
+    expect(batch).toContain('HARNESSDOCK_FORCE_PORTABLE_NODE')
     expect(batch).toContain('node scripts\\bootstrap.mjs')
     expect(batch).toContain('node scripts\\build.mjs --skip-install')
     expect(windowsBootstrap).toContain('SHASUMS256.txt')
     expect(windowsBootstrap).toContain('Get-FileHash -Algorithm SHA256')
+    expect(windowsBootstrap).toContain('NODE_DOWNLOAD_BASES')
     expect(windowsBootstrap).toContain('.local-tools')
 
-    // POSIX: build.sh is a thin shim over build.mjs and delegates portable Node
-    // provisioning to bootstrap-node.sh, which publishes the same
-    // .local-tools/node-home.txt contract as the Windows counterpart.
+    expect(shell).toContain('HARNESSDOCK_FORCE_PORTABLE_NODE')
     expect(shell).toContain('bash scripts/bootstrap-node.sh')
     expect(shell).toContain('.local-tools/node-home.txt')
     expect(shell).toContain('node scripts/bootstrap.mjs')
@@ -35,21 +33,39 @@ describe('self-contained local client build', () => {
     expect(posixBootstrap).toContain('node-home.txt')
     expect(posixBootstrap).not.toContain('build.mjs')
 
-    // Both mirrors must stay reachable; CI drives the primary order through
-    // NODE_DOWNLOAD_BASES so a nodejs.org manifest change cannot surface only on
-    // a bare developer machine.
     expect(posixBootstrap).toContain('NODE_DOWNLOAD_BASES')
     expect(posixBootstrap).toContain('https://nodejs.org/dist/v')
     expect(posixBootstrap).toContain('https://npmmirror.com/mirrors/node/v')
-    // Windows developers reaching this script through Git Bash must be pointed at
-    // the PowerShell counterpart instead of failing on an opaque uname value.
     expect(posixBootstrap).toContain('CYGWIN*|MINGW*|MSYS*')
     expect(posixBootstrap).toContain('bootstrap-node.ps1')
   })
 
-  it('prepares the exact sealed runtime instead of assuming resources/dsh-runtime exists', () => {
+  it('requires the exact sealed runtime identity rather than version-only reuse', () => {
     const prepare = read('scripts/prepare-local-runtime.mjs')
-    const build = read('scripts/build.mjs')
+    const runtimeBuilder = read('packages/client-runtime/src/prepare-cli.ts')
+    const imageIdentity = read('packages/client-runtime/src/image-identity.ts')
+    const prune = read('packages/client-runtime/src/prune-node-cli.ts')
+
+    for (const field of [
+      'platform',
+      'arch',
+      'dshVersion',
+      'gitTag',
+      'gitCommit',
+      'dshGitTag',
+      'dshGitCommit',
+      'clientVersion',
+      'schemaVersion',
+      'runtimeLayoutVersion',
+      'imageIdentityAlgorithm',
+      'runtimeEmbedded',
+      'firstLaunchRuntimeDownloadRequired',
+      'imageIdentity',
+      'contentFileCount',
+      'contentBytes',
+    ]) {
+      expect(prepare).toContain(field)
+    }
 
     expect(prepare).toContain('origin.gitTag')
     expect(prepare).toContain('origin.gitCommit')
@@ -57,9 +73,45 @@ describe('self-contained local client build', () => {
     expect(prepare).toContain("'clone'")
     expect(prepare).toContain("'build:official'")
     expect(prepare).toContain('DSH_PACKED_RUNTIME_DIR')
-    expect(prepare).toContain('runtimeEmbedded === true')
-    expect(prepare).toContain('firstLaunchRuntimeDownloadRequired === false')
+    expect(prepare).toContain('cached runtime is stale or incompatible; refreshing')
 
+    const builderLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(runtimeBuilder)?.[1]
+    const localLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(prepare)?.[1]
+    expect(localLayout).toBe(builderLayout)
+
+    const identityAlgorithm = /const IDENTITY_ALGORITHM = '([^']+)'/.exec(imageIdentity)?.[1]
+    const localIdentityAlgorithm = /const RUNTIME_IMAGE_IDENTITY_ALGORITHM = '([^']+)'/.exec(prepare)?.[1]
+    expect(localIdentityAlgorithm).toBe(identityAlgorithm)
+
+    const runtimeSchema = /manifest\.schemaVersion = (\d+)/.exec(prune)?.[1]
+    const localSchema = /const RUNTIME_SCHEMA_VERSION = (\d+)/.exec(prepare)?.[1]
+    expect(localSchema).toBe(runtimeSchema)
+  })
+
+  it('pins pnpm and tauri-cli instead of accepting arbitrary developer tool versions', () => {
+    const pkg = JSON.parse(read('package.json')) as { packageManager?: string; scripts: Record<string, string> }
+    const versions = JSON.parse(read('scripts/versions.json')) as { node?: string; tauriCli?: string }
+    const bootstrap = read('scripts/bootstrap.mjs')
+    const build = read('scripts/build.mjs')
+
+    expect(pkg.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/)
+    expect(versions.tauriCli).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(bootstrap).toContain('rootPackage.packageManager')
+    expect(bootstrap).toContain('expectedPnpmVersion')
+    expect(bootstrap).toContain('exact packageManager match')
+    expect(bootstrap).not.toContain('pnpm@10.12.0')
+    expect(build).toContain('versions.tauriCli')
+    expect(build).toContain('globalVersion === tauriCliVersion')
+    expect(build).toContain('ignoring tauri-cli')
+    expect(build).toContain('actualPnpmVersion !== expectedPnpmVersion')
+  })
+
+  it('prepares the exact sealed runtime and proves Harness Web before packaging', () => {
+    const prepare = read('scripts/prepare-local-runtime.mjs')
+    const build = read('scripts/build.mjs')
+
+    expect(prepare).toContain('runtimeEmbedded')
+    expect(prepare).toContain('firstLaunchRuntimeDownloadRequired')
     expect(build).toContain('scripts/prepare-local-runtime.mjs')
     expect(build).toContain("'smoke-runtime'")
     expect(build).toContain('verify sealed Runtime + Harness Web readiness')
@@ -83,7 +135,7 @@ describe('self-contained local client build', () => {
   })
 
   it('keeps the JavaScript build entrypoints syntactically valid', () => {
-    for (const relative of ['scripts/build.mjs', 'scripts/prepare-local-runtime.mjs']) {
+    for (const relative of ['scripts/bootstrap.mjs', 'scripts/build.mjs', 'scripts/prepare-local-runtime.mjs']) {
       const result = spawnSync(process.execPath, ['--check', path.join(repoRoot, relative)], {
         cwd: repoRoot,
         encoding: 'utf8',
@@ -92,28 +144,27 @@ describe('self-contained local client build', () => {
     }
   })
 
-  it('parses the host shell bootstrap script for the current CI platform', () => {
+  it('parses the host shell bootstrap and installer-smoke scripts for the current CI platform', () => {
     if (process.platform === 'win32') {
-      const script = path.join(repoRoot, 'scripts/bootstrap-node.ps1').replaceAll("'", "''")
-      const command = `$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }`
-      const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', command], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      })
-      expect(result.status, result.stderr).toBe(0)
+      for (const relative of ['scripts/bootstrap-node.ps1', 'scripts/smoke-windows-installer.ps1']) {
+        const script = path.join(repoRoot, relative).replaceAll("'", "''")
+        const command = `$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }`
+        const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', command], {
+          cwd: repoRoot,
+          encoding: 'utf8',
+        })
+        expect(result.status, `${relative}: ${result.stderr}`).toBe(0)
+      }
       return
     }
 
-    const result = spawnSync('bash', ['-n', path.join(repoRoot, 'scripts/build.sh')], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    })
-    expect(result.status, `scripts/build.sh: ${result.stderr}`).toBe(0)
-    const bootstrapResult = spawnSync('bash', ['-n', path.join(repoRoot, 'scripts/bootstrap-node.sh')], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    })
-    expect(bootstrapResult.status, `scripts/bootstrap-node.sh: ${bootstrapResult.stderr}`).toBe(0)
+    for (const relative of ['scripts/build.sh', 'scripts/bootstrap-node.sh']) {
+      const result = spawnSync('bash', ['-n', path.join(repoRoot, relative)], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+      expect(result.status, `${relative}: ${result.stderr}`).toBe(0)
+    }
   })
 
   it('keeps one build entrypoint and no dead build/dev scripts', () => {
@@ -130,23 +181,43 @@ describe('self-contained local client build', () => {
     expect(build).toContain('verify sealed Runtime + Harness Web readiness')
   })
 
-  it('runs the portable Node bootstrap for real in CI, on both POSIX hosts', () => {
+  it('runs portable Node bootstrap for real on POSIX and Windows, with both mirrors', () => {
     const workflow = read('.github/workflows/ci.yml')
 
-    // The bootstrap used to be validated only with `bash -n`; a real download is
-    // the only check that catches a mirror layout or manifest change.
     expect(workflow).toContain('node-bootstrap:')
     expect(workflow).toContain('bash scripts/bootstrap-node.sh')
-    expect(workflow).toContain('test "$portable_version" = "$node_version"')
+    expect(workflow).toContain('portable_version=')
     expect(workflow).toContain('"$node_home/bin/node" scripts/node-version-check.cjs')
-    // Both mirrors act as primary in some cell of the matrix.
     expect(workflow).toContain('mirror: nodejs')
     expect(workflow).toContain('mirror: npmmirror')
     expect(workflow).toContain('os: ubuntu-latest')
     expect(workflow).toContain('os: macos-latest')
-    // Artifacts must not leak into git; the bootstrap writes under ignored roots.
+
+    expect(workflow).toContain('node-bootstrap-windows:')
+    expect(workflow).toContain('./scripts/bootstrap-node.ps1')
+    expect(workflow).toContain('matrix.mirror')
+    expect(workflow).toContain('NODE_DOWNLOAD_BASES')
     expect(workflow).toContain('.local-tools/node-home.txt')
     expect(workflow).toContain('.local-cache/node')
+  })
+
+  it('gates the actual clean-clone one-click entrypoints and the exact Windows installer startup', () => {
+    const workflow = read('.github/workflows/local-one-click-build.yml')
+    const smoke = read('scripts/smoke-windows-installer.ps1')
+
+    expect(workflow).toContain('HARNESSDOCK_FORCE_PORTABLE_NODE')
+    expect(workflow).toContain('scripts\\build.bat --skip-tests')
+    expect(workflow).toContain('./scripts/build.sh --skip-tests --check-only')
+    expect(workflow).toContain('apps/tauri/src-tauri/resources/dsh-runtime')
+    expect(workflow).toContain('smoke-windows-installer.ps1')
+    expect(workflow).toContain("git status --porcelain")
+
+    expect(smoke).toContain('phase=runtime_ready')
+    expect(smoke).toContain('phase=webview_requested')
+    expect(smoke).toContain('phase=primary_visible')
+    expect(smoke).toContain('127.0.0.1')
+    expect(smoke).toContain('CookieContainer')
+    expect(smoke).toContain('healthyCleanProbes -ge 2')
   })
 
   it('asserts the split module roots rather than the pre-R3 single files', () => {
@@ -160,15 +231,10 @@ describe('self-contained local client build', () => {
     ]) {
       expect(workflow).toContain(`test -s ${relative}`)
     }
-    // The single-file paths no longer exist; a stale assertion would fail CI the
-    // moment the split is reproduced.
     expect(workflow).not.toContain('test -s apps/tauri/src-tauri/src/gateway_host.rs')
   })
 
   it('keeps the dev-only dsh runner self-sufficient after the dev-dsh.sh removal', () => {
-    // The launcher must not require tsx itself: `node --import tsx` resolves the
-    // loader before any script body runs, so a missing node_modules would abort
-    // the process before a dependency fallback had a chance to run.
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
     expect(pkg.scripts['dev:dsh']).toBe('node scripts/dev-dsh.mjs')
     expect(pkg.scripts['dev:dsh']).not.toContain('--import tsx')
@@ -176,16 +242,13 @@ describe('self-contained local client build', () => {
     const launcher = read('scripts/dev-dsh.mjs')
     const runtime = read('scripts/dev-dsh-runtime.mjs')
 
-    // Restored behaviour from the deleted dev-dsh.sh.
     expect(launcher).toContain('pnpm install')
     expect(launcher).toContain('node_modules')
     expect(launcher).toContain('dev-dsh-runtime.mjs')
     expect(launcher).toContain("'--import', 'tsx'")
-    // The launcher itself stays tsx-free.
     expect(launcher).not.toMatch(/^import \{ DshRuntime \}/m)
     expect(launcher).not.toContain('client-runtime/src')
 
-    // The runtime body keeps the original imports and shutdown behaviour.
     expect(runtime).toContain("await import('../packages/client-runtime/src/runtime.ts')")
     expect(runtime).toContain('new DshRuntime(')
     expect(runtime).toContain("process.on('SIGINT', shutdown)")
