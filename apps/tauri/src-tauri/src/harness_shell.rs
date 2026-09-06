@@ -4,27 +4,16 @@
 //! plugin. Tauri supplies only minimum window primitives plus Host Protocol v2.
 //! The remote Harness document never receives direct Runtime/update/quit IPC.
 
+use crate::shell_contract_generated::{
+    SHELL_API_VERSION, SHELL_DIRECT_WINDOW_MAP_JSON, SHELL_HOST_COMMAND_MAP_JSON,
+    SHELL_PLUGIN_ID, SHELL_VERSION,
+};
 use tauri::Manager;
 
 const SHELL_WEB_SCRIPT: &str =
     include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
 /// Web API compatibility layer, injected before every other page script.
-///
-/// HarnessDock ships against the WebView2 Runtime that is already present on
-/// the host machine. Older Evergreen runtimes (observed: Chromium 113) lack
-/// the Web APIs dsh's client bundle relies on, so a missing API degrades the
-/// whole document instead of one feature:
-///
-/// * `Promise.withResolvers` is used by Tauri's own `window.__TAURI__` bridge
-///   script. When it throws, the shell bridge is installed only partially.
-/// * `AbortSignal.any` is used by dsh's `RemoteStream.read` control stream.
-///   When it throws, the session controller cannot establish a stream, the
-///   connection client backs off forever, and the Settings chrome stays on
-///   "connecting" while the browser console is filled with TypeErrors.
-///
-/// Polyfilling here is the only host-side hook that runs before the document's
-/// scripts, so it fixes Tauri's bridge and dsh's bundle with one injection.
 const POLYFILL_SCRIPT: &str = r#"
 (() => {
   'use strict';
@@ -91,32 +80,13 @@ const POLYFILL_SCRIPT: &str = r#"
 })();
 "#;
 
-const BRIDGE_SCRIPT: &str = r#"
+const BRIDGE_SCRIPT_TEMPLATE: &str = r#"
 (() => {
   'use strict';
   const tauriInvoke = window.__TAURI__?.core?.invoke;
   const tauriListen = window.__TAURI__?.event?.listen;
-  const directWindowMap = Object.freeze({
-    'window.minimize': 'harness_minimize',
-    'window.toggleMaximize': 'harness_toggle_maximize',
-    'window.state': 'harness_window_state',
-    'window.close': 'harness_shell_close'
-  });
-  // This map is exactly the set of commands `capability_broker.rs` allows for
-  // the HarnessWeb subject. Commands the broker denies to web
-  // (RuntimeQuarantineAdmin, UpdateInstall, AppQuit, ...) are reachable from
-  // the native tray and diagnostics surfaces instead — they are deliberately
-  // absent here and from SHELL_COMMANDS, so the web contract can never
-  // advertise a command the broker is bound to reject.
-  // tests/parity/shell-contract-lockstep.test.ts enforces the three-way
-  // agreement between this map, SHELL_COMMANDS and the broker allow-list.
-  const hostCommandMap = Object.freeze({
-    'web.reload': 'refresh-harness',
-    'web.restart': 'restart-runtime',
-    'runtime.safe-mode': 'start-safe-mode',
-    'gateway.manage': 'show-gateway',
-    'diagnostics.open': 'show-diagnostics'
-  });
+  const directWindowMap = Object.freeze(__DIRECT_WINDOW_MAP__);
+  const hostCommandMap = Object.freeze(__HOST_COMMAND_MAP__);
   const capabilities = Object.freeze(Object.fromEntries(
     [...Object.keys(directWindowMap), ...Object.keys(hostCommandMap)]
       .map((command) => [command, typeof tauriInvoke === 'function'])
@@ -177,15 +147,28 @@ const BRIDGE_SCRIPT: &str = r#"
     };
   };
   window.__DSH_SHELL_BRIDGE__ = Object.freeze({
-    apiVersion: 2,
-    pluginId: 'harness-shell',
-    version: '0.2.0',
+    apiVersion: __SHELL_API_VERSION__,
+    pluginId: __SHELL_PLUGIN_ID__,
+    version: __SHELL_VERSION__,
     capabilities,
     invoke,
     subscribe
   });
 })();
 "#;
+
+fn bridge_script() -> String {
+    let plugin_id = serde_json::to_string(SHELL_PLUGIN_ID)
+        .unwrap_or_else(|_| "\"harness-shell\"".to_string());
+    let version = serde_json::to_string(SHELL_VERSION)
+        .unwrap_or_else(|_| "\"0.1.2\"".to_string());
+    BRIDGE_SCRIPT_TEMPLATE
+        .replace("__DIRECT_WINDOW_MAP__", SHELL_DIRECT_WINDOW_MAP_JSON)
+        .replace("__HOST_COMMAND_MAP__", SHELL_HOST_COMMAND_MAP_JSON)
+        .replace("__SHELL_API_VERSION__", &SHELL_API_VERSION.to_string())
+        .replace("__SHELL_PLUGIN_ID__", &plugin_id)
+        .replace("__SHELL_VERSION__", &version)
+}
 
 /// The custom shell close button hides to tray only when a tray actually
 /// exists. On desktops where tray creation failed, it performs supervised exit
@@ -207,5 +190,22 @@ pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
 /// `window.__TAURI__` bridge and dsh's client bundle both find the APIs they
 /// call, then the host bridge, then the shell UI.
 pub(crate) fn init_script() -> String {
-    format!("{POLYFILL_SCRIPT}\n{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
+    format!("{POLYFILL_SCRIPT}\n{}\n{SHELL_WEB_SCRIPT}", bridge_script())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bridge_is_composed_from_generated_shell_contract() {
+        let bridge = bridge_script();
+        assert!(bridge.contains(&format!("apiVersion: {SHELL_API_VERSION}")));
+        assert!(bridge.contains(SHELL_PLUGIN_ID));
+        assert!(bridge.contains("window.minimize"));
+        assert!(bridge.contains("diagnostics.open"));
+        assert!(!bridge.contains("__SHELL_"));
+        assert!(!bridge.contains("__DIRECT_WINDOW_MAP__"));
+        assert!(!bridge.contains("__HOST_COMMAND_MAP__"));
+    }
 }
