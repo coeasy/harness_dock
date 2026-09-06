@@ -5,6 +5,92 @@
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
 
+pub enum BootstrapClaim {
+    Complete,
+    Claimed(BootstrapReservation),
+    SessionMissing,
+    Busy,
+}
+
+pub struct BootstrapReservation {
+    shared: Arc<GatewayShared>,
+    session_token: String,
+    committed: bool,
+}
+
+impl BootstrapReservation {
+    pub fn commit(&mut self) -> Result<(), String> {
+        let mut registry = self
+            .shared
+            .registry
+            .lock()
+            .map_err(|_| lock_err("GatewayRegistry"))?;
+        let session = registry
+            .sessions
+            .get_mut(&self.session_token)
+            .ok_or_else(|| "Gateway session expired during bootstrap".to_string())?;
+        if session.bootstrap_phase != SessionBootstrapPhase::InFlight {
+            return Err("Gateway bootstrap reservation lost ownership".into());
+        }
+        session.bootstrap_phase = SessionBootstrapPhase::Complete;
+        self.committed = true;
+        Ok(())
+    }
+}
+
+impl Drop for BootstrapReservation {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        if let Ok(mut registry) = self.shared.registry.lock() {
+            if let Some(session) = registry.sessions.get_mut(&self.session_token) {
+                if session.bootstrap_phase == SessionBootstrapPhase::InFlight {
+                    session.bootstrap_phase = SessionBootstrapPhase::Pending;
+                }
+            }
+        }
+    }
+}
+
+pub fn claim_session_bootstrap(
+    shared: &Arc<GatewayShared>,
+    session_token: &str,
+) -> Result<BootstrapClaim, String> {
+    let deadline = Instant::now() + GATEWAY_HANDSHAKE_TIMEOUT;
+    loop {
+        let phase = {
+            let mut registry = shared
+                .registry
+                .lock()
+                .map_err(|_| lock_err("GatewayRegistry"))?;
+            prune_registry(&mut registry);
+            let Some(session) = registry.sessions.get_mut(session_token) else {
+                return Ok(BootstrapClaim::SessionMissing);
+            };
+            session.last_seen_at = SystemTime::now();
+            match session.bootstrap_phase {
+                SessionBootstrapPhase::Pending => {
+                    session.bootstrap_phase = SessionBootstrapPhase::InFlight;
+                    return Ok(BootstrapClaim::Claimed(BootstrapReservation {
+                        shared: Arc::clone(shared),
+                        session_token: session_token.to_string(),
+                        committed: false,
+                    }));
+                }
+                SessionBootstrapPhase::Complete => return Ok(BootstrapClaim::Complete),
+                SessionBootstrapPhase::InFlight => SessionBootstrapPhase::InFlight,
+            }
+        };
+
+        debug_assert_eq!(phase, SessionBootstrapPhase::InFlight);
+        if deadline <= Instant::now() {
+            return Ok(BootstrapClaim::Busy);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 pub fn handle_connection(
     mut stream: TcpStream,
     peer: SocketAddr,
@@ -57,9 +143,6 @@ pub fn handle_connection(
         }
         "/api/harnessdock/pair" => handle_pair(&mut stream, peer.ip(), &request, &shared),
         "/api/harnessdock/connect" => {
-            // The connect token is a single-use credential. Reject unsupported
-            // methods before touching the registry so a stray POST/HEAD/OPTIONS
-            // cannot consume the ticket and strand the legitimate redirect.
             if request.method != "GET" {
                 return write_status(&mut stream, 405, "Method Not Allowed", b"");
             }
@@ -141,7 +224,7 @@ pub fn handle_pair(
                 paired_at: now,
                 last_seen_at: now,
                 expires_at: session_expiry,
-                bootstrapped: false,
+                bootstrap_phase: SessionBootstrapPhase::Pending,
             },
         );
         registry.connect_tickets.insert(
@@ -257,19 +340,25 @@ pub fn proxy_authenticated(
         write_status(&mut client, 401, "Unauthorized", b"session cookie missing")?;
         return Ok(());
     };
-    let bootstrap = {
-        let mut registry = shared
-            .registry
-            .lock()
-            .map_err(|_| lock_err("GatewayRegistry"))?;
-        prune_registry(&mut registry);
-        let Some(session) = registry.sessions.get_mut(&session_token) else {
+
+    let mut bootstrap_reservation = match claim_session_bootstrap(&shared, &session_token)? {
+        BootstrapClaim::Complete => None,
+        BootstrapClaim::Claimed(reservation) => Some(reservation),
+        BootstrapClaim::SessionMissing => {
             write_status(&mut client, 401, "Unauthorized", b"session expired")?;
             return Ok(());
-        };
-        session.last_seen_at = SystemTime::now();
-        !session.bootstrapped
+        }
+        BootstrapClaim::Busy => {
+            write_status(
+                &mut client,
+                503,
+                "Service Unavailable",
+                b"session bootstrap busy",
+            )?;
+            return Ok(());
+        }
     };
+
     let upstream = Url::parse(&shared.runtime_lease.origin)
         .map_err(|_| "RuntimeLease origin invalid".to_string())?;
     let host = upstream
@@ -284,7 +373,7 @@ pub fn proxy_authenticated(
         .set_nodelay(true)
         .map_err(|error| error.to_string())?;
 
-    let target = if bootstrap {
+    let target = if bootstrap_reservation.is_some() {
         let launch = Url::parse(&shared.runtime_lease.launch_url)
             .map_err(|_| "RuntimeLease launch URL invalid".to_string())?;
         let mut value = launch.path().to_string();
@@ -324,11 +413,14 @@ pub fn proxy_authenticated(
         .write_all(first.as_bytes())
         .and_then(|_| upstream_stream.write_all(&request.raw_body))
         .map_err(|error| error.to_string())?;
-    if bootstrap {
-        if let Ok(mut registry) = shared.registry.lock() {
-            if let Some(session) = registry.sessions.get_mut(&session_token) {
-                session.bootstrapped = true;
-            }
+
+    if let Some(reservation) = bootstrap_reservation.as_mut() {
+        let response_head = read_upstream_response_head(&mut upstream_stream)?;
+        client
+            .write_all(&response_head.bytes)
+            .map_err(|error| error.to_string())?;
+        if bootstrap_response_accepted(&response_head) {
+            reservation.commit()?;
         }
     }
 
