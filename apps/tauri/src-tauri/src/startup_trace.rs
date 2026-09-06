@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -68,7 +69,7 @@ fn prune_old_traces(dir: &Path) {
             Some((modified, path))
         })
         .collect::<Vec<_>>();
-    traces.sort_by(|a, b| b.0.cmp(&a.0));
+    traces.sort_by_key(|(modified, _)| Reverse(*modified));
     for (_, path) in traces.into_iter().skip(20) {
         let _ = fs::remove_file(path);
     }
