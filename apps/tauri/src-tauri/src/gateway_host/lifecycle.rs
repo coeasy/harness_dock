@@ -1,11 +1,9 @@
 //! Gateway admission: actor phase machine, port/URL validation, spawn and
 //! the stop path that serialises against a late publish.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub(crate) struct GatewayActorState {
     pub phase: GatewayPhase,
@@ -84,7 +82,7 @@ pub fn stopped() -> GatewayHostStatus {
 }
 
 pub fn validated_gateway_port(local_port: Option<u16>) -> Result<u16, String> {
-    let port = local_port.unwrap_or(43137);
+    let port = local_port.unwrap_or(crate::constants::DEFAULT_GATEWAY_PORT);
     if port < 1024 {
         return Err("Gateway 本地端口必须在 1024-65535 之间。".into());
     }
