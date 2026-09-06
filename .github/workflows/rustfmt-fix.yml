@@ -1,0 +1,39 @@
+name: one-shot-rustfmt-fix
+
+on:
+  push:
+    branches:
+      - refactor/v4-full-implementation
+    paths:
+      - '.github/workflows/rustfmt-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/v4-full-implementation
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+      - name: Apply canonical rustfmt
+        run: cargo fmt --manifest-path apps/tauri/src-tauri/Cargo.toml --all
+      - name: Commit formatting if needed
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/tauri/src-tauri; then
+            echo "rustfmt already clean"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/tauri/src-tauri
+          git diff --cached --check
+          git commit -m "style: apply rustfmt to Tauri source"
+          git push origin HEAD:refactor/v4-full-implementation
