@@ -94,13 +94,29 @@ pub(crate) fn show_startup_recovery(app: &AppHandle, error: &str) {
     if let Ok(mut recovery) = state.startup_recovery_error.lock() {
         *recovery = Some(error.to_string());
     }
-    if let Ok(mut surface) = state.surface_actor.lock() {
+    let primary_visible = if let Ok(mut surface) = state.surface_actor.lock() {
+        let primary_visible = surface.primary_visible();
         let (navigation, generation) = surface.current_navigation();
         if let Some(generation) = generation {
             let _ = surface.fail_navigation(navigation, generation);
         }
         surface.end_operation();
+        primary_visible
+    } else {
+        false
+    };
+
+    // During normal startup the `harness` window may already be visible with
+    // the local first-paint document. Recovery is the only replacement UI when
+    // Runtime boot/navigation fails, so hide that bootstrap window before the
+    // control surface is shown. A healthy already-visible Harness document is
+    // never hidden by an unrelated diagnostics error.
+    if !primary_visible {
+        if let Some(window) = app.get_webview_window("harness") {
+            let _ = window.hide();
+        }
     }
+
     eprintln!("HarnessDock startup failed: {error}");
     if let Err(surface_error) = show_control_surface(app, "recovery", Some(error)) {
         eprintln!("HarnessDock recovery surface unavailable: {surface_error}");
