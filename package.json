@@ -11,7 +11,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:versions": "node scripts/check-tauri-only.mjs && node scripts/check-tauri-source-layout.mjs && node scripts/check-versions.mjs && node scripts/generate-host-protocol.mjs --check",
+    "check:versions": "node scripts/check-tauri-only.mjs && node scripts/check-tauri-source-layout.mjs && node scripts/check-versions.mjs && node scripts/generate-host-protocol.mjs --check && node scripts/generate-shell-contract.mjs --check",
     "check:tauri-only": "node scripts/check-tauri-only.mjs",
     "check:tauri-layout": "node scripts/check-tauri-source-layout.mjs",
     "check:release": "node scripts/check-release.mjs",
@@ -19,6 +19,8 @@
     "check:embedded-runtime": "node scripts/check-embedded-runtime.mjs",
     "generate:host-protocol": "node scripts/generate-host-protocol.mjs",
     "check:host-protocol": "node scripts/generate-host-protocol.mjs --check",
+    "generate:shell-contract": "node scripts/generate-shell-contract.mjs",
+    "check:shell-contract": "node scripts/generate-shell-contract.mjs --check",
     "perf:report": "node scripts/perf-report.mjs",
     "mark:released": "node scripts/mark-released.mjs",
     "tauri:dev": "pnpm --filter @dsh/tauri tauri:dev",
