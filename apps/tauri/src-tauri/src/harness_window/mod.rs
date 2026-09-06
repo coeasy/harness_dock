@@ -67,11 +67,13 @@ mod tests {
         ] {
             assert!(is_harness_bootstrap_url(&Url::parse(value).unwrap()));
         }
+        // This assertion runs after `url::Url` canonicalization. Raw spellings
+        // such as `/../splash.html` normalize to `/splash.html` before this
+        // callback and therefore cannot be distinguished at this layer.
         for value in [
             "https://example.com/splash.html",
             "http://127.0.0.1:4321/splash.html",
             "http://tauri.localhost/splash.html?token=x",
-            "http://tauri.localhost/../splash.html",
             "http://user@tauri.localhost/splash.html",
         ] {
             assert!(
