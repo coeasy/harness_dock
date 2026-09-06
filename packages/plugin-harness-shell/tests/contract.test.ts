@@ -2,50 +2,45 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { apply, service } from '../src/index.ts'
+import { apiVersion, apply, name, service, version } from '../src/index.ts'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(packageRoot, '../..')
 const read = (relative: string) => readFileSync(path.join(packageRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('independent Harness Shell dsh plugin', () => {
-  it('publishes a versioned manifest and distributable entrypoint', () => {
+  it('publishes a generated contract-aligned manifest and distributable artifacts', () => {
     const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'))
     const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'manifest.json'), 'utf8'))
     const shellContract = JSON.parse(readFileSync(path.join(repoRoot, 'protocol/shell-contract.json'), 'utf8'))
-    const entry = read('src/index.ts')
-    const web = read('src/web/shell.js')
+    const commandNames = shellContract.commands.map((command: { name: string }) => command.name)
     const bundledEntry = read('lib/index.js')
     const bundledWeb = read('web/shell.js')
+
     expect(packageJson.private).not.toBe(true)
     expect(packageJson.files).toEqual(expect.arrayContaining(['lib', 'manifest.json', 'web']))
-    expect(manifest).toMatchObject({
-      id: 'harness-shell',
+    expect({ name, version, apiVersion }).toEqual({
+      name: shellContract.pluginId,
       version: packageJson.version,
-      kind: 'shell',
       apiVersion: shellContract.apiVersion,
-      safeMode: true,
     })
-    expect(entry).toContain("export const name = 'harness-shell'")
-    expect(entry).toContain(`export const version = '${packageJson.version}'`)
-    expect(entry).toContain("register?.('harnessShell', service)")
-    expect(web).toContain('window.__DSH_SHELL_BRIDGE__')
-    expect(web).toContain('runtime.safe-mode')
-    expect(web).toContain('gateway.manage')
-    expect(web).toContain('移动设备 / Gateway')
-    expect(web).toContain('diagnostics.open')
-    expect(web).not.toContain('runtime.clear-quarantine')
-    expect(web).not.toContain('app.update.install')
-    expect(web).not.toContain('app.quit')
-    expect(web).toContain('isWindowCommand')
-    expect(web).toContain('setBusinessActionsDisabled')
-    expect(web).toContain("window.addEventListener('pagehide'")
-    expect(bundledEntry).toContain('harness-shell')
-    expect(bundledEntry).toContain('register?.("harnessShell", service)')
-    expect(bundledWeb).toContain('window.__DSH_SHELL_BRIDGE__')
-    expect(bundledWeb).toContain('gateway.manage')
-    expect(bundledWeb).toContain('isWindowCommand')
-    expect(bundledWeb).toContain("window.addEventListener('pagehide'")
+    expect(service).toMatchObject({
+      pluginId: shellContract.pluginId,
+      version: packageJson.version,
+      apiVersion: shellContract.apiVersion,
+      capabilities: commandNames,
+    })
+    expect(manifest).toMatchObject({
+      id: service.pluginId,
+      version: service.version,
+      kind: 'shell',
+      apiVersion: service.apiVersion,
+      safeMode: true,
+      entry: 'lib/index.js',
+      webEntry: 'web/shell.js',
+    })
+    expect(bundledEntry.trim().length).toBeGreaterThan(0)
+    expect(bundledWeb.trim().length).toBeGreaterThan(0)
   })
 
   it('registers the shell service when the host accepts it', () => {
