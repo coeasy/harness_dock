@@ -35,6 +35,8 @@ mod plugin_quarantine;
 #[cfg(not(mobile))]
 mod process;
 #[cfg(not(mobile))]
+mod read_model;
+#[cfg(not(mobile))]
 mod reconciler;
 #[cfg(not(mobile))]
 mod runtime;
