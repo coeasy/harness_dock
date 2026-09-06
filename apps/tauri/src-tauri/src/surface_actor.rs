@@ -63,10 +63,6 @@ impl SurfaceActorState {
         self.primary_visible
     }
 
-    pub(crate) fn runtime_generation(&self) -> Option<u64> {
-        self.runtime_generation
-    }
-
     pub(crate) fn current_navigation(&self) -> (u64, Option<u64>) {
         (self.navigation_id, self.runtime_generation)
     }
@@ -123,10 +119,6 @@ impl SurfaceActorState {
         self.runtime_generation = None;
         self.phase = SurfacePhase::Hidden;
         self.primary_visible = false;
-    }
-
-    pub(crate) fn hide(&mut self) {
-        self.cancel_navigation();
     }
 }
 
