@@ -68,10 +68,19 @@ function Install-FromMirror([string]$BaseUrl) {
 
 New-Item -ItemType Directory -Path $ToolRoot -Force | Out-Null
 if (-not (Test-Node $NodeExe)) {
-    $sources = @(
-        "https://nodejs.org/dist/v$Version",
-        "https://npmmirror.com/mirrors/node/v$Version"
-    )
+    if ($env:NODE_DOWNLOAD_BASES) {
+        $sources = @($env:NODE_DOWNLOAD_BASES -split '\s+' | Where-Object { $_ -and $_.Trim().Length -gt 0 })
+    }
+    else {
+        $sources = @(
+            "https://nodejs.org/dist/v$Version",
+            "https://npmmirror.com/mirrors/node/v$Version"
+        )
+    }
+    if ($sources.Count -eq 0) {
+        throw 'NODE_DOWNLOAD_BASES did not contain any usable mirror URLs'
+    }
+
     $lastError = $null
     foreach ($source in $sources) {
         try {
