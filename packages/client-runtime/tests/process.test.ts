@@ -2,7 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { collectProcessTree, isProcessAlive, resolveRuntimeMode, shutdownLadder } from '../src/process.ts'
+import {
+  collectProcessTree,
+  collectProcessTreeViaPs,
+  isProcessAlive,
+  resolveRuntimeMode,
+  shutdownLadder,
+} from '../src/process.ts'
 
 const temps: string[] = []
 
@@ -26,7 +32,6 @@ describe('resolveRuntimeMode', () => {
     expect(resolveRuntimeMode({ env: {}, packaged: false, bundledAvailable: true })).toBe(
       'bundled',
     )
-    // 显式 DSH_RUNTIME 仍优先
     expect(
       resolveRuntimeMode({ env: { DSH_RUNTIME: 'local' }, packaged: false, bundledAvailable: true }),
     ).toBe('local')
@@ -63,7 +68,6 @@ describe('shutdownLadder', () => {
       { pid: 77, force: false },
       { pid: 77, force: true },
     ])
-    // mock taskkill manages its own alive-state; the mock child reports dead
     expect(alive).toBe(false)
   })
 
@@ -120,8 +124,45 @@ describe('shutdownLadder', () => {
       killMs: 20,
       isAlive: () => !child.killed,
       platform: 'linux',
+      collectTree: async () => [],
     })
     expect(signals).toEqual(['SIGTERM', 'SIGKILL'])
+  })
+
+  it('drains POSIX descendants instead of declaring success when only the root exits', async () => {
+    const alive = new Set([7000, 7001, 7002])
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = []
+    const child = {
+      pid: 7000,
+      kill(signal: NodeJS.Signals = 'SIGTERM') {
+        signals.push({ pid: 7000, signal })
+        if (signal === 'SIGKILL') alive.delete(7000)
+        return true
+      },
+    }
+
+    const result = await shutdownLadder(child, {
+      termMs: 20,
+      killMs: 20,
+      platform: 'linux',
+      isAlive: () => alive.has(7000),
+      isProcessAlive: (pid) => alive.has(pid),
+      collectTree: async () => [7001, 7002],
+      killPid: (pid, signal) => {
+        signals.push({ pid, signal })
+        if (signal === 'SIGKILL') alive.delete(pid)
+      },
+    })
+
+    expect(result).toEqual({ dead: true, survivors: [] })
+    expect(signals).toEqual(expect.arrayContaining([
+      { pid: 7001, signal: 'SIGTERM' },
+      { pid: 7002, signal: 'SIGTERM' },
+      { pid: 7000, signal: 'SIGTERM' },
+      { pid: 7001, signal: 'SIGKILL' },
+      { pid: 7002, signal: 'SIGKILL' },
+      { pid: 7000, signal: 'SIGKILL' },
+    ]))
   })
 })
 
@@ -140,17 +181,14 @@ describe('isProcessAlive', () => {
     const { spawn } = await import('node:child_process')
     const child = spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' })
     await new Promise<void>((resolve) => child.once('exit', () => resolve()))
-    // Give Windows a moment to reap the pid
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(isProcessAlive(child.pid)).toBe(false)
   })
 })
 
 describe('collectProcessTree', () => {
-  it('returns descendants via the injected enumerator', async () => {
-    const calls: string[] = []
-    const fakeExec = (async (cmd: string, args: string[]) => {
-      calls.push(args.join(' '))
+  it('returns Windows descendants via the injected enumerator', async () => {
+    const fakeExec = (async (_cmd: string, args: string[]) => {
       if (args[2].includes('ParentProcessId=100')) {
         return { stdout: 'ProcessId=200\r\nProcessId=201\r\n' }
       }
@@ -159,34 +197,54 @@ describe('collectProcessTree', () => {
       }
       return { stdout: '' }
     }) as never
-    const tree = await collectProcessTree(100, { exec: fakeExec, maxDepth: 3 })
+    const tree = await collectProcessTree(100, {
+      exec: fakeExec,
+      maxDepth: 3,
+      platform: 'win32',
+    })
     expect(tree.sort((a, b) => a - b)).toEqual([200, 201, 300])
   })
 
-  it('returns [] when the enumerator fails', async () => {
+  it('returns [] when every Windows enumerator fails', async () => {
     const fakeExec = (async () => {
-      throw new Error('wmic unavailable')
+      throw new Error('enumerator unavailable')
     }) as never
-    const tree = await collectProcessTree(100, { exec: fakeExec })
+    const tree = await collectProcessTree(100, { exec: fakeExec, platform: 'win32' })
     expect(tree).toEqual([])
+  })
+
+  it('builds a POSIX subtree from a single ps snapshot', async () => {
+    const fakeExec = (async (cmd: string, args: string[]) => {
+      expect(cmd).toBe('ps')
+      expect(args).toEqual(['-eo', 'pid=,ppid='])
+      return {
+        stdout: [
+          '100 1',
+          '200 100',
+          '201 100',
+          '300 200',
+          '400 999',
+        ].join('\n'),
+      }
+    }) as never
+    const tree = await collectProcessTreeViaPs(100, { exec: fakeExec, maxDepth: 3 })
+    expect(tree.sort((a, b) => a - b)).toEqual([200, 201, 300])
   })
 })
 
 describe('shutdownLadder verification sweep', () => {
   it('re-kills survivors that outlive the first force kill', async () => {
     const kills: Array<{ pid: number; force: boolean }> = []
-    let dead = new Set<number>()
-    const platform = 'win32'
+    const dead = new Set<number>()
     const child = { pid: 500 }
 
     await shutdownLadder(child, {
       termMs: 20,
       killMs: 20,
-      platform,
+      platform: 'win32',
       isAlive: () => !dead.has(500),
       taskkill: async (pid, force) => {
         kills.push({ pid, force })
-        // The third force kill (round-1 sweep on pid 500) finally lands
         if (kills.filter((k) => k.pid === pid && k.force).length >= 2) {
           dead.add(pid)
         }
@@ -207,7 +265,7 @@ describe('shutdownLadder verification sweep', () => {
       killMs: 10,
       platform: 'win32',
       isAlive: () => true,
-      taskkill: async () => undefined, // never kills
+      taskkill: async () => undefined,
       isProcessAlive: () => true,
       collectTree: async () => [601],
       verify: true,
