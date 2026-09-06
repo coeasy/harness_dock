@@ -126,7 +126,9 @@ jobs:
         shell: bash
         env:
           HARNESSDOCK_FORCE_PORTABLE_NODE: '1'
-        run: ./scripts/build.sh --skip-tests
+        # Invoke through bash deliberately: source ZIPs and cross-filesystem copies
+        # are not required to preserve the executable bit on build.sh.
+        run: bash scripts/build.sh --skip-tests
 
       - name: Verify exact-pinned Runtime manifest
         shell: pwsh
