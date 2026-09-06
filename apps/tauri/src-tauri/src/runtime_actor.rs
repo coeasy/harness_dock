@@ -186,11 +186,19 @@ impl RuntimeActorState {
     }
 
     fn mark_failed(&mut self, generation: u64, message: String) {
-        if self
+        // A start failure is allowed to settle only the start operation that
+        // still owns this generation. Cancellation/stop is a higher-priority
+        // lifecycle decision: a late spawn/probe error must never overwrite
+        // Cancelling/Stopping (or an already-published Ready generation).
+        let owns_active_start = self
             .generation
             .as_ref()
             .is_some_and(|current| current.id == generation)
-        {
+            && matches!(
+                self.phase,
+                RuntimePhase::Preparing | RuntimePhase::Starting | RuntimePhase::Probing
+            );
+        if owns_active_start {
             self.phase = RuntimePhase::Failed;
             self.last_error = Some(message);
         }
@@ -342,8 +350,13 @@ impl RuntimeActor {
     }
 
     pub(crate) fn mark_failed(&mut self, generation: u64, message: String) {
+        let was_active_start = self.generation_id() == Some(generation)
+            && matches!(
+                self.phase(),
+                RuntimePhase::Preparing | RuntimePhase::Starting | RuntimePhase::Probing
+            );
         self.state.mark_failed(generation, message);
-        if self.generation_id() == Some(generation) {
+        if was_active_start && self.phase() == RuntimePhase::Failed {
             self.cancellation = None;
             self.lease = None;
         }
@@ -489,7 +502,29 @@ mod tests {
         state.mark_probing(generation.id).unwrap();
         state.begin_stop();
         assert_eq!(state.phase(), RuntimePhase::Cancelling);
+        state.mark_failed(generation.id, "late probe failure".into());
+        assert_eq!(
+            state.phase(),
+            RuntimePhase::Cancelling,
+            "late start failures must not override cancellation"
+        );
         state.settle_stopped();
         assert_eq!(state.phase(), RuntimePhase::Stopped);
+    }
+
+    #[test]
+    fn ready_generation_rejects_late_start_failure() {
+        let mut state = RuntimeActorState::default();
+        let generation = state.begin(RuntimeMode::Normal).unwrap();
+        state
+            .bind_image(generation.id, "sha256:runtime-image".into())
+            .unwrap();
+        let bound = state.generation().unwrap().clone();
+        state.mark_starting(generation.id).unwrap();
+        state
+            .accept_ready_generation(generation.id, &bound, false)
+            .unwrap();
+        state.mark_failed(generation.id, "late start failure".into());
+        assert_eq!(state.phase(), RuntimePhase::Ready);
     }
 }
