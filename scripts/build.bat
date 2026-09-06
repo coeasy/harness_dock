@@ -16,6 +16,7 @@ if not exist "package.json" (
 echo [build] HarnessDock local Windows build
 
 echo [build] Checking build-time Node...
+if /I "%HARNESSDOCK_FORCE_PORTABLE_NODE%"=="1" goto :portable_node
 where node.exe >nul 2>nul
 if errorlevel 1 goto :portable_node
 node scripts\node-version-check.cjs >nul 2>nul
@@ -23,7 +24,11 @@ if errorlevel 1 goto :portable_node
 goto :node_ready
 
 :portable_node
-echo [build] Supported Node is not available on PATH; preparing verified portable Node...
+if /I "%HARNESSDOCK_FORCE_PORTABLE_NODE%"=="1" (
+  echo [build] HARNESSDOCK_FORCE_PORTABLE_NODE=1; preparing verified portable Node...
+) else (
+  echo [build] Supported Node is not available on PATH; preparing verified portable Node...
+)
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bootstrap-node.ps1"
 if errorlevel 1 goto :fail
 if not exist ".local-tools\node-home.txt" (
