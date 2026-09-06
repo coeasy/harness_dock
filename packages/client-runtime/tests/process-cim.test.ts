@@ -35,7 +35,7 @@ describe('collectProcessTreeViaCim', () => {
   })
 })
 
-describe('collectProcessTree wmic fallback', () => {
+describe('collectProcessTree Windows wmic fallback', () => {
   it('falls back to the CIM enumeration when wmic throws', async () => {
     let powershellInvoked = false
     const fakeExec = (async (cmd: string) => {
@@ -43,7 +43,7 @@ describe('collectProcessTree wmic fallback', () => {
       powershellInvoked = true
       return { stdout: '42\n7\n99\n' }
     }) as never
-    const tree = await collectProcessTree(100, { exec: fakeExec })
+    const tree = await collectProcessTree(100, { exec: fakeExec, platform: 'win32' })
     expect(powershellInvoked).toBe(true)
     expect(tree.sort((a, b) => a - b)).toEqual([7, 42, 99])
   })
@@ -55,7 +55,11 @@ describe('collectProcessTree wmic fallback', () => {
       if (cmd === 'wmic') throw new Error('wmic unavailable')
       return { stdout: '' }
     }) as never
-    await collectProcessTree(100, { exec: fakeExec, commandTimeoutMs: 987 })
+    await collectProcessTree(100, {
+      exec: fakeExec,
+      commandTimeoutMs: 987,
+      platform: 'win32',
+    })
     expect(timeouts).toEqual([987, 987])
   })
 
@@ -63,7 +67,7 @@ describe('collectProcessTree wmic fallback', () => {
     const fakeExec = (async () => {
       throw new Error('all enumeration failed')
     }) as never
-    const tree = await collectProcessTree(100, { exec: fakeExec })
+    const tree = await collectProcessTree(100, { exec: fakeExec, platform: 'win32' })
     expect(tree).toEqual([])
   })
 })
