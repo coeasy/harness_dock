@@ -4,13 +4,12 @@
 //! presents the subset required by service/status readers.
 
 use crate::read_model::HostReadModel;
-use crate::runtime_actor::{RuntimeLease, RuntimePhase};
+use crate::runtime_actor::RuntimePhase;
 use crate::AppState;
 
 pub(crate) struct ReadOnlySnapshot {
     pub(crate) runtime_phase: RuntimePhase,
     pub(crate) runtime_generation: Option<u64>,
-    pub(crate) runtime_lease: Option<RuntimeLease>,
     pub(crate) harness_visible: bool,
     pub(crate) gateway_enabled: bool,
 }
@@ -21,7 +20,6 @@ impl ReadOnlySnapshot {
         Self {
             runtime_phase: model.runtime_phase,
             runtime_generation: model.runtime_generation,
-            runtime_lease: model.runtime_lease,
             harness_visible: model.harness_visible,
             gateway_enabled: model.gateway_phase == crate::gateway_host::GatewayPhase::Ready,
         }
@@ -38,7 +36,6 @@ mod tests {
         let snapshot = ReadOnlySnapshot::collect(&state);
         assert_eq!(snapshot.runtime_phase, RuntimePhase::Stopped);
         assert_eq!(snapshot.runtime_generation, None);
-        assert!(snapshot.runtime_lease.is_none());
         assert!(!snapshot.harness_visible);
         assert!(!snapshot.gateway_enabled);
     }
