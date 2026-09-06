@@ -1,15 +1,16 @@
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import {
+  SHELL_API_VERSION,
+  SHELL_COMMANDS,
+  SHELL_PLUGIN_ID,
+  SHELL_VERSION,
+} from './shell-contract.generated.ts'
 
-export const name = 'harness-shell'
+export const name = SHELL_PLUGIN_ID
 export const inject: readonly string[] = []
-export const version = '0.1.2' as const
-/**
- * Must match `SHELL_API_VERSION` in `packages/bootstrap/src/shell-contract.ts`
- * and the `apiVersion` published by the desktop bridge in `harness_shell.rs`.
- * `scripts/check-shell-package.mjs` asserts all three stay in lockstep.
- */
-export const apiVersion = 2 as const
+export const version = SHELL_VERSION
+export const apiVersion = SHELL_API_VERSION
 
 export interface HarnessShellService {
   pluginId: typeof name
@@ -29,19 +30,7 @@ export const service: HarnessShellService = {
   version,
   apiVersion,
   webEntry: fileURLToPath(new URL('../web/shell.js', import.meta.url)),
-  // Must stay identical to SHELL_COMMANDS: this is the web-reachable set, so
-  // anything `capability_broker.rs` denies to the HarnessWeb subject is absent.
-  capabilities: [
-    'window.minimize',
-    'window.toggleMaximize',
-    'window.state',
-    'window.close',
-    'web.reload',
-    'web.restart',
-    'runtime.safe-mode',
-    'gateway.manage',
-    'diagnostics.open',
-  ],
+  capabilities: SHELL_COMMANDS,
 }
 
 /**
