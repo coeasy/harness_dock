@@ -10,6 +10,7 @@
   "packageManager": "pnpm@10.12.1",
   "scripts": {
     "test": "vitest run",
+    "test:ci": "vitest run --testTimeout=20000 --hookTimeout=20000",
     "test:watch": "vitest",
     "check:versions": "node scripts/check-tauri-only.mjs && node scripts/check-tauri-source-layout.mjs && node scripts/check-versions.mjs && node scripts/generate-host-protocol.mjs --check && node scripts/generate-shell-contract.mjs --check && node scripts/generate-runtime-ready-contract.mjs --check && node scripts/check-mobile-contract.mjs",
     "check:tauri-only": "node scripts/check-tauri-only.mjs",
