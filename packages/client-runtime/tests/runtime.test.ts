@@ -16,15 +16,27 @@ afterEach(async () => {
 })
 
 async function fakeUrlScript(dir: string): Promise<string> {
-  const fake = path.join(dir, 'fake-dsh.mjs')
+  const fake = path.join(dir, `fake-dsh-${Math.random().toString(16).slice(2)}.mjs`)
   await writeFile(
     fake,
     `
+import { writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 const server = createServer((_req, res) => { res.end('ok') })
 server.listen(0, '127.0.0.1', () => {
   const addr = server.address()
-  process.stdout.write('dsh web: http://127.0.0.1:' + addr.port + '\\n')
+  const url = 'http://127.0.0.1:' + addr.port + '/'
+  process.stdout.write('dsh web: ' + url + '\\n')
+  writeFileSync(process.env.DSH_EMBEDDED_READY_FILE, JSON.stringify({
+    url,
+    host: '127.0.0.1',
+    port: addr.port,
+    pid: process.pid,
+    dshVersion: process.env.DSH_EMBEDDED_VERSION,
+    generation: Number(process.env.HARNESSDOCK_RUNTIME_GENERATION),
+    nonce: process.env.HARNESSDOCK_RUNTIME_NONCE,
+    imageIdentity: process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY,
+  }) + '\\n')
 })
 setInterval(() => {}, 1 << 30)
 `,
@@ -50,30 +62,18 @@ async function fixtureBundledRoot(dir: string, dshVersion: string): Promise<stri
 
 describe('DshRuntime', () => {
   it(
-    'waits for the stdout URL from a fake dsh process',
+    'waits for a generation-bound ready file from a fake dsh process',
     async () => {
       const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-rt-'))
       temps.push(dir)
-      const fake = path.join(dir, 'fake-dsh.mjs')
-      await writeFile(
-        fake,
-        `
-import { createServer } from 'node:http'
-const server = createServer((_req, res) => { res.end('ok') })
-server.listen(0, '127.0.0.1', () => {
-  const addr = server.address()
-  process.stdout.write('dsh web: http://127.0.0.1:' + addr.port + '\\n')
-})
-setInterval(() => {}, 1 << 30)
-`,
-        'utf8',
-      )
+      const fake = await fakeUrlScript(dir)
 
       const runtime = new DshRuntime({
         origin: { dshVersion: '0.1.1-rc.2' },
         pluginPath: path.join(dir, 'missing-plugin.js'),
         cacheDir: dir,
         readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 50,
         env: { DSH_RUNTIME: 'local', DSH_BIN: process.execPath },
         spawnImpl: (command, _args, options) =>
           spawn(command, [fake], { ...options, stdio: ['ignore', 'pipe', 'pipe'] }),
@@ -83,11 +83,49 @@ setInterval(() => {}, 1 << 30)
         const ready = await runtime.start()
         expect(ready.host).toBe('127.0.0.1')
         expect(ready.port).toBeGreaterThan(0)
+        expect(ready.generation).toBeGreaterThan(0)
+        expect(ready.nonce.length).toBeGreaterThanOrEqual(32)
+        expect(ready.imageIdentity).toMatch(/^sha256:/)
         const response = await fetch(ready.url)
         expect(await response.text()).toBe('ok')
       } finally {
         await runtime.stop()
       }
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'never promotes a stdout URL when the bound ready file was not published',
+    async () => {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-rt-unbound-'))
+      temps.push(dir)
+      const fake = path.join(dir, 'stdout-only.mjs')
+      await writeFile(
+        fake,
+        `
+import { createServer } from 'node:http'
+const server = createServer((_req, res) => { res.end('ok') })
+server.listen(0, '127.0.0.1', () => {
+  const addr = server.address()
+  process.stdout.write('dsh web: http://127.0.0.1:' + addr.port + '/\\n')
+  setTimeout(() => process.exit(23), 50)
+})
+`,
+        'utf8',
+      )
+      const runtime = new DshRuntime({
+        origin: { dshVersion: '0.1.1-rc.2' },
+        pluginPath: path.join(dir, 'missing-plugin.js'),
+        cacheDir: dir,
+        readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 25,
+        env: { DSH_RUNTIME: 'local', DSH_BIN: process.execPath },
+        spawnImpl: (command, _args, options) =>
+          spawn(command, [fake], { ...options, stdio: ['ignore', 'pipe', 'pipe'] }),
+      })
+      await expect(runtime.start()).rejects.toThrow('dsh exited before ready (code 23)')
+      await runtime.stop()
     },
     TEST_TIMEOUT_MS,
   )
@@ -206,7 +244,7 @@ setInterval(() => {}, 1 << 30)
   )
 
   it(
-    'rejects a transient web server that crashes during the stability window',
+    'rejects a transient ready file when the server crashes during the stability window',
     async () => {
       const dir = await mkdtemp(path.join(os.tmpdir(), 'dsh-rt-'))
       temps.push(dir)
@@ -214,11 +252,23 @@ setInterval(() => {}, 1 << 30)
       await writeFile(
         fake,
         `
+import { writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 const server = createServer((_req, res) => { res.end('<html>temporary</html>') })
 server.listen(0, '127.0.0.1', () => {
   const addr = server.address()
-  process.stdout.write('dsh web: http://127.0.0.1:' + addr.port + '\\n')
+  const url = 'http://127.0.0.1:' + addr.port + '/'
+  process.stdout.write('dsh web: ' + url + '\\n')
+  writeFileSync(process.env.DSH_EMBEDDED_READY_FILE, JSON.stringify({
+    url,
+    host: '127.0.0.1',
+    port: addr.port,
+    pid: process.pid,
+    dshVersion: process.env.DSH_EMBEDDED_VERSION,
+    generation: Number(process.env.HARNESSDOCK_RUNTIME_GENERATION),
+    nonce: process.env.HARNESSDOCK_RUNTIME_NONCE,
+    imageIdentity: process.env.HARNESSDOCK_RUNTIME_IMAGE_IDENTITY,
+  }) + '\\n')
   setTimeout(() => process.exit(19), 100)
 })
 `,
@@ -358,6 +408,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         cacheDir: dir,
         bundledRoot,
         readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 50,
         env: { DSH_RUNTIME: 'bundled', DSH_BUNDLED_FETCH: '1', HARNESSDOCK_USE_SYSTEM_NODE: '0' },
         downloadImpl: async (input) => {
           expect(input.origin.dshVersion).toBe('0.1.1')
@@ -398,6 +449,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         cacheDir: dir,
         bundledRoot,
         readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 50,
         env: { DSH_RUNTIME: 'bundled', DSH_BUNDLED_FETCH: '1', HARNESSDOCK_USE_SYSTEM_NODE: '0' },
         downloadImpl: async () => {
           throw new Error('offline')
@@ -436,6 +488,7 @@ describe('DshRuntime bundled follow-pin (Phase B)', () => {
         cacheDir: dir,
         bundledRoot,
         readyTimeoutMs: READY_TIMEOUT_MS,
+        readyStabilityMs: 50,
         env: { DSH_RUNTIME: 'bundled' },
         downloadImpl: async () => {
           downloadCalled = true
