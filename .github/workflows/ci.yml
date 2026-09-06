@@ -89,18 +89,13 @@ jobs:
           test "$tauri_version" = "$root_version"
           test "$cargo_version" = "$root_version"
           test -s apps/tauri/src-tauri/Cargo.lock
-          # runtime / gateway_host / harness_window are directory modules since the
-          # R3-R5 split, so assert on the module roots rather than single files.
           test -s apps/tauri/src-tauri/src/runtime/mod.rs
           test -s apps/tauri/src-tauri/src/gateway_host/mod.rs
           test -s apps/tauri/src-tauri/src/harness_window/mod.rs
           test -s apps/tauri/src-tauri/src/util.rs
           test -s apps/tauri/src-tauri/src/error.rs
 
-  # The portable-Node bootstrap has historically been validated only with
-  # `bash -n` / a PowerShell parse, never actually downloaded anything. Run it
-  # for real on POSIX, once per mirror primary, so a nodejs.org manifest change
-  # cannot fail only on a bare dev machine.
+  # Exercise the real portable Node download on POSIX, once per primary mirror.
   node-bootstrap:
     if: github.event_name != 'schedule'
     strategy:
@@ -133,17 +128,55 @@ jobs:
               export NODE_DOWNLOAD_BASES="https://nodejs.org/dist/v${node_version} https://npmmirror.com/mirrors/node/v${node_version}"
               ;;
           esac
+          rm -rf .local-tools .local-cache/node
           bash -n scripts/bootstrap-node.sh
           bash scripts/bootstrap-node.sh
           test -s .local-tools/node-home.txt
           node_home="$(cat .local-tools/node-home.txt)"
           test -x "$node_home/bin/node"
-          test -d ".local-cache/node"
+          test -d .local-cache/node
           portable_version="$($node_home/bin/node --version | sed 's/^v//')"
           test "$portable_version" = "$node_version"
           "$node_home/bin/node" scripts/node-version-check.cjs
-          # A second invocation must be a no-op on the already-installed tree.
           bash scripts/bootstrap-node.sh
+
+  # Windows previously parsed bootstrap-node.ps1 but never executed its download,
+  # checksum, extraction, and node-home contract. Exercise both mirrors for real.
+  node-bootstrap-windows:
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        mirror: [nodejs, npmmirror]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bootstrap portable Node and verify the published Windows artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeVersion = [string](Get-Content scripts/versions.json -Raw | ConvertFrom-Json).node
+          if (-not $nodeVersion) { throw 'scripts/versions.json has no node version' }
+          if ('${{ matrix.mirror }}' -eq 'npmmirror') {
+            $env:NODE_DOWNLOAD_BASES = "https://npmmirror.com/mirrors/node/v$nodeVersion https://nodejs.org/dist/v$nodeVersion"
+          }
+          else {
+            $env:NODE_DOWNLOAD_BASES = "https://nodejs.org/dist/v$nodeVersion https://npmmirror.com/mirrors/node/v$nodeVersion"
+          }
+          Remove-Item .local-tools -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item .local-cache/node -Recurse -Force -ErrorAction SilentlyContinue
+          ./scripts/bootstrap-node.ps1
+          if (-not (Test-Path .local-tools/node-home.txt)) { throw 'node-home.txt missing' }
+          $nodeHome = (Get-Content .local-tools/node-home.txt -Raw).Trim()
+          $nodeExe = Join-Path $nodeHome 'node.exe'
+          if (-not (Test-Path $nodeExe)) { throw "portable node missing: $nodeExe" }
+          if (-not (Test-Path .local-cache/node)) { throw 'portable Node cache missing' }
+          $portableVersion = (& $nodeExe --version).TrimStart('v')
+          if ($portableVersion -ne $nodeVersion) { throw "portable Node $portableVersion != pinned $nodeVersion" }
+          & $nodeExe scripts/node-version-check.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'portable Node failed version gate' }
+          ./scripts/bootstrap-node.ps1
 
   sync:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
