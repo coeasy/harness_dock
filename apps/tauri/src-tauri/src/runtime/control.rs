@@ -5,15 +5,10 @@
 use super::*;
 
 pub(crate) fn current_lease(state: &AppState) -> Option<RuntimeLease> {
-    // Poisoning only means a previous holder panicked; the lease it protects is
-    // still structurally valid, so read it back instead of reporting a failure
-    // for a transient that the caller cannot act on.
     state.runtime_actor.lock().recover("RuntimeActor").lease()
 }
 
 pub(crate) fn live_lease(state: &AppState) -> Option<RuntimeLease> {
-    // `live_lease` is an explicit lifecycle path: callers want a lease that is
-    // still backed by a live process. Reaping a dead process here is intended.
     let _ = status_snapshot(state);
     current_lease(state)
 }
@@ -74,11 +69,6 @@ async fn start_impl(
         return Err("HarnessDock 正在退出，已拒绝新的 Runtime 启动。".into());
     }
 
-    // Starting the Runtime must not reap a process merely because a status
-    // check is being performed: `start_impl` is an explicit lifecycle action
-    // but the pre-check below only describes current state. Use the read-only
-    // snapshot so a healthy running Runtime (degraded via safe-mode, for
-    // example) is reported as-is instead of being torn down by inspection.
     let existing = status_snapshot_readonly(&state);
     if existing.app_url.is_some() {
         return Ok(existing);
@@ -109,6 +99,7 @@ async fn start_impl(
                 return Err(error);
             }
         };
+        startup_trace::mark(StartupPhase::RuntimeVerified);
         if let Err(error) = actor.mark_starting(generation.id) {
             actor.mark_failed(generation.id, error.clone());
             return Err(error);
@@ -145,26 +136,20 @@ async fn start_impl(
             return Err(mark_start_failed(&state, generation.id, error));
         }
     }
-    let starting_processes = Arc::clone(&state.starting_processes);
-    let quitting = Arc::clone(&state.quitting);
-    let force_safe_mode = mode == RuntimeMode::Safe;
-    let spawn_generation = generation.clone();
-    let spawn_token = token.clone();
-    let process = match tauri::async_runtime::spawn_blocking(move || {
-        start_blocking(
-            image,
-            plugin_path,
-            compatibility_path,
-            shell_plugin_path,
-            quarantine_state_path,
-            spawn_generation,
-            spawn_token,
-            force_safe_mode,
-            starting_processes,
-            quitting,
-        )
-    })
-    .await
+
+    let start_request = RuntimeStartRequest {
+        image,
+        plugin_path,
+        compatibility_path,
+        shell_plugin_path,
+        quarantine_state_path,
+        generation: generation.clone(),
+        token: token.clone(),
+        force_safe_mode: mode == RuntimeMode::Safe,
+        starting_processes: Arc::clone(&state.starting_processes),
+        quitting: Arc::clone(&state.quitting),
+    };
+    let process = match tauri::async_runtime::spawn_blocking(move || start_blocking(start_request)).await
     {
         Ok(process) => process,
         Err(error) => {
@@ -221,11 +206,7 @@ async fn start_impl(
         }
     }
     startup_trace::mark(StartupPhase::RuntimeReady);
-    // Publication is already the authoritative readiness transition. Do not
-    // immediately re-enter status_snapshot(), because that path owns explicit
-    // liveness reconciliation. Return a read-only snapshot of the generation
-    // that was just published so the startup coordinator cannot lose its lease
-    // between RuntimeReady and WebviewRequested.
+
     let actor = state.runtime_actor.lock().recover("RuntimeActor");
     let lease = actor.lease();
     if let Some(process) = actor.process() {
@@ -268,9 +249,6 @@ pub fn stop_impl(state: &AppState) -> Result<RuntimeStatus, String> {
             .map_err(|_| lock_err("RuntimeActor"))?;
         actor.settle_stopped();
     }
-    // Gateway start publishes outside the RuntimeActor lock. A stop can
-    // therefore pass its first Gateway sweep while a late start is still
-    // publishing; sweep again after Runtime has settled to close that race.
     crate::gateway_host::stop_managed(&state.gateway);
     Ok(phase_status(RuntimePhase::Stopped, None))
 }
