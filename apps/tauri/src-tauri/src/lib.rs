@@ -25,6 +25,8 @@ mod host_protocol;
 mod lease;
 #[cfg(not(mobile))]
 mod lifecycle;
+#[cfg(mobile)]
+mod mobile;
 mod platform;
 #[cfg(not(mobile))]
 mod plugin_quarantine;
@@ -38,6 +40,8 @@ mod runtime;
 mod runtime_actor;
 #[cfg(not(mobile))]
 mod service;
+#[cfg(not(mobile))]
+mod shell_contract_generated;
 #[cfg(not(mobile))]
 mod single_instance;
 #[cfg(not(mobile))]
@@ -85,6 +89,7 @@ pub fn run() {
 #[tauri::mobile_entry_point]
 pub fn run() {
     let app = tauri::Builder::default()
+        .setup(mobile::setup)
         .invoke_handler(tauri::generate_handler![
             platform::platform_info,
             gateway::gateway_health,
@@ -93,5 +98,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building HarnessDock mobile");
 
-    app.run(|_, _| {});
+    app.run(mobile::handle_run_event);
 }
