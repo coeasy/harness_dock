@@ -1,10 +1,8 @@
 //! Tauri commands that expose the Gateway to the native UI surfaces.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 #[tauri::command]
 pub fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStatus, String> {
@@ -114,7 +112,11 @@ pub fn gateway_host_start(
             stale.stop();
             return Err("陈旧 Gateway generation 已被丢弃。".into());
         }
-        actor.server.as_ref().expect("published gateway").status()
+        actor
+            .server
+            .as_ref()
+            .ok_or_else(|| "Gateway publish succeeded without a live server".to_string())?
+            .status()
     };
     // A Runtime stop can race between the pre-spawn lease check and publish.
     // Re-check after publication and tear down a server that was published
@@ -143,7 +145,8 @@ pub fn gateway_host_create_pairing(
         return Err("Gateway RuntimeLease 已失效，请重新启动 Gateway。".into());
     }
     let code = pairing_code()?;
-    let expires_at = SystemTime::now() + Duration::from_secs(5 * 60);
+    let expires_at = SystemTime::now()
+        + Duration::from_secs(crate::constants::GATEWAY_PAIRING_TTL_SECS);
     let mut registry = server
         .shared
         .registry
