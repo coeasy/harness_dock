@@ -6,6 +6,7 @@ use super::*;
 
 pub const MAX_GATEWAY_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_GATEWAY_CONNECTIONS: usize = 64;
+pub const MAX_GATEWAY_UPSTREAM_RESPONSE_HEAD_BYTES: usize = 64 * 1024;
 pub const GATEWAY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(8);
 pub const GATEWAY_UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -17,6 +18,13 @@ pub enum GatewayPhase {
     Ready,
     Stopping,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionBootstrapPhase {
+    Pending,
+    InFlight,
+    Complete,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -96,7 +104,7 @@ pub struct SessionState {
     pub paired_at: SystemTime,
     pub last_seen_at: SystemTime,
     pub expires_at: SystemTime,
-    pub bootstrapped: bool,
+    pub bootstrap_phase: SessionBootstrapPhase,
 }
 
 #[derive(Default)]
