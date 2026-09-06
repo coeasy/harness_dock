@@ -32,6 +32,11 @@ fi
 
 node scripts/node-version-check.cjs
 node scripts/bootstrap.mjs
+if [[ -s .local-tools/pnpm-home.txt ]]; then
+  pnpm_home="$(cat .local-tools/pnpm-home.txt)"
+  [[ -x "$pnpm_home/pnpm" ]] || { echo "[build] ERROR: repo-local pnpm path is invalid: $pnpm_home" >&2; exit 1; }
+  export PATH="$pnpm_home:$PATH"
+fi
 node scripts/build.mjs --skip-install "$@"
 
 echo
