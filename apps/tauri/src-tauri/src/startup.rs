@@ -1,10 +1,9 @@
 //! Native desktop startup coordinator.
 //!
-//! Normal launch has no hidden renderer dependency: resolve the packaged Runtime ->
-//! spawn/probe actor generation -> request Harness surface. The packaged Runtime
-//! is already part of the application image, so normal startup does not expose a
-//! separate Node/Runtime verification screen. Recovery/Gateway control surfaces
-//! are created only when explicitly needed.
+//! The desktop creates the real Harness window immediately with a local,
+//! non-privileged bootstrap document. Runtime preparation runs asynchronously;
+//! when the sealed Runtime publishes its lease the same WebView navigates to
+//! Harness Web. Recovery/Gateway control surfaces remain on-demand only.
 
 use crate::{
     constants::{
@@ -28,18 +27,6 @@ fn runtime_listener_reachable(url: &url::Url) -> bool {
     std::net::TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
 }
 
-/// WebView2/WebKit may report the authenticated `?token=` load event after the
-/// browser has already followed dsh's 303 to the clean `/` URL. The normal
-/// `on_page_load` callback remains authoritative, but startup must not leave a
-/// healthy Harness document hidden forever when that event/current-URL pair is
-/// reordered by the platform WebView.
-///
-/// After the Runtime has already passed the browser-faithful readiness probe,
-/// observe the actual WebView URL for a short stability window. The fallback is
-/// deliberately stricter than a URL-only check: Chromium/WebView2 can retain the
-/// requested clean loopback URL while rendering an internal network-error page.
-/// The current Runtime listener therefore has to remain reachable for every
-/// stability poll before this path may publish the primary surface.
 async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
     let mut stable_clean_polls = 0_usize;
     for _ in 0..STARTUP_PRIMARY_RETRY_ATTEMPTS {
@@ -62,11 +49,6 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
             tokio::time::sleep(Duration::from_millis(STARTUP_RETRY_DELAY_MS)).await;
             continue;
         };
-        // Runtime replacement and WebView redirect callbacks can briefly cross.
-        // A missing lease in one fallback poll is not proof that startup failed;
-        // wait for the current generation instead of turning the transient into
-        // a recovery window. The generation-aware watchdog remains the bounded
-        // failure path if the lease never returns.
         let Some(lease) = crate::runtime::current_lease(&app.state::<AppState>()) else {
             stable_clean_polls = 0;
             tokio::time::sleep(Duration::from_millis(STARTUP_RETRY_DELAY_MS)).await;
@@ -102,9 +84,6 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
                 .unwrap_or(false);
 
             if claimed {
-                // Fail open to native window controls. If the normal page-load
-                // callback subsequently installs Harness Shell successfully it
-                // will switch decorations off again.
                 let _ = window.set_decorations(true);
                 window
                     .show()
@@ -126,11 +105,19 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn spawn(app: AppHandle) {
+    // First paint is the actual Harness window, not a settings/control window
+    // and not the separate legacy splash. This happens before any Runtime
+    // filesystem work or process spawn. The local bootstrap document has no
+    // Host bridge and is replaced in-place as soon as Runtime is ready.
+    harness_window::hide_splash(&app);
+    startup_trace::mark(StartupPhase::WebviewRequested);
+    if let Err(error) = harness_window::show_harness_bootstrap(&app) {
+        startup_trace::mark(StartupPhase::Recovery);
+        harness_window::show_startup_recovery(&app, &error);
+        return;
+    }
+
     tauri::async_runtime::spawn(async move {
-        // The packaged application owns a sealed Runtime image. Keep the
-        // bootstrap surface hidden and go straight to the Harness Web surface;
-        // failures still open the explicit recovery control surface.
-        harness_window::hide_splash(&app);
         let status = match reconciler::ensure_runtime_for_boot(app.clone()).await {
             Ok(status) => status,
             Err(error) => {
@@ -147,7 +134,6 @@ pub(crate) fn spawn(app: AppHandle) {
             );
             return;
         };
-        startup_trace::mark(StartupPhase::WebviewRequested);
         if let Err(error) = harness_window::open_for_startup(app.clone(), url).await {
             startup_trace::mark(StartupPhase::Recovery);
             harness_window::show_startup_recovery(&app, &error);
