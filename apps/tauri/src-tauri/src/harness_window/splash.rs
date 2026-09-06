@@ -6,8 +6,11 @@ use super::*;
 
 #[cfg(not(mobile))]
 pub(crate) fn hide_splash(app: &AppHandle) {
+    // The progress surface is created only for explicit restart/safe-mode
+    // operations. Destroy it after use so normal steady state has no hidden
+    // renderer consuming memory or participating in shutdown.
     if let Some(window) = app.get_webview_window("splash") {
-        let _ = window.hide();
+        let _ = window.close();
     }
 }
 
@@ -27,9 +30,32 @@ pub fn set_splash_status(app: &AppHandle, status: &str) {
 
 #[cfg(not(mobile))]
 pub(crate) fn show_splash(app: &AppHandle, status: &str) {
-    set_splash_status(app, status);
     if let Some(window) = app.get_webview_window("splash") {
+        set_splash_status(app, status);
         let _ = window.show();
+        return;
+    }
+
+    let status = status.to_string();
+    let result = WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("splash.html".into()))
+        .title("HarnessDock")
+        .inner_size(420.0, 300.0)
+        .resizable(false)
+        .center()
+        .decorations(false)
+        .visible(false)
+        .on_page_load(move |window, payload| {
+            if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                return;
+            }
+            if let Ok(value) = serde_json::to_string(&status) {
+                let _ = window.eval(format!("window.__harnessDockSetStatus({value})"));
+            }
+            let _ = window.show();
+        })
+        .build();
+    if let Err(error) = result {
+        eprintln!("Unable to create on-demand HarnessDock progress surface: {error}");
     }
 }
 
@@ -106,11 +132,6 @@ pub(crate) fn show_startup_recovery(app: &AppHandle, error: &str) {
         false
     };
 
-    // During normal startup the `harness` window may already be visible with
-    // the local first-paint document. Recovery is the only replacement UI when
-    // Runtime boot/navigation fails, so hide that bootstrap window before the
-    // control surface is shown. A healthy already-visible Harness document is
-    // never hidden by an unrelated diagnostics error.
     if !primary_visible {
         if let Some(window) = app.get_webview_window("harness") {
             let _ = window.hide();
