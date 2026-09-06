@@ -7,7 +7,7 @@
 
 use crate::{
     gateway_host::GatewayPhase,
-    runtime_actor::{RuntimeLease, RuntimePhase},
+    runtime_actor::RuntimePhase,
     surface_actor::SurfaceOperation,
     update_actor::UpdatePhase,
     AppState,
@@ -17,7 +17,6 @@ use crate::{
 pub(crate) struct HostReadModel {
     pub(crate) runtime_phase: RuntimePhase,
     pub(crate) runtime_generation: Option<u64>,
-    pub(crate) runtime_lease: Option<RuntimeLease>,
     pub(crate) surface_operation: SurfaceOperation,
     pub(crate) harness_visible: bool,
     pub(crate) gateway_phase: GatewayPhase,
@@ -27,11 +26,15 @@ pub(crate) struct HostReadModel {
 impl HostReadModel {
     pub(crate) fn collect(state: &AppState) -> Self {
         // Canonical read order: runtime -> surface -> gateway -> update.
-        let (runtime_phase, runtime_generation, runtime_lease) = state
+        // Lease credentials deliberately stay out of this general read model;
+        // callers that need the published lease use `runtime::current_lease`
+        // explicitly so a lifecycle snapshot cannot accidentally become a
+        // second lease source of truth.
+        let (runtime_phase, runtime_generation) = state
             .runtime_actor
             .lock()
-            .map(|actor| (actor.phase(), actor.generation_id(), actor.lease()))
-            .unwrap_or((RuntimePhase::Failed, None, None));
+            .map(|actor| (actor.phase(), actor.generation_id()))
+            .unwrap_or((RuntimePhase::Failed, None));
 
         let (surface_operation, harness_visible) = state
             .surface_actor
@@ -54,7 +57,6 @@ impl HostReadModel {
         Self {
             runtime_phase,
             runtime_generation,
-            runtime_lease,
             surface_operation,
             harness_visible,
             gateway_phase,
@@ -72,7 +74,6 @@ mod tests {
         let model = HostReadModel::collect(&AppState::default());
         assert_eq!(model.runtime_phase, RuntimePhase::Stopped);
         assert_eq!(model.runtime_generation, None);
-        assert!(model.runtime_lease.is_none());
         assert_eq!(model.surface_operation, SurfaceOperation::Idle);
         assert!(!model.harness_visible);
         assert_eq!(model.gateway_phase, GatewayPhase::Stopped);
