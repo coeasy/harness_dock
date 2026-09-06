@@ -1,10 +1,13 @@
 //! Process spawning, readiness probing and config dumps for a Runtime image.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
+use crate::runtime_ready_contract_generated::{
+    RUNTIME_READY_ENV_DSH_VERSION, RUNTIME_READY_ENV_GENERATION,
+    RUNTIME_READY_ENV_IMAGE_IDENTITY, RUNTIME_READY_ENV_NONCE,
+    RUNTIME_READY_ENV_READY_FILE, RUNTIME_READY_LOOPBACK_HOST,
+};
 
 pub struct WorkDirGuard {
     pub path: PathBuf,
@@ -61,17 +64,23 @@ pub fn validated_ready(
             "Runtime ready.json generation/nonce/imageIdentity 未通过当前启动代际校验。".into(),
         );
     }
-    if ready.host != "127.0.0.1" || ready.port == 0 || ready.pid != expected_pid || ready.pid == 0 {
+    if ready.host != RUNTIME_READY_LOOPBACK_HOST
+        || ready.port == 0
+        || ready.pid != expected_pid
+        || ready.pid == 0
+    {
         return Err("Runtime ready.json host/port/PID 未通过受管进程校验。".into());
     }
     let app_url = Url::parse(&ready.url).map_err(|_| "Runtime 返回了无效 Web URL。".to_string())?;
     if app_url.scheme() != "http"
-        || app_url.host_str() != Some("127.0.0.1")
+        || app_url.host_str() != Some(RUNTIME_READY_LOOPBACK_HOST)
         || app_url.port() != Some(ready.port)
         || !app_url.username().is_empty()
         || app_url.password().is_some()
     {
-        return Err("Runtime Web URL 必须精确匹配受管 http://127.0.0.1:<port> origin。".into());
+        return Err(format!(
+            "Runtime Web URL 必须精确匹配受管 http://{RUNTIME_READY_LOOPBACK_HOST}:<port> origin。"
+        ));
     }
     Ok(ready)
 }
@@ -159,16 +168,16 @@ pub fn spawn_runtime(
         command.arg("--patch").arg(platform::node_cli_path(patch));
     }
     command
-        .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
+        .args(["--host", RUNTIME_READY_LOOPBACK_HOST, "--port", "0", "--no-open"])
         .env(
-            "DSH_EMBEDDED_READY_FILE",
+            RUNTIME_READY_ENV_READY_FILE,
             platform::node_cli_path(ready_file),
         )
-        .env("DSH_EMBEDDED_VERSION", &image.origin.dsh_version)
-        .env("HARNESSDOCK_RUNTIME_GENERATION", generation.id.to_string())
-        .env("HARNESSDOCK_RUNTIME_NONCE", &generation.nonce)
+        .env(RUNTIME_READY_ENV_DSH_VERSION, &image.origin.dsh_version)
+        .env(RUNTIME_READY_ENV_GENERATION, generation.id.to_string())
+        .env(RUNTIME_READY_ENV_NONCE, &generation.nonce)
         .env(
-            "HARNESSDOCK_RUNTIME_IMAGE_IDENTITY",
+            RUNTIME_READY_ENV_IMAGE_IDENTITY,
             &generation.image_identity,
         )
         .stdin(Stdio::null())
