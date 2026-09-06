@@ -36,6 +36,24 @@ describe('local one-click build hardening', () => {
     expect(windowsBootstrap).toContain("-split '\\s+'")
   })
 
+  it('enforces packageManager pnpm and the exact local Tauri CLI', () => {
+    const bootstrap = read('scripts/bootstrap.mjs')
+    const build = read('scripts/build.mjs')
+    const pkg = JSON.parse(read('package.json')) as { packageManager: string }
+    const requiredPnpm = pkg.packageManager.replace(/^pnpm@/, '').split('+')[0]
+
+    expect(bootstrap).toContain('const requiredPnpm = pnpmMatch[1]')
+    expect(bootstrap).toContain('pnpm !== requiredPnpm')
+    expect(bootstrap).toContain('`pnpm@${requiredPnpm}`')
+    expect(build).toContain('const requiredPnpmVersion = pnpmMatch[1]')
+    expect(build).toContain('activePnpmVersion !== requiredPnpmVersion')
+    expect(build).toContain("const tauriCliVersion = '2.11.4'")
+    expect(build).toContain('activeTauriCliVersion')
+    expect(build).toContain('globalVersion === tauriCliVersion')
+    expect(build).toContain('cachedVersion === tauriCliVersion')
+    expect(requiredPnpm).toBe('10.12.1')
+  })
+
   it('runs real Windows mirror downloads and full clean-state client packaging in CI', () => {
     const workflow = read('.github/workflows/local-one-click-build.yml')
 
