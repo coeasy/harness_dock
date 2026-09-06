@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 node_ok=false
-if command -v node >/dev/null 2>&1 && node scripts/node-version-check.cjs >/dev/null 2>&1; then
+if [[ "${HARNESSDOCK_FORCE_PORTABLE_NODE:-0}" != "1" ]] && command -v node >/dev/null 2>&1 && node scripts/node-version-check.cjs >/dev/null 2>&1; then
   node_ok=true
 fi
 
