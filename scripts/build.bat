@@ -16,6 +16,7 @@ if not exist "package.json" (
 echo [build] HarnessDock local Windows build
 
 echo [build] Checking build-time Node...
+if /I "%HARNESSDOCK_FORCE_PORTABLE_NODE%"=="1" goto :portable_node
 where node.exe >nul 2>nul
 if errorlevel 1 goto :portable_node
 node scripts\node-version-check.cjs >nul 2>nul
@@ -23,7 +24,7 @@ if errorlevel 1 goto :portable_node
 goto :node_ready
 
 :portable_node
-echo [build] Supported Node is not available on PATH; preparing verified portable Node...
+echo [build] Preparing verified portable Node...
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bootstrap-node.ps1"
 if errorlevel 1 goto :fail
 if not exist ".local-tools\node-home.txt" (
@@ -41,12 +42,12 @@ set "PATH=%NODE_HOME%;%PATH%"
 node scripts\node-version-check.cjs
 if errorlevel 1 goto :fail
 
-rem bootstrap.mjs provisions pnpm 10 and installs workspace dependencies when needed.
+rem bootstrap.mjs provisions the exact packageManager pnpm and installs workspace dependencies when needed.
 node scripts\bootstrap.mjs
 if errorlevel 1 goto :fail
 
-rem build.mjs prepares the sealed Runtime, verifies real Harness Web readiness,
-rem installs an isolated tauri-cli when needed, checks Rust, and builds NSIS.
+rem build.mjs prepares the exact sealed Runtime, verifies real Harness Web readiness,
+rem pins tauri-cli, checks Rust, and builds NSIS.
 node scripts\build.mjs --skip-install %*
 if errorlevel 1 goto :fail
 
