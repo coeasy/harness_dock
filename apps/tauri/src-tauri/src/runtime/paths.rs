@@ -62,7 +62,6 @@ pub fn load_runtime_image(app: &AppHandle) -> Result<RuntimeImage, String> {
     .map_err(|error| format!("origin.json 无效: {error}"))?;
 
     Ok(RuntimeImage {
-        root,
         node,
         dsh,
         origin,
