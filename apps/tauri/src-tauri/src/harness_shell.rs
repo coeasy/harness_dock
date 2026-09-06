@@ -10,7 +10,7 @@ use crate::shell_contract_generated::{
 };
 use tauri::Manager;
 
-const SHELL_WEB_SCRIPT: &str =
+const SHELL_WEB_SCRIPT_TEMPLATE: &str =
     include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
 /// Web API compatibility layer, injected before every other page script.
@@ -157,17 +157,23 @@ const BRIDGE_SCRIPT_TEMPLATE: &str = r#"
 })();
 "#;
 
+fn json_string(value: &str, fallback: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| format!("\"{fallback}\""))
+}
+
 fn bridge_script() -> String {
-    let plugin_id = serde_json::to_string(SHELL_PLUGIN_ID)
-        .unwrap_or_else(|_| "\"harness-shell\"".to_string());
-    let version = serde_json::to_string(SHELL_VERSION)
-        .unwrap_or_else(|_| "\"0.1.2\"".to_string());
     BRIDGE_SCRIPT_TEMPLATE
         .replace("__DIRECT_WINDOW_MAP__", SHELL_DIRECT_WINDOW_MAP_JSON)
         .replace("__HOST_COMMAND_MAP__", SHELL_HOST_COMMAND_MAP_JSON)
         .replace("__SHELL_API_VERSION__", &SHELL_API_VERSION.to_string())
-        .replace("__SHELL_PLUGIN_ID__", &plugin_id)
-        .replace("__SHELL_VERSION__", &version)
+        .replace("__SHELL_PLUGIN_ID__", &json_string(SHELL_PLUGIN_ID, "harness-shell"))
+        .replace("__SHELL_VERSION__", &json_string(SHELL_VERSION, "0.1.2"))
+}
+
+fn shell_web_script() -> String {
+    SHELL_WEB_SCRIPT_TEMPLATE
+        .replace("__SHELL_API_VERSION__", &SHELL_API_VERSION.to_string())
+        .replace("__SHELL_PLUGIN_ID__", &json_string(SHELL_PLUGIN_ID, "harness-shell"))
 }
 
 /// The custom shell close button hides to tray only when a tray actually
@@ -190,7 +196,11 @@ pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
 /// `window.__TAURI__` bridge and dsh's client bundle both find the APIs they
 /// call, then the host bridge, then the shell UI.
 pub(crate) fn init_script() -> String {
-    format!("{POLYFILL_SCRIPT}\n{}\n{SHELL_WEB_SCRIPT}", bridge_script())
+    format!(
+        "{POLYFILL_SCRIPT}\n{}\n{}",
+        bridge_script(),
+        shell_web_script()
+    )
 }
 
 #[cfg(test)]
@@ -207,5 +217,13 @@ mod tests {
         assert!(!bridge.contains("__SHELL_"));
         assert!(!bridge.contains("__DIRECT_WINDOW_MAP__"));
         assert!(!bridge.contains("__HOST_COMMAND_MAP__"));
+    }
+
+    #[test]
+    fn web_shell_compatibility_gate_is_rendered_from_contract() {
+        let shell = shell_web_script();
+        assert!(shell.contains(&format!("apiVersion === {SHELL_API_VERSION}")));
+        assert!(shell.contains(SHELL_PLUGIN_ID));
+        assert!(!shell.contains("__SHELL_"));
     }
 }
