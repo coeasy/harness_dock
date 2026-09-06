@@ -56,7 +56,6 @@ mod tray;
 mod update;
 #[cfg(not(mobile))]
 mod update_actor;
-#[cfg(not(mobile))]
 mod util;
 
 #[cfg(not(mobile))]
