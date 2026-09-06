@@ -1,6 +1,11 @@
 name: pr85-rustfmt
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/pr85-rustfmt.yml'
+      - 'apps/tauri/src-tauri/**/*.rs'
   push:
     branches:
       - fix/complete-local-one-click-build
@@ -13,6 +18,7 @@ permissions:
 
 jobs:
   rustfmt:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 85
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
