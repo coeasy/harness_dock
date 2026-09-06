@@ -33,10 +33,6 @@ use std::{
 use tauri::{AppHandle, State};
 use url::Url;
 
-// Randomness, loopback checks and Runtime lease access now live in shared
-// modules (`crypto` / `util` / `lease`) so the Gateway no longer carries a
-// second copy of helpers that also exist in `runtime_actor` and
-// `harness_window`.
 use crate::crypto::{pairing_code, random_hex};
 use crate::error::lock_err;
 use crate::lease::{is_current_generation, require_live_lease};
@@ -150,7 +146,7 @@ mod tests {
                     paired_at: now,
                     last_seen_at: now,
                     expires_at: now + Duration::from_secs(600),
-                    bootstrapped: false,
+                    bootstrap_phase: SessionBootstrapPhase::Pending,
                 },
             );
             registry.connect_tickets.insert(
@@ -217,7 +213,138 @@ mod tests {
         assert_eq!(connected.peer_addr().unwrap().port(), port);
     }
 
+    #[test]
+    pub fn bootstrap_response_requires_success_and_cookie() {
+        let accepted = UpstreamResponseHead {
+            bytes: Vec::new(),
+            status: 303,
+            has_set_cookie: true,
+        };
+        let missing_cookie = UpstreamResponseHead {
+            bytes: Vec::new(),
+            status: 303,
+            has_set_cookie: false,
+        };
+        let failure = UpstreamResponseHead {
+            bytes: Vec::new(),
+            status: 500,
+            has_set_cookie: true,
+        };
+        assert!(bootstrap_response_accepted(&accepted));
+        assert!(!bootstrap_response_accepted(&missing_cookie));
+        assert!(!bootstrap_response_accepted(&failure));
+    }
+
+    #[test]
+    pub fn failed_bootstrap_reservation_rolls_back_to_pending() {
+        let shared = test_gateway_shared();
+        insert_test_session(&shared, "session-rollback");
+        let claim = claim_session_bootstrap(&shared, "session-rollback").unwrap();
+        let BootstrapClaim::Claimed(reservation) = claim else {
+            panic!("expected bootstrap reservation");
+        };
+        assert_eq!(
+            shared.registry.lock().unwrap().sessions["session-rollback"].bootstrap_phase,
+            SessionBootstrapPhase::InFlight
+        );
+        drop(reservation);
+        assert_eq!(
+            shared.registry.lock().unwrap().sessions["session-rollback"].bootstrap_phase,
+            SessionBootstrapPhase::Pending
+        );
+    }
+
+    #[test]
+    pub fn concurrent_bootstrap_waiter_never_claims_the_launch_token_twice() {
+        let shared = test_gateway_shared();
+        insert_test_session(&shared, "session-concurrent");
+        let first = claim_session_bootstrap(&shared, "session-concurrent").unwrap();
+        let BootstrapClaim::Claimed(mut reservation) = first else {
+            panic!("expected first bootstrap reservation");
+        };
+
+        let waiter_shared = Arc::clone(&shared);
+        let waiter = thread::spawn(move || {
+            claim_session_bootstrap(&waiter_shared, "session-concurrent").unwrap()
+        });
+        thread::sleep(Duration::from_millis(60));
+        reservation.commit().unwrap();
+        drop(reservation);
+
+        assert!(matches!(waiter.join().unwrap(), BootstrapClaim::Complete));
+        assert_eq!(
+            shared.registry.lock().unwrap().sessions["session-concurrent"].bootstrap_phase,
+            SessionBootstrapPhase::Complete
+        );
+    }
+
+    #[test]
+    pub fn upstream_disconnect_before_bootstrap_response_retries_launch_token() {
+        let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let upstream_port = upstream_listener.local_addr().unwrap().port();
+        let shared = test_gateway_shared_at(upstream_port);
+        insert_test_session(&shared, "session-retry");
+        let (target_tx, target_rx) = std::sync::mpsc::channel();
+
+        let upstream = thread::spawn(move || {
+            let (mut first, _) = upstream_listener.accept().unwrap();
+            let first_request = read_request(&mut first).unwrap();
+            target_tx.send(first_request.target).unwrap();
+            drop(first);
+
+            let (mut second, _) = upstream_listener.accept().unwrap();
+            let second_request = read_request(&mut second).unwrap();
+            target_tx.send(second_request.target).unwrap();
+            second
+                .write_all(
+                    b"HTTP/1.1 303 See Other\r\nLocation: /\r\nSet-Cookie: dsh_auth=test; Path=/; HttpOnly\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+
+        let (first_result, first_response) =
+            authenticated_gateway_exchange(&shared, "session-retry", "/", 31);
+        assert!(first_result.is_err());
+        assert!(first_response.is_empty());
+        assert_eq!(
+            shared.registry.lock().unwrap().sessions["session-retry"].bootstrap_phase,
+            SessionBootstrapPhase::Pending
+        );
+
+        let (second_result, second_response) =
+            authenticated_gateway_exchange(&shared, "session-retry", "/", 32);
+        assert!(second_result.is_ok());
+        assert!(second_response.starts_with("HTTP/1.1 303 See Other"));
+        assert_eq!(
+            shared.registry.lock().unwrap().sessions["session-retry"].bootstrap_phase,
+            SessionBootstrapPhase::Complete
+        );
+
+        upstream.join().unwrap();
+        assert_eq!(target_rx.recv().unwrap(), "/launch?token=test-launch");
+        assert_eq!(target_rx.recv().unwrap(), "/launch?token=test-launch");
+    }
+
+    fn insert_test_session(shared: &Arc<GatewayShared>, token: &str) {
+        let now = SystemTime::now();
+        shared.registry.lock().unwrap().sessions.insert(
+            token.into(),
+            SessionState {
+                id: format!("device-{token}"),
+                name: "test device".into(),
+                paired_at: now,
+                last_seen_at: now,
+                expires_at: now + Duration::from_secs(600),
+                bootstrap_phase: SessionBootstrapPhase::Pending,
+            },
+        );
+    }
+
     fn test_gateway_shared() -> Arc<GatewayShared> {
+        test_gateway_shared_at(43138)
+    }
+
+    fn test_gateway_shared_at(runtime_port: u16) -> Arc<GatewayShared> {
         Arc::new(GatewayShared {
             registry: Mutex::new(GatewayRegistry::default()),
             runtime_lease: RuntimeLease {
@@ -228,8 +355,10 @@ mod tests {
                     mode: RuntimeMode::Normal,
                 },
                 pid: 1,
-                origin: "http://127.0.0.1:43138".into(),
-                launch_url: "http://127.0.0.1:43138/launch".into(),
+                origin: format!("http://127.0.0.1:{runtime_port}"),
+                launch_url: format!(
+                    "http://127.0.0.1:{runtime_port}/launch?token=test-launch"
+                ),
                 dsh_version: "test".into(),
             },
             public_url: "http://127.0.0.1:43137/".into(),
@@ -256,5 +385,26 @@ mod tests {
         let mut response = String::new();
         client.read_to_string(&mut response).unwrap();
         response
+    }
+
+    fn authenticated_gateway_exchange(
+        shared: &Arc<GatewayShared>,
+        session_token: &str,
+        target: &str,
+        connection_id: usize,
+    ) -> (Result<(), String>, String) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        let (server, peer) = listener.accept().unwrap();
+        let request = format!(
+            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: hd_session={session_token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let result = handle_connection(server, peer, connection_id, Arc::clone(shared));
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        (result, response)
     }
 }
