@@ -3,6 +3,8 @@
 mod bridge;
 #[cfg(not(mobile))]
 mod capability_broker;
+#[cfg(not(mobile))]
+mod constants;
 mod crypto;
 #[cfg(not(mobile))]
 mod desktop;
