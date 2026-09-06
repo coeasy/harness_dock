@@ -24,8 +24,8 @@ static NATIVE_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 /// lifecycles (restart, safe-mode, install, quit) and can take seconds.
 ///
 /// The host kernel keeps two queues so a slow command cannot starve the
-/// window/reload surface: when both queues have work, the fast queue is
-/// processed first (`tokio::select!` with `biased`).
+/// window/reload surface. The queues are consumed concurrently, while request
+/// admission and dedupe remain serialized through `SharedKernelState`.
 fn is_fast_command(command: &HostCommand) -> bool {
     matches!(
         command,
@@ -156,15 +156,94 @@ fn record_event(
         .map_err(|error| format!("failed to publish host event: {error}"))
 }
 
+#[derive(Default)]
+struct InFlightKernelRequest {
+    fingerprint: String,
+    waiters: Vec<SyncSender<ResponseEnvelope>>,
+}
+
 /// Shared command-dedupe state used by both the fast and slow kernel
-/// consumers. Fast/slow consumers run concurrently, so the dedupe window must
-/// be shared behind a mutex; event ordering remains a single monotonic
-/// sequence inside `record_event`.
+/// consumers. Fast/slow consumers run concurrently, so admission must reserve
+/// a request id before the reconciler is awaited. Otherwise the same request
+/// can enter both queues before either result is cached and execute twice.
 #[derive(Default)]
 struct SharedKernelState {
     dedupe: HashMap<String, (String, ResponseEnvelope)>,
     dedupe_order: VecDeque<String>,
+    inflight: HashMap<String, InFlightKernelRequest>,
     operation_sequence: u64,
+}
+
+fn admit_kernel_request(
+    state: &mut SharedKernelState,
+    request: &KernelRequest,
+    fingerprint: &str,
+) -> Option<String> {
+    let request_id = &request.envelope.request_id;
+
+    if let Some((previous_fingerprint, previous_response)) = state.dedupe.get(request_id) {
+        let response = if previous_fingerprint == fingerprint {
+            previous_response.clone()
+        } else {
+            protocol_failure(
+                request_id.clone(),
+                "REQUEST_ID_REUSED",
+                "requestId was reused for a different Host command",
+                false,
+            )
+        };
+        let _ = request.reply.send(response);
+        return None;
+    }
+
+    if let Some(active) = state.inflight.get_mut(request_id) {
+        if active.fingerprint == fingerprint {
+            active.waiters.push(request.reply.clone());
+        } else {
+            let _ = request.reply.send(protocol_failure(
+                request_id.clone(),
+                "REQUEST_ID_REUSED",
+                "requestId was reused for a different in-flight Host command",
+                false,
+            ));
+        }
+        return None;
+    }
+
+    state.operation_sequence = state.operation_sequence.saturating_add(1);
+    let operation_id = format!("host-op-{}", state.operation_sequence);
+    state.inflight.insert(
+        request_id.clone(),
+        InFlightKernelRequest {
+            fingerprint: fingerprint.to_string(),
+            waiters: Vec::new(),
+        },
+    );
+    Some(operation_id)
+}
+
+fn complete_kernel_request(
+    state: &mut SharedKernelState,
+    request_id: &str,
+    fingerprint: String,
+    response: ResponseEnvelope,
+) -> Vec<SyncSender<ResponseEnvelope>> {
+    let waiters = state
+        .inflight
+        .remove(request_id)
+        .map(|active| active.waiters)
+        .unwrap_or_default();
+
+    state
+        .dedupe
+        .insert(request_id.to_string(), (fingerprint, response));
+    state.dedupe_order.push_back(request_id.to_string());
+    while state.dedupe_order.len() > DEDUPE_WINDOW {
+        if let Some(expired) = state.dedupe_order.pop_front() {
+            state.dedupe.remove(&expired);
+        }
+    }
+    waiters
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -177,30 +256,18 @@ async fn process_kernel_request(
     let request_id = request.envelope.request_id.clone();
     let fingerprint = command_fingerprint(&request.envelope);
 
-    // Phase 1 (synchronous, lock scoped to this block): dedupe check and
-    // operation-id allocation. std MutexGuards are not Send, so no guard may
-    // live across the `.await` in phase 2.
+    // Phase 1 (synchronous, lock scoped to this block): completed-request
+    // dedupe, in-flight reservation and operation-id allocation. std
+    // MutexGuards are not Send, so no guard may live across phase 2.
     let operation_id = {
         let mut state = match shared.lock() {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
         };
-        if let Some((previous_fingerprint, previous_response)) = state.dedupe.get(&request_id) {
-            let response = if *previous_fingerprint == fingerprint {
-                previous_response.clone()
-            } else {
-                protocol_failure(
-                    request_id.clone(),
-                    "REQUEST_ID_REUSED",
-                    "requestId was reused for a different Host command",
-                    false,
-                )
-            };
-            let _ = request.reply.send(response);
-            return;
+        match admit_kernel_request(&mut state, &request, &fingerprint) {
+            Some(operation_id) => operation_id,
+            None => return,
         }
-        state.operation_sequence = state.operation_sequence.saturating_add(1);
-        format!("host-op-{}", state.operation_sequence)
     };
 
     // Phase 2 (await, no kernel lock held): reconcile the command.
@@ -224,23 +291,27 @@ async fn process_kernel_request(
         eprintln!("host kernel event publication failed (observable, not silent): {error}");
     }
 
-    // Phase 3 (synchronous, lock scoped to this block): cache for dedupe.
-    {
+    // Phase 3 (synchronous, lock scoped to this block): atomically retire the
+    // in-flight reservation and cache the completed response. Duplicate
+    // callers that arrived while phase 2 was running are released afterwards
+    // with the exact same response.
+    let waiters = {
         let mut state = match shared.lock() {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
         };
-        state
-            .dedupe
-            .insert(request_id.clone(), (fingerprint, response.clone()));
-        state.dedupe_order.push_back(request_id);
-        while state.dedupe_order.len() > DEDUPE_WINDOW {
-            if let Some(expired) = state.dedupe_order.pop_front() {
-                state.dedupe.remove(&expired);
-            }
-        }
+        complete_kernel_request(
+            &mut state,
+            &request_id,
+            fingerprint,
+            response.clone(),
+        )
+    };
+
+    let _ = request.reply.send(response.clone());
+    for waiter in waiters {
+        let _ = waiter.send(response.clone());
     }
-    let _ = request.reply.send(response);
 }
 
 /// The slow consumer owns the main command queue (restart, safe-mode,
@@ -369,6 +440,22 @@ pub(crate) fn public_state(app: &AppHandle) -> KernelPublicState {
 mod tests {
     use super::*;
 
+    fn request(request_id: &str, command: HostCommand) -> (KernelRequest, std::sync::mpsc::Receiver<ResponseEnvelope>) {
+        let (reply, receiver) = std::sync::mpsc::sync_channel(1);
+        (
+            KernelRequest {
+                envelope: CommandEnvelope {
+                    protocol_version: HOST_PROTOCOL_VERSION,
+                    request_id: request_id.to_string(),
+                    subject: SubjectKind::NativeMenu,
+                    command,
+                },
+                reply,
+            },
+            receiver,
+        )
+    }
+
     #[test]
     fn native_request_ids_are_monotonic() {
         let first = NATIVE_REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -381,5 +468,55 @@ mod tests {
         let response = protocol_failure("req-1".into(), "TEST", "test", false);
         assert_eq!(response.request_id, "req-1");
         assert!(response.result.is_err());
+    }
+
+    #[test]
+    fn duplicate_inflight_request_waits_for_the_first_response() {
+        let mut state = SharedKernelState::default();
+        let (first, _first_rx) = request("req-1", HostCommand::RefreshHarness);
+        let fingerprint = command_fingerprint(&first.envelope);
+        assert_eq!(
+            admit_kernel_request(&mut state, &first, &fingerprint).as_deref(),
+            Some("host-op-1")
+        );
+
+        let (duplicate, duplicate_rx) = request("req-1", HostCommand::RefreshHarness);
+        assert!(admit_kernel_request(&mut state, &duplicate, &fingerprint).is_none());
+        assert_eq!(state.inflight["req-1"].waiters.len(), 1);
+
+        let response = ResponseEnvelope {
+            protocol_version: HOST_PROTOCOL_VERSION,
+            request_id: "req-1".into(),
+            result: Ok(HostResponse::Ack),
+        };
+        let waiters = complete_kernel_request(
+            &mut state,
+            "req-1",
+            fingerprint,
+            response.clone(),
+        );
+        for waiter in waiters {
+            let _ = waiter.send(response.clone());
+        }
+        let duplicate_response = duplicate_rx.recv().expect("duplicate response");
+        assert_eq!(duplicate_response.request_id, "req-1");
+        assert!(duplicate_response.result.is_ok());
+        assert!(!state.inflight.contains_key("req-1"));
+    }
+
+    #[test]
+    fn conflicting_inflight_request_id_fails_closed() {
+        let mut state = SharedKernelState::default();
+        let (first, _first_rx) = request("req-2", HostCommand::RefreshHarness);
+        let first_fingerprint = command_fingerprint(&first.envelope);
+        assert!(admit_kernel_request(&mut state, &first, &first_fingerprint).is_some());
+
+        let (conflict, conflict_rx) = request("req-2", HostCommand::RestartRuntime);
+        let conflict_fingerprint = command_fingerprint(&conflict.envelope);
+        assert!(admit_kernel_request(&mut state, &conflict, &conflict_fingerprint).is_none());
+        let response = conflict_rx.recv().expect("conflict response");
+        let error = response.result.expect_err("conflicting request id must fail");
+        assert_eq!(error.code, "REQUEST_ID_REUSED");
+        assert_eq!(state.inflight.len(), 1);
     }
 }
