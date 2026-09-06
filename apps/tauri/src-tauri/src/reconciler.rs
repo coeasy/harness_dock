@@ -22,6 +22,27 @@ fn host_error(
     HostError::new(code, scope, message, retryable)
 }
 
+fn command_allowed_while_quitting(command: &HostCommand) -> bool {
+    matches!(command, HostCommand::Quit)
+}
+
+fn reject_if_shutting_down(app: &AppHandle, command: &HostCommand) -> Result<(), HostError> {
+    if app
+        .state::<crate::AppState>()
+        .quitting
+        .load(Ordering::Acquire)
+        && !command_allowed_while_quitting(command)
+    {
+        return Err(host_error(
+            "HOST_SHUTTING_DOWN",
+            ErrorScope::Host,
+            "HarnessDock is shutting down and no longer accepts new Host operations",
+            false,
+        ));
+    }
+    Ok(())
+}
+
 fn authorize_local(
     app: &AppHandle,
     subject: SubjectKind,
@@ -60,6 +81,11 @@ pub(crate) async fn execute(
     subject: SubjectKind,
     command: HostCommand,
 ) -> Result<(), HostError> {
+    // Shutdown is a one-way admission boundary. Once Supervisor has begun
+    // draining actors, no newly queued refresh/restart/update operation may
+    // race with that drain and recreate resources. Quit remains allowed so
+    // duplicate native/tray quit requests stay idempotent.
+    reject_if_shutting_down(&app, &command)?;
     authorize_local(&app, subject, &command)?;
     bump_revision(&app);
     reconcile_command(app, command)
@@ -112,6 +138,35 @@ async fn reconcile_command(app: AppHandle, command: HostCommand) -> Result<(), S
 pub(crate) async fn ensure_runtime_for_boot(
     app: AppHandle,
 ) -> Result<crate::runtime::RuntimeStatus, String> {
+    if app
+        .state::<crate::AppState>()
+        .quitting
+        .load(Ordering::Acquire)
+    {
+        return Err("HarnessDock is shutting down; Runtime boot was cancelled".into());
+    }
     bump_revision(&app);
     crate::runtime::start_for_boot(app).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_quit_is_admitted_after_shutdown_begins() {
+        assert!(command_allowed_while_quitting(&HostCommand::Quit));
+        for command in [
+            HostCommand::ActivatePrimary,
+            HostCommand::RefreshHarness,
+            HostCommand::RestartRuntime,
+            HostCommand::StartSafeMode,
+            HostCommand::ClearQuarantine,
+            HostCommand::ShowGateway,
+            HostCommand::ShowDiagnostics,
+            HostCommand::InstallUpdate,
+        ] {
+            assert!(!command_allowed_while_quitting(&command));
+        }
+    }
 }
