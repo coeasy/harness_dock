@@ -1,0 +1,11 @@
+{
+  "identifier": "mobile-remote",
+  "description": "Android/iOS remote-only HarnessDock client. It may inspect its platform profile and explicitly pair to a user-supplied Gateway, but it has no local Runtime, update, tray, process or desktop administration authority.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": [
+    "platform-info",
+    "gateway-health",
+    "gateway-pair"
+  ]
+}
