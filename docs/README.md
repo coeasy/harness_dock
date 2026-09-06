@@ -35,17 +35,19 @@ Tauri Native Host
 
 1. [`../README.md`](../README.md)  
    用户入口、平台支持、安装使用、核心能力、发布门禁。
-2. [`PROJECT_INTRO.md`](./PROJECT_INTRO.md)  
+2. [`LOCAL_BUILD.md`](./LOCAL_BUILD.md)  
+   Windows/macOS/Linux 本地一键构建：portable Node、精确 pnpm/Tauri CLI、exact-pinned sealed Runtime、真实 Harness Web smoke 与原生安装包产物。
+3. [`PROJECT_INTRO.md`](./PROJECT_INTRO.md)  
    项目定位、架构边界、开发和发布说明。
-3. [`ARCHITECTURE_REVIEW.md`](./ARCHITECTURE_REVIEW.md)  
+4. [`ARCHITECTURE_REVIEW.md`](./ARCHITECTURE_REVIEW.md)  
    架构审查报告：顶层架构、Rust 模块清单、核心实现细节、设计亮点、技术债清单。
-4. [`OPTIMIZATION_PLAN.md`](./OPTIMIZATION_PLAN.md)  
+5. [`OPTIMIZATION_PLAN.md`](./OPTIMIZATION_PLAN.md)  
    优化改进方案：四阶段路线图（P0 稳定性 → P1 健壮性 → P2 异步化+测试 → P3 生态完善），16 项技术债逐项方案。
-5. [`../apps/tauri/README.md`](../apps/tauri/README.md)  
+6. [`../apps/tauri/README.md`](../apps/tauri/README.md)  
    Tauri Native Host、Runtime、WebView、Shell、Gateway 与构建说明。
-6. [`VERSIONING.md`](./VERSIONING.md)  
+7. [`VERSIONING.md`](./VERSIONING.md)  
    HarnessDock 与 DeepSeek Harness/dsh 的版本对齐政策。
-7. [`../.github/release-notes/v0.1.2-beta.1.md`](../.github/release-notes/v0.1.2-beta.1.md)  
+8. [`../.github/release-notes/v0.1.2-beta.1.md`](../.github/release-notes/v0.1.2-beta.1.md)  
    当前测试版发布说明。
 
 ## 当前架构不变量
