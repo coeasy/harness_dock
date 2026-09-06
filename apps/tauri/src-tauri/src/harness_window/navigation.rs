@@ -43,6 +43,26 @@ pub fn has_launch_token(url: &Url) -> bool {
 }
 
 #[cfg(not(mobile))]
+pub fn is_harness_bootstrap_url(url: &Url) -> bool {
+    if url.path() != "/splash.html"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return false;
+    }
+
+    matches!(
+        (url.scheme(), url.host_str()),
+        ("tauri", Some("localhost"))
+            | ("http", Some("tauri.localhost"))
+            | ("https", Some("tauri.localhost"))
+    )
+}
+
+#[cfg(not(mobile))]
 pub fn runtime_listener_reachable(url: &Url) -> bool {
     let Some(port) = url.port() else {
         return false;
@@ -58,14 +78,6 @@ pub fn runtime_listener_reachable(url: &Url) -> bool {
 pub fn current_runtime_lease(
     app: &AppHandle,
 ) -> Result<crate::runtime_actor::RuntimeLease, String> {
-    // A RuntimeLease is published only after the Runtime readiness probe has
-    // succeeded. WebView navigation/page-load callbacks must read that lease
-    // without calling status_snapshot(), because status_snapshot() is allowed
-    // to mutate RuntimeActor liveness state. Performing that mutation from the
-    // page-load path can revoke the very lease used by the current navigation.
-    //
-    // The lookup itself is shared with the Gateway via `crate::lease` so both
-    // surfaces report the same message when no Runtime is ready.
     crate::lease::require_current_lease(&app.state::<crate::AppState>())
 }
 
@@ -81,13 +93,24 @@ pub fn allowed_runtime_navigation(app: &AppHandle, url: &Url) -> bool {
 }
 
 #[cfg(not(mobile))]
+pub fn allowed_harness_navigation(app: &AppHandle, url: &Url) -> bool {
+    if app
+        .state::<crate::AppState>()
+        .quitting
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return false;
+    }
+    if is_harness_bootstrap_url(url) {
+        return current_runtime_lease(app).is_err();
+    }
+    allowed_runtime_navigation(app, url)
+}
+
+#[cfg(not(mobile))]
 pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url: &Url) {
     let app = window.app_handle();
 
-    // WebView engines can deliver Finished for a redirect or for the previous
-    // Runtime generation after the current document already moved on. Stale
-    // callbacks are not startup failures. Reject them before consulting mutable
-    // Runtime state so an old callback cannot hide the new healthy surface.
     let current_matches_event = window
         .url()
         .ok()
@@ -101,10 +124,6 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
         return;
     }
 
-    // A momentary absence of a lease can occur while an explicit restart is
-    // replacing generations. Do not convert that transition into recovery from
-    // a page-load callback; the generation-aware watchdog/startup fallback will
-    // either publish the current navigation or report the real timeout.
     let Ok(lease) = current_runtime_lease(app) else {
         eprintln!("Ignoring Harness page-load callback while RuntimeLease is transitioning");
         return;
@@ -129,9 +148,6 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
         show_startup_recovery(app, "Harness Web 导航到了不受管理的 origin，已阻止加载。");
         return;
     }
-    // WebView2/Chromium emits PageLoadEvent::Finished for its own network error
-    // document as well. Never convert ERR_CONNECTION_REFUSED into
-    // primary_visible merely because the requested URL still matches the Lease.
     if !runtime_listener_reachable(&candidate) {
         let _ = window.hide();
         show_startup_recovery(
@@ -233,11 +249,6 @@ pub fn claim_surface_operation(
     app: &AppHandle,
     operation: SurfaceOperation,
 ) -> Result<SurfaceOperationGuard, String> {
-    // Surface ownership is also the local-control shutdown admission point.
-    // Remote Host Protocol commands are rejected by Reconciler, while legacy
-    // local recovery invokes may call these helpers directly. Closing the gate
-    // here ensures neither path can start a new navigation/restart/diagnostics
-    // operation after Supervisor has begun draining resources.
     if app
         .state::<crate::AppState>()
         .quitting
