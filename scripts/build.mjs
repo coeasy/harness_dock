@@ -9,16 +9,25 @@
  * System Node/pnpm/cargo are build tools only. The installed desktop client
  * starts from its bundled Node+dsh Runtime and does not inspect system Node.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const rootPackage = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
+const versions = JSON.parse(readFileSync(path.join(repoRoot, 'scripts', 'versions.json'), 'utf8'))
+const packageManager = String(rootPackage.packageManager ?? '')
+const pnpmMatch = /^pnpm@([^\s]+)$/.exec(packageManager)
+if (!pnpmMatch) throw new Error(`package.json packageManager must pin pnpm exactly; got ${packageManager || 'missing'}`)
+const expectedPnpmVersion = pnpmMatch[1]
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const cargoCommand = process.platform === 'win32' ? 'cargo.exe' : 'cargo'
-const tauriCliVersion = '2.11.4'
+const tauriCliVersion = String(versions.tauriCli ?? '')
+if (!/^\d+\.\d+\.\d+$/.test(tauriCliVersion)) {
+  throw new Error(`scripts/versions.json must pin tauriCli exactly; got ${tauriCliVersion || 'missing'}`)
+}
 const localTauriRoot = path.join(repoRoot, '.local-tools', `tauri-cli-${tauriCliVersion}`)
 const localTauriBin = path.join(localTauriRoot, 'bin')
 
@@ -59,16 +68,28 @@ function fail(message) {
   process.exit(1)
 }
 
-function commandWorks(command, args = ['--version'], extraPath = null) {
+function commandResult(command, args = ['--version'], extraPath = null) {
   const env = { ...process.env }
   if (extraPath) env.PATH = `${extraPath}${path.delimiter}${env.PATH ?? ''}`
-  const result = spawnSync(command, args, {
+  return spawnSync(command, args, {
     cwd: repoRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
     shell: process.platform === 'win32',
     env,
   })
-  return result.status === 0
+}
+
+function commandWorks(command, args = ['--version'], extraPath = null) {
+  return commandResult(command, args, extraPath).status === 0
+}
+
+function tauriVersion(extraPath = null) {
+  const result = commandResult(cargoCommand, ['tauri', '--version'], extraPath)
+  if (result.status !== 0) return null
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim()
+  const match = /(?:tauri-cli\s+)?(\d+\.\d+\.\d+)/i.exec(output)
+  return match?.[1] ?? null
 }
 
 function run(command, args, label, options = {}) {
@@ -88,40 +109,48 @@ function prependPath(directory) {
 
 function ensureTauriCli() {
   if (!commandWorks(cargoCommand, ['--version'])) {
-    fail('Rust/Cargo was not found on PATH. Install the Rust toolchain from https://rustup.rs and the Tauri 2 platform prerequisites.')
+    fail('Rust/Cargo was not found on PATH. Install the pinned rust-toolchain.toml toolchain and the Tauri 2 platform prerequisites.')
   }
 
-  if (commandWorks(cargoCommand, ['tauri', '--version'])) return
+  const globalVersion = tauriVersion()
+  if (globalVersion === tauriCliVersion) {
+    console.log(`[build] using tauri-cli ${tauriCliVersion} from PATH`)
+    return
+  }
+  if (globalVersion) {
+    console.log(`[build] ignoring tauri-cli ${globalVersion} from PATH; exact ${tauriCliVersion} is required`)
+  }
 
   const localBinary = path.join(localTauriBin, process.platform === 'win32' ? 'cargo-tauri.exe' : 'cargo-tauri')
-  if (existsSync(localBinary) && commandWorks(cargoCommand, ['tauri', '--version'], localTauriBin)) {
+  if (existsSync(localBinary) && tauriVersion(localTauriBin) === tauriCliVersion) {
     prependPath(localTauriBin)
     console.log(`[build] using cached local tauri-cli ${tauriCliVersion}`)
     return
   }
 
-  console.log(`[build] tauri-cli not found; installing isolated tauri-cli ${tauriCliVersion} under ${localTauriRoot}`)
+  console.log(`[build] installing isolated tauri-cli ${tauriCliVersion} under ${localTauriRoot}`)
   run(
     cargoCommand,
-    ['install', 'tauri-cli', '--version', tauriCliVersion, '--locked', '--root', localTauriRoot],
+    ['install', 'tauri-cli', '--version', tauriCliVersion, '--locked', '--root', localTauriRoot, '--force'],
     `install tauri-cli ${tauriCliVersion}`,
   )
   prependPath(localTauriBin)
-  if (!commandWorks(cargoCommand, ['tauri', '--version'])) {
-    fail(`tauri-cli ${tauriCliVersion} was installed but cargo tauri is still unavailable`)
+  const installedVersion = tauriVersion()
+  if (installedVersion !== tauriCliVersion) {
+    fail(`tauri-cli ${tauriCliVersion} was installed but cargo tauri reports ${installedVersion ?? 'unavailable'}`)
   }
 }
 
 run(process.execPath, ['scripts/node-version-check.cjs'], 'check build-time Node version')
 
-const pnpmVersion = spawnSync(pnpmCommand, ['--version'], {
-  cwd: repoRoot,
-  shell: process.platform === 'win32',
-  encoding: 'utf8',
-})
-if (pnpmVersion.status !== 0) {
-  fail('pnpm not found on PATH; run scripts/bootstrap.mjs or use scripts/build.bat / scripts/build.sh')
+const pnpmVersion = commandResult(pnpmCommand, ['--version'])
+const actualPnpmVersion = pnpmVersion.status === 0 ? String(pnpmVersion.stdout ?? '').trim() : null
+if (actualPnpmVersion !== expectedPnpmVersion) {
+  fail(
+    `pnpm ${actualPnpmVersion ?? 'not found'} does not match packageManager pnpm@${expectedPnpmVersion}; run scripts/bootstrap.mjs or use scripts/build.bat / scripts/build.sh`,
+  )
 }
+console.log(`[build] using exact pnpm ${actualPnpmVersion}`)
 
 ensureTauriCli()
 
