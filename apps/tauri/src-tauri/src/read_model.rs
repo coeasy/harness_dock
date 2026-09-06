@@ -5,39 +5,47 @@
 //! short-lived and never nested; mutation remains owned by the Host Kernel /
 //! Reconciler path.
 
+use std::sync::atomic::Ordering;
+
 use crate::{
-    gateway_host::GatewayPhase, runtime_actor::RuntimePhase, surface_actor::SurfaceOperation,
-    update_actor::UpdatePhase, AppState,
+    gateway_host::GatewayPhase,
+    runtime_actor::RuntimePhase,
+    surface_actor::{SurfaceOperation, SurfacePhase},
+    update_actor::UpdatePhase,
+    AppState,
 };
 
 #[derive(Clone)]
 pub(crate) struct HostReadModel {
     pub(crate) runtime_phase: RuntimePhase,
     pub(crate) runtime_generation: Option<u64>,
+    pub(crate) surface_phase: SurfacePhase,
     pub(crate) surface_operation: SurfaceOperation,
     pub(crate) harness_visible: bool,
     pub(crate) gateway_phase: GatewayPhase,
     pub(crate) update_phase: UpdatePhase,
+    pub(crate) recovery_pending: bool,
+    pub(crate) quitting: bool,
 }
 
 impl HostReadModel {
     pub(crate) fn collect(state: &AppState) -> Self {
-        // Canonical read order: runtime -> surface -> gateway -> update.
-        // Lease credentials deliberately stay out of this general read model;
-        // callers that need the published lease use `runtime::current_lease`
-        // explicitly so a lifecycle snapshot cannot accidentally become a
-        // second lease source of truth.
+        // Canonical read order: runtime -> surface -> gateway -> update ->
+        // recovery. Lease credentials deliberately stay out of this general
+        // read model; callers that need the published lease use
+        // `runtime::current_lease` explicitly so a lifecycle snapshot cannot
+        // accidentally become a second lease source of truth.
         let (runtime_phase, runtime_generation) = state
             .runtime_actor
             .lock()
             .map(|actor| (actor.phase(), actor.generation_id()))
             .unwrap_or((RuntimePhase::Failed, None));
 
-        let (surface_operation, harness_visible) = state
+        let (surface_phase, surface_operation, harness_visible) = state
             .surface_actor
             .lock()
-            .map(|actor| (actor.operation(), actor.primary_visible()))
-            .unwrap_or((SurfaceOperation::Idle, false));
+            .map(|actor| (actor.phase(), actor.operation(), actor.primary_visible()))
+            .unwrap_or((SurfacePhase::Failed, SurfaceOperation::Idle, false));
 
         let gateway_phase = state
             .gateway
@@ -51,14 +59,28 @@ impl HostReadModel {
             .map(|actor| actor.phase())
             .unwrap_or(UpdatePhase::Failed);
 
+        let recovery_pending = state
+            .startup_recovery_error
+            .lock()
+            .map(|value| value.is_some())
+            .unwrap_or(true);
+        let quitting = state.quitting.load(Ordering::Acquire);
+
         Self {
             runtime_phase,
             runtime_generation,
+            surface_phase,
             surface_operation,
             harness_visible,
             gateway_phase,
             update_phase,
+            recovery_pending,
+            quitting,
         }
+    }
+
+    pub(crate) fn host_phase(&self) -> crate::lifecycle::HostPhase {
+        crate::lifecycle::derive_host_phase(self)
     }
 }
 
@@ -71,9 +93,13 @@ mod tests {
         let model = HostReadModel::collect(&AppState::default());
         assert_eq!(model.runtime_phase, RuntimePhase::Stopped);
         assert_eq!(model.runtime_generation, None);
+        assert_eq!(model.surface_phase, SurfacePhase::Hidden);
         assert_eq!(model.surface_operation, SurfaceOperation::Idle);
         assert!(!model.harness_visible);
         assert_eq!(model.gateway_phase, GatewayPhase::Stopped);
         assert_eq!(model.update_phase, UpdatePhase::Idle);
+        assert!(!model.recovery_pending);
+        assert!(!model.quitting);
+        assert_eq!(model.host_phase(), crate::lifecycle::HostPhase::Booting);
     }
 }
