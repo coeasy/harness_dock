@@ -5,12 +5,14 @@ import { describe, expect, it } from 'vitest'
 import { apply, service } from '../src/index.ts'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = path.resolve(packageRoot, '../..')
 const read = (relative: string) => readFileSync(path.join(packageRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 
 describe('independent Harness Shell dsh plugin', () => {
   it('publishes a versioned manifest and distributable entrypoint', () => {
     const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'))
     const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'manifest.json'), 'utf8'))
+    const shellContract = JSON.parse(readFileSync(path.join(repoRoot, 'protocol/shell-contract.json'), 'utf8'))
     const entry = read('src/index.ts')
     const web = read('src/web/shell.js')
     const bundledEntry = read('lib/index.js')
@@ -21,7 +23,7 @@ describe('independent Harness Shell dsh plugin', () => {
       id: 'harness-shell',
       version: packageJson.version,
       kind: 'shell',
-      apiVersion: 1,
+      apiVersion: shellContract.apiVersion,
       safeMode: true,
     })
     expect(entry).toContain("export const name = 'harness-shell'")
