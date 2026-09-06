@@ -58,7 +58,15 @@ pub fn handle_connection(
             write_json(&mut stream, 200, "OK", &body)
         }
         "/api/harnessdock/pair" => handle_pair(&mut stream, peer.ip(), &request, &shared),
-        "/api/harnessdock/connect" => handle_connect(&mut stream, &url, &shared),
+        "/api/harnessdock/connect" => {
+            // The connect token is a single-use credential. Reject unsupported
+            // methods before touching the registry so a stray POST/HEAD/OPTIONS
+            // cannot consume the ticket and strand the legitimate redirect.
+            if request.method != "GET" {
+                return write_status(&mut stream, 405, "Method Not Allowed", b"");
+            }
+            handle_connect(&mut stream, &url, &shared)
+        }
         _ => proxy_authenticated(stream, request, connection_id, shared),
     }
 }
