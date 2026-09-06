@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const PLATFORM_BOOTSTRAP_PARSE_TIMEOUT_MS = 20_000
 const run = (command: string, args: string[]) =>
   spawnSync(command, args, { cwd: repoRoot, encoding: 'utf8' })
 
@@ -46,20 +47,24 @@ describe('self-contained local client build', () => {
     }
   })
 
-  it('parses the platform bootstrap scripts', () => {
-    if (process.platform === 'win32') {
-      const script = path.join(repoRoot, 'scripts/bootstrap-node.ps1').replaceAll("'", "''")
-      const command = `$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }`
-      const result = run('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', command])
-      expect(result.status, result.stderr).toBe(0)
-      return
-    }
+  it(
+    'parses the platform bootstrap scripts',
+    () => {
+      if (process.platform === 'win32') {
+        const script = path.join(repoRoot, 'scripts/bootstrap-node.ps1').replaceAll("'", "''")
+        const command = `$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }`
+        const result = run('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', command])
+        expect(result.status, result.stderr).toBe(0)
+        return
+      }
 
-    for (const relative of ['scripts/build.sh', 'scripts/bootstrap-node.sh']) {
-      const result = run('bash', ['-n', path.join(repoRoot, relative)])
-      expect(result.status, `${relative}: ${result.stderr}`).toBe(0)
-    }
-  })
+      for (const relative of ['scripts/build.sh', 'scripts/bootstrap-node.sh']) {
+        const result = run('bash', ['-n', path.join(repoRoot, relative)])
+        expect(result.status, `${relative}: ${result.stderr}`).toBe(0)
+      }
+    },
+    PLATFORM_BOOTSTRAP_PARSE_TIMEOUT_MS,
+  )
 
   it('executes the canonical Tauri source-layout gate instead of duplicating module paths in tests', () => {
     const result = run(process.execPath, [path.join(repoRoot, 'scripts/check-tauri-source-layout.mjs')])
