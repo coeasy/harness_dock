@@ -99,7 +99,6 @@ async fn start_impl(
                 return Err(error);
             }
         };
-        startup_trace::mark(StartupPhase::RuntimeVerified);
         if let Err(error) = actor.mark_starting(generation.id) {
             actor.mark_failed(generation.id, error.clone());
             return Err(error);
