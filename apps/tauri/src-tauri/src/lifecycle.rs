@@ -58,9 +58,11 @@ pub(crate) fn derive_host_phase(model: &HostReadModel) -> HostPhase {
     }
 }
 
+/// Minimal shutdown projection. High-level `HostPhase` is exposed through the
+/// Host Protocol read model; the supervisor only needs actor operation state
+/// to decide when managed resources have drained.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LifecycleSnapshot {
-    pub host_phase: HostPhase,
     pub runtime_phase: RuntimePhase,
     pub gateway_phase: GatewayPhase,
     pub update_phase: UpdatePhase,
@@ -89,7 +91,6 @@ impl LifecycleSnapshot {
 pub(crate) fn snapshot(state: &AppState) -> LifecycleSnapshot {
     let model = HostReadModel::collect(state);
     LifecycleSnapshot {
-        host_phase: derive_host_phase(&model),
         runtime_phase: model.runtime_phase,
         gateway_phase: model.gateway_phase,
         update_phase: model.update_phase,
@@ -155,7 +156,6 @@ mod tests {
     #[test]
     fn explicit_actor_states_define_shutdown_idleness() {
         let idle = LifecycleSnapshot {
-            host_phase: HostPhase::Running,
             runtime_phase: RuntimePhase::Ready,
             gateway_phase: GatewayPhase::Ready,
             update_phase: UpdatePhase::Idle,
