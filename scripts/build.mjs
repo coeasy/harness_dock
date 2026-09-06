@@ -56,7 +56,7 @@ Options:
 
 Normal first-run usage:
   Windows: scripts\\build.bat
-  macOS/Linux: ./scripts/build.sh
+  macOS/Linux: bash scripts/build.sh
 
 Cross-platform release artifacts remain produced by .github/workflows/tauri-candidate.yml.`)
   process.exit(0)
