@@ -1,15 +1,20 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import {
-  defaultDownloadCacheDir,
-  ensureDownloadedRuntime as ensureNpmRuntime,
-} from './fetch-runtime.ts'
+import { defaultDownloadCacheDir } from './fetch-runtime.ts'
+import { ensureRegistryRuntime } from './registry-runtime.ts'
 import { inspectBundledRuntime, bundledRuntimeVersion } from './bundled.ts'
 import { installRuntimeBundle, runtimeBundleKey, type RuntimeBundleSpec } from './runtime-bundle.ts'
 import type { RuntimeProgressEvent } from './runtime.ts'
 
 export { defaultDownloadCacheDir }
 
+/**
+ * Bundle-aware runtime resolver used by hosts and release tooling.
+ *
+ * If origin.json publishes a platform bundle we install/verify that immutable
+ * image; otherwise we fall back to the registry closure resolver. Keeping the
+ * fallback name distinct avoids treating these two layers as duplicate hosts.
+ */
 export async function ensureDownloadedRuntime(input: {
   origin: {
     dshVersion: string
@@ -29,7 +34,7 @@ export async function ensureDownloadedRuntime(input: {
   const key = runtimeBundleKey()
   const bundle = input.origin.runtimeBundles?.[key]
 
-  if (!bundle) return ensureNpmRuntime(input)
+  if (!bundle) return ensureRegistryRuntime(input)
 
   const runtimeDir = path.join(input.cacheDir, `runtime-${version}`)
   const layout = inspectBundledRuntime(runtimeDir, process.platform)
