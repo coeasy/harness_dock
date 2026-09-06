@@ -22,6 +22,7 @@ pub enum SurfacePhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SurfaceOperation {
     Idle,
+    Activate,
     Refresh,
     Restart,
     SafeMode,
@@ -149,5 +150,15 @@ mod tests {
         let navigation = state.begin_navigation(9);
         assert!(!state.finish_navigation(navigation, 8));
         assert_eq!(state.phase(), SurfacePhase::Loading);
+    }
+
+    #[test]
+    fn activation_cannot_enter_while_restart_owns_the_surface() {
+        let mut state = SurfaceActorState::default();
+        state.begin_operation(SurfaceOperation::Restart).unwrap();
+        assert!(state.begin_operation(SurfaceOperation::Activate).is_err());
+        assert_eq!(state.operation(), SurfaceOperation::Restart);
+        state.end_operation();
+        assert!(state.begin_operation(SurfaceOperation::Activate).is_ok());
     }
 }
