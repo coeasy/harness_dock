@@ -5,7 +5,7 @@ import path from 'node:path'
 import { bundledRuntimeVersion, inspectBundledRuntime } from './bundled.ts'
 import { ensureDownloadedRuntime, defaultDownloadCacheDir } from './ensure-runtime.ts'
 import { buildLaunchArgs, renderEmbeddedPatch } from './launch.ts'
-import { parseWebUrl, redactWebAuthTokens } from './output.ts'
+import { redactWebAuthTokens } from './output.ts'
 import {
   buildPluginRecoveryPlan,
   parseConfigDumpRows,
@@ -21,9 +21,14 @@ import { shutdownLadder, isProcessAlive, type ShutdownResult } from './process.t
 import { parseReadyFile } from './ready.ts'
 import { resolveDshCommand } from './resolve.ts'
 import { resolveRuntimeMode } from './process.ts'
+import {
+  createRuntimeBinding,
+  type RuntimeBinding,
+} from './runtime-binding.ts'
+import { RUNTIME_READY_ENV } from './runtime-ready-contract.generated.ts'
 import { buildSpawnRequest } from './shell.ts'
 import { openWebUiSession } from './web-auth.ts'
-import type { ParsedUrl, ReadyInfo, RuntimeMode } from './types.ts'
+import type { ReadyInfo, RuntimeMode } from './types.ts'
 
 export type PluginRecoverySource = 'none' | 'startup-failure' | 'quarantine'
 
@@ -119,6 +124,7 @@ export class DshRuntime {
   private stopPromise: Promise<void> | undefined
   private stopRequested = false
   private stopGeneration = 0
+  private runtimeGeneration = 0
   private stopOutcome: StopOutcome | undefined
   private recoveryState: PluginRecoveryState = emptyRecoveryState()
 
@@ -206,6 +212,7 @@ export class DshRuntime {
       env,
       bundledRoot: this.options.bundledRoot,
     })
+    let runtimeRootForBinding = mode === 'bundled' ? this.options.bundledRoot : undefined
 
     if (mode === 'download') {
       const downloaded = await ensureDownloadedRuntime({
@@ -214,6 +221,7 @@ export class DshRuntime {
         cacheDir: this.options.downloadCacheDir ?? defaultDownloadCacheDir(),
         onProgress: this.options.onProgress,
       })
+      runtimeRootForBinding = downloaded.runtimeDir
       const bundledLayout = this.options.bundledRoot
         ? inspectBundledRuntime(this.options.bundledRoot, process.platform)
         : null
@@ -255,6 +263,7 @@ export class DshRuntime {
           },
         )
         if (downloaded) {
+          runtimeRootForBinding = downloaded.runtimeDir
           const bundledLayout = inspectBundledRuntime(this.options.bundledRoot, process.platform)
           if (bundledLayout) {
             const bundledCommand = await resolveDshCommand({
@@ -271,6 +280,15 @@ export class DshRuntime {
         }
       }
     }
+
+    const binding = await createRuntimeBinding({
+      generation: this.runtimeGeneration + 1,
+      runtimeRoot: runtimeRootForBinding,
+      dshVersion: version,
+      command: command.command,
+      argsPrefix: command.argsPrefix,
+    })
+    this.runtimeGeneration = binding.generation
 
     this.assertStartActive()
     this.workDir = await mkdtemp(path.join(this.options.cacheDir ?? os.tmpdir(), 'harnessdock-'))
@@ -290,8 +308,11 @@ export class DshRuntime {
     const childEnv = {
       ...env,
       ...command.extraEnv,
-      DSH_EMBEDDED_READY_FILE: readyFile,
-      DSH_EMBEDDED_VERSION: version,
+      [RUNTIME_READY_ENV.readyFile]: readyFile,
+      [RUNTIME_READY_ENV.dshVersion]: version,
+      [RUNTIME_READY_ENV.generation]: String(binding.generation),
+      [RUNTIME_READY_ENV.nonce]: binding.nonce,
+      [RUNTIME_READY_ENV.imageIdentity]: binding.imageIdentity,
     }
     const dumpEnv = { ...env, ...command.extraEnv }
     const spawnImpl = this.options.spawnImpl ?? spawn
@@ -404,6 +425,7 @@ export class DshRuntime {
             quarantineChild,
             readyFile,
             version,
+            binding,
             timeoutMs,
             stabilityMs,
             this.options.log,
@@ -443,6 +465,7 @@ export class DshRuntime {
         child,
         readyFile,
         version,
+        binding,
         timeoutMs,
         stabilityMs,
         this.options.log,
@@ -494,6 +517,7 @@ export class DshRuntime {
           recoveryChild,
           readyFile,
           version,
+          binding,
           timeoutMs,
           stabilityMs,
           this.options.log,
@@ -660,6 +684,7 @@ async function waitForReady(
   child: ChildProcessWithoutNullStreams,
   readyFile: string,
   dshVersion: string,
+  binding: RuntimeBinding,
   timeoutMs: number,
   stabilityMs: number,
   log?: (message: string) => void,
@@ -699,8 +724,6 @@ async function waitForReady(
     const onData = (chunk: Buffer | string) => {
       appendOutput(chunk)
       forwardOutput(chunk)
-      const parsed = parseWebUrl(buffer)
-      if (parsed) consider({ ...parsed, pid: child.pid ?? 0, dshVersion })
     }
     const consider = (info: ReadyInfo): void => {
       if (candidate?.url === info.url) return
@@ -737,13 +760,21 @@ async function waitForReady(
       void validateCandidate()
       void readFile(readyFile, 'utf8')
         .then((raw) => {
-          const info = parseReadyFile(raw)
+          const pid = child.pid ?? 0
+          if (pid <= 0) return
+          const info = parseReadyFile(raw, {
+            dshVersion,
+            pid,
+            generation: binding.generation,
+            nonce: binding.nonce,
+            imageIdentity: binding.imageIdentity,
+          })
           if (info) consider(info)
         })
         .catch(() => undefined)
     }, 100)
     const timer = setTimeout(() => {
-      fail(new Error(`Timed out waiting for dsh web ready after ${timeoutMs}ms${diagnostics()}`))
+      fail(new Error(`Timed out waiting for generation-bound dsh ready.json after ${timeoutMs}ms${diagnostics()}`))
     }, timeoutMs)
     const cleanup = () => {
       clearTimeout(timer)
