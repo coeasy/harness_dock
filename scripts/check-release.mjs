@@ -6,25 +6,18 @@
  *   HarnessDock tracks the base SemVer of the pinned dsh release. Prerelease
  *   qualifiers belong to Runtime provenance, not to the HarnessDock product
  *   version. Example: dsh 0.1.2-rc.1 => HarnessDock 0.1.2.
- *
- * Rules:
- *  1. origin.json.dshVersion must be an exact SemVer (never latest/next).
- *  2. HarnessDock client version must equal the dsh base SemVer.
- *  3. origin.json.clientVersion must equal package.json version.
- *  4. release-manifest Runtime version/tag/commit must equal origin.json.
- *  5. If the pinned dsh changed since released-origin.json, the client version
- *     must also have changed so the updater/release identity cannot stay stale.
  */
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
-const origin = JSON.parse(
-  readFileSync(path.join(repoRoot, 'packages', 'docs-sync', 'origin.json'), 'utf8'),
-)
-const manifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
+const readJson = (relative) => JSON.parse(readFileSync(path.join(repoRoot, relative), 'utf8'))
+const rootPkg = readJson('package.json')
+const origin = readJson('packages/docs-sync/origin.json')
+const manifest = readJson('release-manifest.json')
+const shellContract = readJson('protocol/shell-contract.json')
+const shellManifest = readJson('packages/plugin-harness-shell/manifest.json')
 const releasedPath = path.join(repoRoot, 'packages', 'docs-sync', 'released-origin.json')
 
 const errors = []
@@ -46,8 +39,20 @@ if (manifest.shell?.version !== clientVersion) {
     `release-manifest.json.shell.version (${manifest.shell?.version}) != package.json version (${clientVersion})`,
   )
 }
-if (manifest.shell?.apiVersion !== 1) {
-  errors.push('release-manifest.json.shell.apiVersion must be 1')
+if (shellManifest.version !== clientVersion) {
+  errors.push(
+    `plugin-harness-shell manifest version (${shellManifest.version}) != package.json version (${clientVersion})`,
+  )
+}
+if (manifest.shell?.apiVersion !== shellContract.apiVersion) {
+  errors.push(
+    `release-manifest.json.shell.apiVersion (${manifest.shell?.apiVersion}) != protocol/shell-contract.json apiVersion (${shellContract.apiVersion})`,
+  )
+}
+if (shellManifest.apiVersion !== shellContract.apiVersion) {
+  errors.push(
+    `plugin-harness-shell manifest apiVersion (${shellManifest.apiVersion}) != protocol/shell-contract.json apiVersion (${shellContract.apiVersion})`,
+  )
 }
 if (manifest.runtime?.version !== origin.dshVersion) {
   errors.push(
@@ -100,5 +105,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `check:release OK: dsh=${dshVersion} dshBase=${dshBaseVersion} client=${clientVersion}${existsSync(releasedPath) ? '' : ' (no released-origin baseline yet)'}`,
+  `check:release OK: dsh=${dshVersion} dshBase=${dshBaseVersion} client=${clientVersion} shellApi=${shellContract.apiVersion}${existsSync(releasedPath) ? '' : ' (no released-origin baseline yet)'}`,
 )
