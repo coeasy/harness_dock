@@ -20,11 +20,10 @@ pub(crate) fn stop_managed_processes(app: &tauri::AppHandle) {
 
 pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
     // Pacing uses `tokio::time::sleep` instead of a blocking `spawn_blocking`
-    // + thread::sleep poll loop: the shutdown coordinator is fully async, no
-    // blocking thread is tied up for up to 30s, and the deadline is derived
-    // from a monotonic clock just like before. The `State` borrow is taken
-    // inside each iteration so it never spans an `.await` point.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    // + thread::sleep poll loop. The deadline is a reviewed Host policy rather
+    // than an ad-hoc number embedded in the coordinator.
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(crate::constants::SUPERVISOR_SHUTDOWN_TIMEOUT_SECS);
     loop {
         stop_managed_processes(&app);
         let idle = {
