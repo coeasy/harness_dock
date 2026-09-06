@@ -157,6 +157,21 @@ const BRIDGE_SCRIPT_TEMPLATE: &str = r#"
 })();
 "#;
 
+const BOOTSTRAP_GUARD_PREFIX: &str = r#"
+(() => {
+  'use strict';
+  const bootstrap =
+    window.location.pathname === '/splash.html' &&
+    !window.location.search &&
+    !window.location.hash &&
+    ((window.location.protocol === 'tauri:' && window.location.hostname === 'localhost') ||
+     ((window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+      window.location.hostname === 'tauri.localhost'));
+  if (bootstrap) return;
+"#;
+
+const BOOTSTRAP_GUARD_SUFFIX: &str = "\n})();";
+
 fn json_string(value: &str, fallback: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| format!("\"{fallback}\""))
 }
@@ -200,10 +215,12 @@ pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Initialisation script order matters: polyfills first so that Tauri's own
 /// `window.__TAURI__` bridge and dsh's client bundle both find the APIs they
-/// call, then the host bridge, then the shell UI.
+/// call. The local first-paint document deliberately receives neither the Host
+/// bridge nor the shell UI; the same initialization script runs again when the
+/// WebView navigates to the managed Runtime document.
 pub(crate) fn init_script() -> String {
     format!(
-        "{POLYFILL_SCRIPT}\n{}\n{}",
+        "{POLYFILL_SCRIPT}\n{BOOTSTRAP_GUARD_PREFIX}\n{}\n{}\n{BOOTSTRAP_GUARD_SUFFIX}",
         bridge_script(),
         shell_web_script()
     )
@@ -231,5 +248,13 @@ mod tests {
         assert!(shell.contains(&format!("apiVersion === {SHELL_API_VERSION}")));
         assert!(shell.contains(SHELL_PLUGIN_ID));
         assert!(!shell.contains("__SHELL_"));
+    }
+
+    #[test]
+    fn first_paint_document_is_excluded_from_shell_bridge_injection() {
+        let script = init_script();
+        assert!(script.contains("window.location.pathname === '/splash.html'"));
+        assert!(script.contains("window.location.hostname === 'tauri.localhost'"));
+        assert!(script.contains("if (bootstrap) return"));
     }
 }
