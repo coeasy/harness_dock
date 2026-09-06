@@ -52,7 +52,6 @@ pub struct RuntimeManifest {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeImage {
-    pub root: PathBuf,
     pub node: PathBuf,
     pub dsh: PathBuf,
     pub origin: OriginInfo,
