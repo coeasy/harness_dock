@@ -57,15 +57,20 @@ fn trusted_subject(
                     false,
                 ));
             }
-            let lease =
-                crate::runtime::live_lease(&app.state::<crate::AppState>()).ok_or_else(|| {
+            // Authentication observes the RuntimeLease that RuntimeActor has
+            // already published. It must not run the liveness reaper: subject
+            // validation is not a lifecycle mutation and must not revoke the
+            // same lease the command is about to use.
+            let lease = crate::runtime::current_lease(&app.state::<crate::AppState>()).ok_or_else(
+                || {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
                         "Harness subject has no current RuntimeLease",
                         true,
                     )
-                })?;
+                },
+            )?;
             let actual = window
                 .url()
                 .ok()
@@ -133,15 +138,16 @@ fn snapshot_subject(
     match window.label() {
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
-            let lease =
-                crate::runtime::live_lease(&app.state::<crate::AppState>()).ok_or_else(|| {
+            let lease = crate::runtime::current_lease(&app.state::<crate::AppState>()).ok_or_else(
+                || {
                     HostError::new(
                         "RUNTIME_LEASE_REQUIRED",
                         ErrorScope::Runtime,
                         "Harness snapshot has no current RuntimeLease",
                         true,
                     )
-                })?;
+                },
+            )?;
             let origin = window
                 .url()
                 .ok()
@@ -185,10 +191,11 @@ pub fn host_snapshot(
     // Read through the single read-only snapshot layer (service::snapshot).
     // This fixes one canonical lock order for status readers (runtime ->
     // surface -> gateway) instead of letting each bridge command lock actors
-    // ad hoc.
+    // ad hoc. Reading the published lease is intentionally non-reaping too:
+    // host_snapshot must never mutate Runtime/Gateway lifecycle state.
     let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&state);
     let runtime_phase = snapshot.runtime_phase;
-    let lease = crate::runtime::live_lease(&state);
+    let lease = crate::runtime::current_lease(&state);
     let capabilities = crate::capability_broker::allowed_capabilities(
         subject,
         surface,
