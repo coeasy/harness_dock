@@ -3,7 +3,7 @@
   "name": "Harness Shell",
   "version": "0.1.2",
   "kind": "shell",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "entry": "lib/index.js",
   "webEntry": "web/shell.js",
   "safeMode": true,
