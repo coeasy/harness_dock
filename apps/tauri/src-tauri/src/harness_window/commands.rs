@@ -13,6 +13,12 @@ pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
     }
     #[cfg(not(mobile))]
     {
+        // Primary activation participates in the same surface-operation mutex
+        // as refresh/restart. Without this claim the Host Kernel fast lane can
+        // start an old-generation navigation while the slow lane is replacing
+        // the Runtime, changing navigation_id and causing the restart path to
+        // skip reopening the newly published generation.
+        let _operation = claim_surface_operation(&app, SurfaceOperation::Activate)?;
         harness_open_impl(app, url, true).await
     }
 }
@@ -61,7 +67,9 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
         let _operation = claim_surface_operation(&app, SurfaceOperation::Refresh)?;
         let lease = current_runtime_lease(&app)?;
         let Some(window) = app.get_webview_window("harness") else {
-            return harness_open(app.clone(), lease.launch_url).await;
+            // The refresh claim already owns SurfaceActor. Call the unclaimed
+            // implementation directly rather than nesting the Activate claim.
+            return harness_open_impl(app.clone(), lease.launch_url, true).await;
         };
         let current = window
             .url()
