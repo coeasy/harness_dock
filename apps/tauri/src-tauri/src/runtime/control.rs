@@ -1,10 +1,8 @@
 //! Tauri commands and actor-facing lifecycle helpers for the Runtime.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub(crate) fn current_lease(state: &AppState) -> Option<RuntimeLease> {
     // Poisoning only means a previous holder panicked; the lease it protects is
