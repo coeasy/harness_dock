@@ -1,10 +1,8 @@
 //! Gateway wire types, limits and shared registry state.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub const MAX_GATEWAY_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_GATEWAY_CONNECTIONS: usize = 64;
