@@ -1,31 +1,6 @@
-//! Small helpers shared across host modules.
-//!
-//! `is_loopback` in particular guards both the Gateway public-address check and
-//! the Harness WebView navigation check; keeping one implementation means a
-//! hardening of the loopback definition applies everywhere at once.
+//! Small helpers shared across desktop host modules.
 
-use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Returns true when `host` names a loopback interface.
-///
-/// Both `localhost` and any loopback IP qualify. `Url::host_str()` keeps the
-/// brackets on an IPv6 authority (`http://[::1]:8080` yields `[::1]`), so the
-/// bracketed form is accepted here rather than assuming callers pre-strip it —
-/// otherwise a legitimately local Gateway address would be rejected as remote.
-pub(crate) fn is_loopback(host: &str) -> bool {
-    let host = host.trim();
-    let unbracketed = if host.starts_with('[') && host.ends_with(']') {
-        &host[1..host.len() - 1]
-    } else {
-        host
-    };
-    unbracketed.eq_ignore_ascii_case("localhost")
-        || unbracketed
-            .parse::<IpAddr>()
-            .map(|ip| ip.is_loopback())
-            .unwrap_or(false)
-}
 
 /// Formats `time` as an RFC 3339 UTC timestamp.
 ///
@@ -65,32 +40,6 @@ pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 mod tests {
     use super::*;
     use std::time::Duration;
-
-    #[test]
-    fn loopback_hosts_are_recognised() {
-        assert!(is_loopback("localhost"));
-        assert!(is_loopback("LOCALHOST"));
-        assert!(is_loopback("127.0.0.1"));
-        assert!(is_loopback("127.7.7.7"));
-        assert!(is_loopback("::1"));
-        // `Url::host_str()` keeps IPv6 brackets, so the bracketed form must also
-        // count — this is the exact value callers hand us for [::1] URLs.
-        assert!(is_loopback("[::1]"));
-        assert!(is_loopback("  localhost  "));
-    }
-
-    #[test]
-    fn non_loopback_hosts_are_rejected() {
-        assert!(!is_loopback("example.com"));
-        assert!(!is_loopback("192.168.1.1"));
-        assert!(!is_loopback("10.0.0.1"));
-        assert!(!is_loopback("0.0.0.0"));
-        assert!(!is_loopback(""));
-        // Must not panic on malformed input.
-        assert!(!is_loopback("999.999.999.999"));
-        assert!(!is_loopback("[192.168.1.1]"));
-        assert!(!is_loopback("[::ffff:10.0.0.1]"));
-    }
 
     #[test]
     fn known_epochs_format_correctly() {
