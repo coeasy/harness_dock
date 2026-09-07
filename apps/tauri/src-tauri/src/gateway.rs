@@ -2,7 +2,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::util::is_loopback;
+use crate::net::is_loopback;
 
 const HEALTH_PATH: &str = "/api/harnessdock/health";
 const PAIR_PATH: &str = "/api/harnessdock/pair";
@@ -248,4 +248,3 @@ mod tests {
         assert_eq!(health.origin(), base.origin());
     }
 }
-
