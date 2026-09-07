@@ -36,11 +36,7 @@ impl ReadOnlySnapshot {
                 Ok(actor) => actor,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            (
-                actor.phase(),
-                actor.generation_id(),
-                actor.lease(),
-            )
+            (actor.phase(), actor.generation_id(), actor.lease())
         };
         let harness_visible = state
             .surface_actor
