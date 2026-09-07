@@ -1,11 +1,9 @@
 //! The live Gateway process: loopback listener handle, generation binding,
 //! status snapshot and shutdown.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub(crate) struct NativeGateway {
     pub stop: Arc<AtomicBool>,
