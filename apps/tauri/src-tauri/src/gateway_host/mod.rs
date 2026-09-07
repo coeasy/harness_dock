@@ -34,37 +34,37 @@ use tauri::{AppHandle, State};
 use url::Url;
 
 // Randomness, loopback checks and Runtime lease access now live in shared
-// modules (`crypto` / `util` / `lease`) so the Gateway no longer carries a
+// modules (`crypto` / `net` / `lease`) so the Gateway no longer carries a
 // second copy of helpers that also exist in `runtime_actor` and
 // `harness_window`.
 use crate::crypto::{pairing_code, random_hex};
 use crate::error::lock_err;
 use crate::lease::{is_current_generation, require_live_lease};
-use crate::util::{is_loopback, rfc3339};
+use crate::net::is_loopback;
+use crate::util::rfc3339;
 use crate::{runtime_actor::RuntimeLease, AppState};
 
-mod types;
-mod server;
-mod lifecycle;
+mod commands;
 mod connection;
-mod request;
 mod handler;
 mod http_io;
-mod commands;
+mod lifecycle;
+mod request;
+mod server;
+mod types;
 
-pub(crate) use types::*;
-pub(crate) use server::*;
-pub(crate) use lifecycle::*;
+pub(crate) use commands::*;
 pub(crate) use connection::*;
-pub(crate) use request::*;
 pub(crate) use handler::*;
 pub(crate) use http_io::*;
-pub(crate) use commands::*;
+pub(crate) use lifecycle::*;
+pub(crate) use request::*;
+pub(crate) use server::*;
+pub(crate) use types::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     pub fn gateway_public_url_is_https_or_loopback_debug_only() {
