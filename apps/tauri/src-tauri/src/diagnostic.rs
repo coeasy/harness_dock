@@ -33,7 +33,9 @@ fn extract_second_line_lower(buffer: &str, marker: &str) -> Option<String> {
     let lower = ascii_lower(buffer);
     let idx = lower.find(marker)?;
     let rest = &lower[idx + marker.len()..];
-    let trimmed = rest.trim_start().trim_end_matches(|c: char| c.is_ascii_punctuation());
+    let trimmed = rest
+        .trim_start()
+        .trim_end_matches(|c: char| c.is_ascii_punctuation());
     if trimmed.is_empty() {
         None
     } else {
@@ -42,9 +44,15 @@ fn extract_second_line_lower(buffer: &str, marker: &str) -> Option<String> {
 }
 
 fn extract_port_in_use(lower: &str) -> Option<u16> {
-    const MARKERS: [&str; 3] = ["address already in use", "eaddrinuse", "port is already in use"];
+    const MARKERS: [&str; 3] = [
+        "address already in use",
+        "eaddrinuse",
+        "port is already in use",
+    ];
     for marker in MARKERS {
-        let Some(idx) = lower.find(marker) else { continue };
+        let Some(idx) = lower.find(marker) else {
+            continue;
+        };
         // scan forward for a numeric port: ": :::<port>" or ":<port>"
         let tail = &lower[idx + marker.len()..];
         let digits_start = tail
@@ -86,7 +94,9 @@ fn extract_syntax_file_line(lower: &str) -> (String, Option<u32>) {
     let mut best_file = String::new();
     let mut best_line = None;
     while search < lower.len() {
-        let Some(rel) = lower[search..].find(':') else { break };
+        let Some(rel) = lower[search..].find(':') else {
+            break;
+        };
         let colon = search + rel;
         let digits_start = colon + 1;
         let digits_end = (digits_start..lower.len())
@@ -152,7 +162,9 @@ pub(crate) fn parse_diagnostic(diagnostic: &str) -> DiagnosticFingerprint {
         if let Some(path) = extract_quoted_value(&lower, "open") {
             return DiagnosticFingerprint::Permission { path };
         }
-        return DiagnosticFingerprint::Permission { path: String::new() };
+        return DiagnosticFingerprint::Permission {
+            path: String::new(),
+        };
     }
     DiagnosticFingerprint::None
 }
@@ -205,7 +217,8 @@ mod tests {
 
     #[test]
     fn recognizes_module_not_found() {
-        let fp = parse_diagnostic("Error: Cannot find module '/app/node_modules/foo-lib/dist/index.js'");
+        let fp =
+            parse_diagnostic("Error: Cannot find module '/app/node_modules/foo-lib/dist/index.js'");
         assert_eq!(
             fp,
             DiagnosticFingerprint::ModuleName("/app/node_modules/foo-lib/dist/index.js".into())
@@ -219,7 +232,9 @@ mod tests {
 
     #[test]
     fn recognizes_port_in_use() {
-        let fp = parse_diagnostic("node:events Error: listen EADDRINUSE: address already in use :::9357");
+        let fp = parse_diagnostic(
+            "node:events Error: listen EADDRINUSE: address already in use :::9357",
+        );
         assert_eq!(fp, DiagnosticFingerprint::PortInUse { port: 9357 });
         // A port conflict is ambiguous: it never blames a plugin.
         assert!(!fingerprint_matches(&fp, &tokens(&["anything"])));
@@ -256,6 +271,9 @@ mod tests {
 
     #[test]
     fn unrecognized_diagnostic_is_none() {
-        assert_eq!(parse_diagnostic("just some warning log"), DiagnosticFingerprint::None);
+        assert_eq!(
+            parse_diagnostic("just some warning log"),
+            DiagnosticFingerprint::None
+        );
     }
 }
