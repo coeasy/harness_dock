@@ -30,6 +30,7 @@ if (!/^\d+\.\d+\.\d+$/.test(tauriCliVersion)) {
 }
 const localTauriRoot = path.join(repoRoot, '.local-tools', `tauri-cli-${tauriCliVersion}`)
 const localTauriBin = path.join(localTauriRoot, 'bin')
+const tauriAppRoot = path.join(repoRoot, 'apps', 'tauri')
 
 const { values } = parseArgs({
   options: {
@@ -59,7 +60,9 @@ Normal first-run usage:
   Windows: scripts\\build.bat
   macOS/Linux: ./scripts/build.sh
 
-Cross-platform release artifacts remain produced by .github/workflows/tauri-candidate.yml.`)
+Windows one-click packaging intentionally produces NSIS only. Cross-platform
+release artifacts, including any MSI/WiX packaging, remain owned by
+.github/workflows/tauri-candidate.yml.`)
   process.exit(0)
 }
 
@@ -200,6 +203,13 @@ if (!values['skip-runtime']) {
 }
 
 run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:check'], 'check Tauri Rust host')
-if (!values['check-only']) run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:build'], 'build Tauri client')
+if (!values['check-only']) {
+  const tauriBuildArgs = ['tauri', 'build']
+  if (process.platform === 'win32') {
+    tauriBuildArgs.push('--bundles', 'nsis')
+    console.log('[build] Windows one-click packaging: NSIS only (MSI/WiX is release-workflow owned).')
+  }
+  run(cargoCommand, tauriBuildArgs, 'build Tauri client', { cwd: tauriAppRoot })
+}
 
 console.log('\n[build] Tauri build completed.')
