@@ -88,7 +88,7 @@ describe('self-contained local client build', () => {
     expect(localSchema).toBe(runtimeSchema)
   })
 
-  it('pins pnpm and tauri-cli instead of accepting arbitrary developer tool versions', () => {
+  it('pins pnpm and tauri-cli and reconciles stale workspace dependencies', () => {
     const pkg = JSON.parse(read('package.json')) as { packageManager?: string; scripts: Record<string, string> }
     const versions = JSON.parse(read('scripts/versions.json')) as { node?: string; tauriCli?: string }
     const bootstrap = read('scripts/bootstrap.mjs')
@@ -99,6 +99,9 @@ describe('self-contained local client build', () => {
     expect(bootstrap).toContain('rootPackage.packageManager')
     expect(bootstrap).toContain('expectedPnpmVersion')
     expect(bootstrap).toContain('exact packageManager match')
+    expect(bootstrap).toContain('reconciling workspace with frozen lockfile')
+    expect(bootstrap).toContain("['install', '--frozen-lockfile', '--prefer-offline']")
+    expect(bootstrap).not.toContain('node_modules present, skip install')
     expect(bootstrap).not.toContain('pnpm@10.12.0')
     expect(build).toContain('versions.tauriCli')
     expect(build).toContain('globalVersion === tauriCliVersion')
@@ -106,15 +109,23 @@ describe('self-contained local client build', () => {
     expect(build).toContain('actualPnpmVersion !== expectedPnpmVersion')
   })
 
-  it('prepares the exact sealed runtime and proves Harness Web before packaging', () => {
+  it('prepares the exact sealed runtime, proves Harness Web, and self-heals corruption once', () => {
     const prepare = read('scripts/prepare-local-runtime.mjs')
     const build = read('scripts/build.mjs')
+    const smoke = read('packages/client-runtime/src/smoke-cli.ts')
 
     expect(prepare).toContain('runtimeEmbedded')
     expect(prepare).toContain('firstLaunchRuntimeDownloadRequired')
     expect(build).toContain('scripts/prepare-local-runtime.mjs')
     expect(build).toContain("'smoke-runtime'")
     expect(build).toContain('verify sealed Runtime + Harness Web readiness')
+    expect(build).toContain('firstSmoke')
+    expect(build).toContain("['scripts/prepare-local-runtime.mjs', '--force']")
+    expect(build).toContain('force-refresh sealed local Harness Runtime after verification failure')
+    expect(build).toContain('verify refreshed sealed Runtime + Harness Web readiness')
+    expect(build).toContain('stale or corrupted local cache')
+    expect(smoke).toContain('assertRuntimeImageIdentity(runtimeDir, manifest)')
+    expect(smoke).toContain('assertBundledRuntimeIntegrity')
     expect(build).toContain('cargoCommand')
     expect(build).toContain('tauri-cli')
   })
@@ -132,6 +143,8 @@ describe('self-contained local client build', () => {
     expect(gitignore).toContain('.local-tools/')
     expect(gitignore).toContain('.local-logs/')
     expect(gitignore).toContain('apps/tauri/src-tauri/resources/dsh-runtime/')
+    expect(gitignore).toContain('apps/tauri/src-tauri/icons/.app-icon-normalized.png')
+    expect(gitignore).toContain('apps/tauri/src-tauri/icons/Square*.png')
   })
 
   it('keeps the JavaScript build entrypoints syntactically valid', () => {
