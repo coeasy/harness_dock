@@ -1,11 +1,9 @@
 //! Navigation admission: Runtime URL validation, lease-bound navigation
 //! guard, load bookkeeping, watchdog and surface-operation claims.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 #[cfg(not(mobile))]
 pub fn begin_harness_load(app: &AppHandle, runtime_generation: u64) -> Result<u64, String> {
@@ -57,7 +55,9 @@ pub fn runtime_listener_reachable(url: &Url) -> bool {
 }
 
 #[cfg(not(mobile))]
-pub fn current_runtime_lease(app: &AppHandle) -> Result<crate::runtime_actor::RuntimeLease, String> {
+pub fn current_runtime_lease(
+    app: &AppHandle,
+) -> Result<crate::runtime_actor::RuntimeLease, String> {
     // A RuntimeLease is published only after the Runtime readiness probe has
     // succeeded. WebView navigation/page-load callbacks must read that lease
     // without calling status_snapshot(), because status_snapshot() is allowed
