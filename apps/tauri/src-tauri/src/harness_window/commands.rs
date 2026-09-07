@@ -1,10 +1,8 @@
 //! Tauri commands for window controls, splash status and settings windows.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 #[tauri::command]
 pub async fn harness_open(app: AppHandle, url: String) -> Result<(), String> {
