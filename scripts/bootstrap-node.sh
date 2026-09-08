@@ -58,7 +58,10 @@ verify_hash() {
 }
 
 node_ready() {
-  [[ -x "$node_home/bin/node" ]] && "$node_home/bin/node" "$SCRIPT_DIR/node-version-check.cjs" >/dev/null 2>&1
+  local actual_version
+  [[ -x "$node_home/bin/node" ]] || return 1
+  actual_version="$("$node_home/bin/node" -p 'process.versions.node' 2>/dev/null || true)"
+  [[ "$actual_version" == "$node_version" ]]
 }
 
 install_from_mirror() {
