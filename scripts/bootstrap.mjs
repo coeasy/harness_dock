@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 /**
  * Toolchain bootstrap: assumes a working supported Node is already on PATH
- * (build.bat / build.sh guarantee that, downloading a portable Node if needed).
+ * (build.bat / build.sh guarantee that, preferring a compatible system Node
+ * and falling back to a verified portable Node when needed).
  *
  * Responsibilities:
- *   1. Ensure the exact pnpm version declared by packageManager
+ *   1. Reuse an exact pnpm from PATH when available; otherwise provision the
+ *      exact packageManager version under .local-tools without mutating global
+ *      Corepack/npm state.
  *   2. Reconcile the workspace with `pnpm install --frozen-lockfile --prefer-offline`
  *      on every normal invocation. This keeps an existing node_modules correct
  *      after git pulls/branch switches instead of trusting directory presence.
@@ -12,7 +15,7 @@
  * Usage: node scripts/bootstrap.mjs [--skip-install]
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +29,12 @@ if (!pnpmMatch) {
   process.exit(1)
 }
 const expectedPnpmVersion = pnpmMatch[1]
+const toolRoot = path.join(repoRoot, '.local-tools')
+const localPnpmRoot = path.join(toolRoot, `pnpm-${expectedPnpmVersion}`)
+const localPnpmBin = path.join(localPnpmRoot, 'node_modules', '.bin')
+const localPnpmCommand = path.join(localPnpmBin, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm')
+const pnpmBinFile = path.join(toolRoot, 'pnpm-bin.txt')
+const systemPnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, {
@@ -37,8 +46,8 @@ function run(cmd, args, opts = {}) {
   return r.status === 0
 }
 
-function pnpmVersion() {
-  const r = spawnSync('pnpm', ['--version'], {
+function commandVersion(command) {
+  const r = spawnSync(command, ['--version'], {
     cwd: repoRoot,
     shell: process.platform === 'win32',
     encoding: 'utf8',
@@ -46,43 +55,60 @@ function pnpmVersion() {
   return r.status === 0 ? String(r.stdout || '').trim() : null
 }
 
-function hasExactPnpm() {
-  return pnpmVersion() === expectedPnpmVersion
+function exactPnpm(command) {
+  return commandVersion(command) === expectedPnpmVersion
 }
 
-let pnpm = pnpmVersion()
+mkdirSync(toolRoot, { recursive: true })
+let pnpmCommand = systemPnpmCommand
+let pnpmSource = 'system PATH'
+let pnpm = commandVersion(systemPnpmCommand)
+
 if (pnpm !== expectedPnpmVersion) {
   console.log(
-    `[bootstrap] pnpm ${pnpm ?? 'missing'} does not match packageManager pnpm@${expectedPnpmVersion}; provisioning exact version...`,
+    `[bootstrap] pnpm ${pnpm ?? 'missing'} does not match packageManager pnpm@${expectedPnpmVersion}; resolving repository-local exact pnpm...`,
   )
 
-  let provisioned = false
-  if (run('corepack', ['enable'])) {
-    provisioned = run('corepack', ['prepare', `pnpm@${expectedPnpmVersion}`, '--activate']) && hasExactPnpm()
+  if (!exactPnpm(localPnpmCommand)) {
+    console.log(`[bootstrap] provisioning pnpm ${expectedPnpmVersion} under ${localPnpmRoot}`)
+    rmSync(localPnpmRoot, { recursive: true, force: true })
+    mkdirSync(localPnpmRoot, { recursive: true })
+    const installed = run('npm', [
+      'install',
+      '--prefix', localPnpmRoot,
+      '--no-save',
+      '--no-fund',
+      '--no-audit',
+      '--package-lock=false',
+      `pnpm@${expectedPnpmVersion}`,
+    ])
+    if (!installed || !existsSync(localPnpmCommand) || !exactPnpm(localPnpmCommand)) {
+      console.error(
+        `[bootstrap] ERROR: unable to provision isolated pnpm ${expectedPnpmVersion} under .local-tools. Check npm/network access or install pnpm@${expectedPnpmVersion} on PATH.`,
+      )
+      process.exit(1)
+    }
+  } else {
+    console.log(`[bootstrap] reusing cached repository-local pnpm ${expectedPnpmVersion}`)
   }
 
-  if (!provisioned) {
-    console.log(`[bootstrap] corepack did not activate pnpm ${expectedPnpmVersion}; falling back to npm install -g...`)
-    provisioned =
-      run('npm', ['install', '-g', `pnpm@${expectedPnpmVersion}`, '--no-fund', '--no-audit']) && hasExactPnpm()
-  }
-
-  if (!provisioned) {
-    console.error(
-      `[bootstrap] ERROR: unable to provision exact pnpm ${expectedPnpmVersion}. Check Node/npm permissions or install pnpm@${expectedPnpmVersion} manually.`,
-    )
-    process.exit(1)
-  }
-  pnpm = pnpmVersion()
+  pnpmCommand = localPnpmCommand
+  pnpmSource = '.local-tools'
+  pnpm = commandVersion(pnpmCommand)
+  writeFileSync(pnpmBinFile, `${localPnpmBin}\n`, 'utf8')
+} else {
+  // Prevent a stale repository-local path from shadowing an exact pnpm that is
+  // already available on PATH for this invocation.
+  rmSync(pnpmBinFile, { force: true })
 }
 
-console.log(`[bootstrap] pnpm ${pnpm} (exact packageManager match)`)
+console.log(`[bootstrap] pnpm ${pnpm} (exact packageManager match; source=${pnpmSource})`)
 
 if (skipInstall) {
   console.log('[bootstrap] --skip-install: skip workspace reconciliation')
 } else {
   console.log('[bootstrap] reconciling workspace with frozen lockfile (prefer offline) ...')
-  if (!run('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'])) {
+  if (!run(pnpmCommand, ['install', '--frozen-lockfile', '--prefer-offline'])) {
     console.error('[bootstrap] ERROR: pnpm install failed.')
     process.exit(1)
   }
