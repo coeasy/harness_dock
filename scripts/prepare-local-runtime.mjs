@@ -371,7 +371,14 @@ async function buildOfficialPackedRuntime() {
     '--yes', 'pnpm@11.7.0', 'exec', 'tsx',
     'scripts/release/verify-packed-install.ts',
     '--family', 'dsh', '--from', 'dist/dsh', '--from', 'dist/vendor',
-  ], { cwd: upstreamRoot })
+  ], {
+    cwd: upstreamRoot,
+    // npm's strict peer graph builder crashes on this large all-local-tarball
+    // consumer graph (Cannot read properties of null, reading edgesOut).
+    // Legacy peer handling still installs the exact tarballs and lets the
+    // verifier exercise the installed entrypoint without that npm bug.
+    env: { npm_config_legacy_peer_deps: 'true' },
+  })
 
   if (!(await hasPackedTarballs())) throw new Error('official upstream pack step produced no dsh/vendor tarballs')
 }
