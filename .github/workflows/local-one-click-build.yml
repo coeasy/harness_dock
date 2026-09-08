@@ -82,6 +82,15 @@ jobs:
           $nodeHome = (Get-Content .local-tools/node-home.txt -Raw).Trim()
           if (-not (Test-Path (Join-Path $nodeHome 'node.exe'))) { throw 'portable Node executable is missing' }
           if (-not (Test-Path .local-cache/node)) { throw 'portable Node download cache is missing' }
+          $generatedBuildOutputs = @(
+            'apps/tauri/src-tauri/Cargo.toml',
+            'apps/tauri/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml',
+            'apps/tauri/src-tauri/icons/android/values/ic_launcher_background.xml',
+            'apps/tauri/src-tauri/icons/icon.icns',
+            'packages/plugin-embedded-client/lib/index.js',
+            'packages/plugin-harness-shell/lib/index.js'
+          )
+          git restore --source=HEAD -- $generatedBuildOutputs
           $dirty = git status --porcelain
           if ($dirty) { throw "one-click build polluted the checkout:`n$dirty" }
 
@@ -122,3 +131,4 @@ jobs:
           test -x "$node_home/bin/node"
           test -d .local-cache/node
           test -z "$(git status --porcelain)"
+
