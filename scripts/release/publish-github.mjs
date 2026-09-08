@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { assertReleaseContract, repoRoot } from './contract.mjs'
+import { verifyReleaseAssets } from './verify-assets.mjs'
 
 const plan = assertReleaseContract()
 const repository = process.env.GITHUB_REPOSITORY
@@ -16,10 +17,10 @@ function fail(message) {
   throw new Error(`[release:publish] ${message}`)
 }
 
-function gh(args, { allowFailure = false, binary = false } = {}) {
+function gh(args, { allowFailure = false } = {}) {
   const result = spawnSync('gh', args, {
     cwd: repoRoot,
-    encoding: binary ? null : 'utf8',
+    encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
   })
   if (result.status !== 0 && !allowFailure) {
@@ -44,16 +45,6 @@ async function sha256File(file) {
   return hash.digest('hex')
 }
 
-function expectedLocalAssets() {
-  if (!existsSync(assetRoot)) fail(`release asset directory is missing: ${assetRoot}`)
-  const actual = readdirSync(assetRoot).filter((name) => statSync(path.join(assetRoot, name)).isFile()).sort()
-  const expected = [...plan.expectedAssetNames].sort()
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail(`local release asset set differs from contract; expected=${expected.join(',')} actual=${actual.join(',')}`)
-  }
-  return actual
-}
-
 function releaseByTag() {
   return ghJson(['api', `repos/${repository}/releases/tags/${releaseTag}`], { allowMissing: true })
 }
@@ -76,6 +67,17 @@ function deleteReplaceablePrerelease(release, oldSha) {
   console.log(`[release:publish] replacing gated test prerelease ${releaseTag}: ${oldSha} -> ${releaseSha}`)
   gh(['api', '--method', 'DELETE', `repos/${repository}/releases/${release.id}`])
   gh(['api', '--method', 'DELETE', `repos/${repository}/git/refs/tags/${releaseTag}`])
+}
+
+function assertExistingReleaseClassification(release) {
+  if (release.draft !== false) {
+    fail(`existing ${releaseTag} is a draft; refusing to mutate it through the published-release path`)
+  }
+  if (release.prerelease !== plan.githubPrerelease) {
+    fail(
+      `existing ${releaseTag} prerelease=${release.prerelease} differs from contract prerelease=${plan.githubPrerelease}; refusing silent classification change`,
+    )
+  }
 }
 
 function createTag() {
@@ -166,9 +168,13 @@ async function verifyPublished(assetNames) {
     fail(`published prerelease=${release.prerelease} expected ${plan.githubPrerelease}`)
   }
 
-  const remoteAssets = (release.assets ?? []).filter((asset) => Number(asset.size) > 0).map((asset) => asset.name).sort()
-  if (JSON.stringify(remoteAssets) !== JSON.stringify([...assetNames].sort())) {
-    fail(`published asset set differs from contract; expected=${assetNames.sort().join(',')} actual=${remoteAssets.join(',')}`)
+  const remoteEntries = Array.isArray(release.assets) ? release.assets : []
+  const empty = remoteEntries.filter((asset) => Number(asset.size) <= 0).map((asset) => asset.name)
+  if (empty.length > 0) fail(`published release contains empty assets: ${empty.join(', ')}`)
+  const remoteAssets = remoteEntries.map((asset) => asset.name).sort()
+  const expected = [...assetNames].sort()
+  if (JSON.stringify(remoteAssets) !== JSON.stringify(expected)) {
+    fail(`published asset set differs from contract; expected=${expected.join(',')} actual=${remoteAssets.join(',')}`)
   }
   console.log(`[release:publish] verified ${remoteAssets.length} exact published assets on ${releaseTag} @ ${releaseSha}`)
 }
@@ -179,7 +185,9 @@ async function main() {
   if (releaseTag !== plan.tag) fail(`RELEASE_TAG ${releaseTag} does not match release contract ${plan.tag}`)
   if (!existsSync(path.join(repoRoot, plan.notesPath))) fail(`release notes are missing: ${plan.notesPath}`)
 
-  const assetNames = expectedLocalAssets()
+  // Standalone publication is safe too: never rely only on a preceding workflow
+  // step to validate the immutable release bundle and SHA256SUMS.
+  const { assetNames } = await verifyReleaseAssets(assetRoot)
   let release = releaseByTag()
   let existingTagSha = tagSha()
 
@@ -192,6 +200,7 @@ async function main() {
   if (!existingTagSha) createTag()
 
   if (release) {
+    assertExistingReleaseClassification(release)
     const compareRoot = mkdtempSync(path.join(os.tmpdir(), 'harnessdock-release-compare-'))
     try {
       for (const assetName of assetNames) {
