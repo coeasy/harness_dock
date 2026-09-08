@@ -95,6 +95,9 @@ describe('self-contained local client build', () => {
     expect(prepare).toContain("'build:official'")
     expect(prepare).toContain('DSH_PACKED_RUNTIME_DIR')
     expect(prepare).toContain('cached runtime is stale or incompatible; refreshing')
+    expect(prepare).toContain('patchPinnedUpstreamWindowsCommandLaunchers')
+    expect(prepare).toContain("['npm', 'npx', 'pnpm']")
+    expect(prepare).toContain(".replace('spawn(command', 'spawn(commandForPlatform(command)')")
 
     const builderLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(runtimeBuilder)?.[1]
     const localLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(prepare)?.[1]
