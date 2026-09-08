@@ -36,7 +36,11 @@ if [[ "$node_ok" != true ]]; then
   node_home="$(cat .local-tools/node-home.txt)"
   [[ -x "$node_home/bin/node" ]] || { echo "[build] ERROR: portable Node missing: $node_home/bin/node" >&2; exit 1; }
   export PATH="$node_home/bin:$PATH"
-  echo "[build] Using verified portable Node $(node --version): $node_home/bin/node"
+
+  npm_command="$(command -v npm || true)"
+  [[ -n "$npm_command" ]] || { echo "[build] ERROR: portable npm is not available after activating $node_home/bin" >&2; exit 1; }
+  node scripts/verify-build-toolchain.mjs --node-home "$node_home" --npm-command "$npm_command"
+  echo "[build] Using verified portable Node $(node --version): $(command -v node)"
 fi
 
 node scripts/node-version-check.cjs
@@ -46,7 +50,11 @@ if [[ -s .local-tools/pnpm-bin.txt ]]; then
   pnpm_bin="$(cat .local-tools/pnpm-bin.txt)"
   [[ -x "$pnpm_bin/pnpm" ]] || { echo "[build] ERROR: repository-local pnpm missing: $pnpm_bin/pnpm" >&2; exit 1; }
   export PATH="$pnpm_bin:$PATH"
-  echo "[build] Using repository-local pnpm $(pnpm --version): $pnpm_bin/pnpm"
+
+  pnpm_command="$(command -v pnpm || true)"
+  [[ -n "$pnpm_command" ]] || { echo "[build] ERROR: repository-local pnpm is not available after activating $pnpm_bin" >&2; exit 1; }
+  node scripts/verify-build-toolchain.mjs --pnpm-bin "$pnpm_bin" --pnpm-command "$pnpm_command"
+  echo "[build] Using repository-local pnpm $(pnpm --version): $(command -v pnpm)"
 fi
 
 node scripts/build.mjs --skip-install "$@"
