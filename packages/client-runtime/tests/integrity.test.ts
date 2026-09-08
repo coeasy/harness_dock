@@ -27,6 +27,9 @@ describe('bundled runtime integrity', () => {
     expect(requiredNativePackages('linux', 'x64')).toContain(
       'node-addon-require-builtin-linux-x64-gnu',
     )
+    expect(requiredNativePackages('linux', 'x64')).toContain(
+      '@deepseek-ai/node-addon-landlock-run-linux-x64',
+    )
   })
 
   it('repairs the pi-ai 0.82.1 hidden manifest omitted from npm', async () => {
