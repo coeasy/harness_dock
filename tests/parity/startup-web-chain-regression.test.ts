@@ -162,10 +162,18 @@ describe('packaged startup Web chain regression', () => {
 
   it('keeps skipped duplicate startup smokes from masquerading as package failures', () => {
     const release = read('.github/workflows/release.yml')
+    const releaseManifest = JSON.parse(read('release-manifest.json')) as {
+      publication?: { requiredSameShaWorkflows?: string[] }
+    }
 
-    expect(release).toContain('startup_deadline=$((SECONDS + 900))')
+    expect(releaseManifest.publication?.requiredSameShaWorkflows).toContain(
+      '.github/workflows/windows-packaged-startup.yml',
+    )
+    expect(release).toContain('mapfile -t required_workflows')
+    expect(release).toContain('deadline=$((SECONDS + 900))')
     expect(release).toContain('.conclusion == "failure" or .conclusion == "timed_out"')
     expect(release).toContain('.conclusion == "action_required" or .conclusion == "startup_failure"')
+    expect(release).toContain('.conclusion == "cancelled"')
     expect(release).not.toContain('.conclusion != "success"')
   })
 })

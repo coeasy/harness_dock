@@ -16,11 +16,12 @@ $NodeExe = Join-Path $NodeHome 'node.exe'
 $PathFile = Join-Path $ToolRoot 'node-home.txt'
 $DownloadDir = Join-Path $RepoRoot '.local-cache\node'
 $Archive = Join-Path $DownloadDir $ArchiveName
+$ChecksumBaseUrl = "https://nodejs.org/dist/v$Version"
 
 function Test-Node([string]$Exe) {
     if (-not (Test-Path $Exe)) { return $false }
-    & $Exe (Join-Path $ScriptDir 'node-version-check.cjs') *> $null
-    return $LASTEXITCODE -eq 0
+    $actual = (& $Exe -p 'process.versions.node' 2>$null | Out-String).Trim()
+    return $LASTEXITCODE -eq 0 -and $actual -eq $Version
 }
 
 function Get-ExpectedHash([string]$BaseUrl) {
@@ -36,7 +37,10 @@ function Get-ExpectedHash([string]$BaseUrl) {
 
 function Install-FromMirror([string]$BaseUrl) {
     Write-Host "[bootstrap-node] source: $BaseUrl"
-    $expected = Get-ExpectedHash $BaseUrl
+    # The archive mirror is not a trust root. Always obtain the checksum
+    # manifest from the canonical Node.js distribution host so a mirror cannot
+    # replace both the archive and the expected digest.
+    $expected = Get-ExpectedHash $ChecksumBaseUrl
     New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
 
     $needsDownload = $true
@@ -46,15 +50,19 @@ function Install-FromMirror([string]$BaseUrl) {
     }
 
     if ($needsDownload) {
-        $partial = "$Archive.partial"
+        $partial = "$Archive.partial-$PID"
         Remove-Item $partial -Force -ErrorAction SilentlyContinue
-        Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/$ArchiveName" -OutFile $partial -TimeoutSec 180
-        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $partial).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) {
-            Remove-Item $partial -Force -ErrorAction SilentlyContinue
-            throw "Node archive SHA-256 mismatch: expected $expected, got $actual"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/$ArchiveName" -OutFile $partial -TimeoutSec 180
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $partial).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+                throw "Node archive SHA-256 mismatch: expected $expected, got $actual"
+            }
+            Move-Item -Force $partial $Archive
         }
-        Move-Item -Force $partial $Archive
+        finally {
+            Remove-Item $partial -Force -ErrorAction SilentlyContinue
+        }
     }
 
     Remove-Item $NodeHome -Recurse -Force -ErrorAction SilentlyContinue
@@ -62,20 +70,29 @@ function Install-FromMirror([string]$BaseUrl) {
     Expand-Archive -LiteralPath $Archive -DestinationPath $ToolRoot -Force
 
     if (-not (Test-Node $NodeExe)) {
-        throw "Portable Node was extracted but failed the HarnessDock Node version gate: $NodeExe"
+        throw "Portable Node was extracted but does not match the pinned Node $Version exactly: $NodeExe"
     }
 }
 
 New-Item -ItemType Directory -Path $ToolRoot -Force | Out-Null
 if (-not (Test-Node $NodeExe)) {
-    $sources = @(
-        "https://nodejs.org/dist/v$Version",
-        "https://npmmirror.com/mirrors/node/v$Version"
-    )
+    if ($env:NODE_DOWNLOAD_BASES) {
+        $sources = @($env:NODE_DOWNLOAD_BASES -split '\s+' | Where-Object { $_ -and $_.Trim() })
+    }
+    else {
+        $sources = @(
+            "https://nodejs.org/dist/v$Version",
+            "https://npmmirror.com/mirrors/node/v$Version"
+        )
+    }
+    if ($sources.Count -eq 0) {
+        throw 'NODE_DOWNLOAD_BASES was set but contained no usable mirror URLs.'
+    }
+
     $lastError = $null
     foreach ($source in $sources) {
         try {
-            Install-FromMirror $source
+            Install-FromMirror $source.TrimEnd('/')
             $lastError = $null
             break
         }

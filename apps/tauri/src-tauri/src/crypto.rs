@@ -59,7 +59,9 @@ mod tests {
     fn random_hex_length_and_charset() {
         let value = random_hex(16).expect("CSPRNG must be available");
         assert_eq!(value.len(), 32);
-        assert!(value.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+        assert!(value
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
     }
 
     #[test]

@@ -1,11 +1,9 @@
 //! Accept loop and connection bookkeeping: registration, per-peer rate
 //! limiting tables and worker join on shutdown.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub struct ActiveConnectionGuard {
     pub id: usize,
@@ -90,7 +88,11 @@ pub fn join_connection_workers(shared: &GatewayShared) {
     }
 }
 
-pub fn gateway_accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc<GatewayShared>) {
+pub fn gateway_accept_loop(
+    listener: TcpListener,
+    stop: Arc<AtomicBool>,
+    shared: Arc<GatewayShared>,
+) {
     while !stop.load(Ordering::Acquire) {
         reap_finished_connection_workers(&shared);
         match listener.accept() {

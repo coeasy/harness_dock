@@ -3,6 +3,8 @@ setlocal EnableExtensions
 rem HarnessDock one-click local Tauri build for Windows.
 rem Build-time Node/pnpm/Rust are developer tools only; the packaged client
 rem always runs the sealed Node+dsh Runtime embedded into the installer.
+rem Node resolution is local-first unless CI explicitly forces portable Node.
+rem pnpm reuses an exact PATH version or falls back to repository-local .local-tools.
 
 set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%.."
@@ -15,15 +17,33 @@ if not exist "package.json" (
 
 echo [build] HarnessDock local Windows build
 
-echo [build] Checking build-time Node...
+echo [build] Resolving build-time Node...
+if /I "%HARNESSDOCK_FORCE_PORTABLE_NODE%"=="1" goto :force_portable_node
 where node.exe >nul 2>nul
-if errorlevel 1 goto :portable_node
+if errorlevel 1 goto :system_node_missing
 node scripts\node-version-check.cjs >nul 2>nul
-if errorlevel 1 goto :portable_node
+if errorlevel 1 goto :system_node_incompatible
+for /f "delims=" %%I in ('where node.exe 2^>nul') do if not defined SYSTEM_NODE_EXE set "SYSTEM_NODE_EXE=%%I"
+for /f "delims=" %%V in ('node --version 2^>nul') do set "SYSTEM_NODE_VERSION=%%V"
+echo [build] Using compatible system Node %SYSTEM_NODE_VERSION%: %SYSTEM_NODE_EXE%
 goto :node_ready
 
+:force_portable_node
+echo [build] HARNESSDOCK_FORCE_PORTABLE_NODE=1; bypassing system Node
+goto :portable_node
+
+:system_node_missing
+echo [build] System Node not found; falling back to verified portable Node
+goto :portable_node
+
+:system_node_incompatible
+for /f "delims=" %%V in ('node --version 2^>nul') do set "SYSTEM_NODE_VERSION=%%V"
+if not defined SYSTEM_NODE_VERSION set "SYSTEM_NODE_VERSION=unknown"
+echo [build] System Node %SYSTEM_NODE_VERSION% is incompatible; falling back to verified portable Node
+goto :portable_node
+
 :portable_node
-echo [build] Supported Node is not available on PATH; preparing verified portable Node...
+echo [build] Preparing verified portable Node...
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bootstrap-node.ps1"
 if errorlevel 1 goto :fail
 if not exist ".local-tools\node-home.txt" (
@@ -37,16 +57,49 @@ if not exist "%NODE_HOME%\node.exe" (
 )
 set "PATH=%NODE_HOME%;%PATH%"
 
+set "ACTIVE_NPM_CMD="
+for /f "delims=" %%I in ('where npm.cmd 2^>nul') do if not defined ACTIVE_NPM_CMD set "ACTIVE_NPM_CMD=%%I"
+if not defined ACTIVE_NPM_CMD (
+  echo [build] ERROR: portable npm is not available after activating "%NODE_HOME%"
+  goto :fail
+)
+node scripts\verify-build-toolchain.mjs --node-home "%NODE_HOME%" --npm-command "%ACTIVE_NPM_CMD%"
+if errorlevel 1 goto :fail
+for /f "delims=" %%V in ('node --version 2^>nul') do set "PORTABLE_NODE_VERSION=%%V"
+for /f "delims=" %%I in ('where node.exe 2^>nul') do if not defined ACTIVE_NODE_EXE set "ACTIVE_NODE_EXE=%%I"
+echo [build] Using verified portable Node %PORTABLE_NODE_VERSION%: %ACTIVE_NODE_EXE%
+
 :node_ready
 node scripts\node-version-check.cjs
 if errorlevel 1 goto :fail
 
-rem bootstrap.mjs provisions pnpm 10 and installs workspace dependencies when needed.
+rem bootstrap.mjs resolves exact pnpm without mutating global Corepack/npm state,
+rem then installs workspace dependencies using the selected pnpm.
 node scripts\bootstrap.mjs
 if errorlevel 1 goto :fail
 
-rem build.mjs prepares the sealed Runtime, verifies real Harness Web readiness,
-rem installs an isolated tauri-cli when needed, checks Rust, and builds NSIS.
+if not exist ".local-tools\pnpm-bin.txt" goto :pnpm_ready
+set /p "PNPM_BIN="<".local-tools\pnpm-bin.txt"
+if not exist "%PNPM_BIN%\pnpm.cmd" (
+  echo [build] ERROR: repository-local pnpm executable not found: "%PNPM_BIN%\pnpm.cmd"
+  goto :fail
+)
+set "PATH=%PNPM_BIN%;%PATH%"
+
+set "ACTIVE_PNPM_CMD="
+for /f "delims=" %%I in ('where pnpm.cmd 2^>nul') do if not defined ACTIVE_PNPM_CMD set "ACTIVE_PNPM_CMD=%%I"
+if not defined ACTIVE_PNPM_CMD (
+  echo [build] ERROR: repository-local pnpm is not available after activating "%PNPM_BIN%"
+  goto :fail
+)
+node scripts\verify-build-toolchain.mjs --pnpm-bin "%PNPM_BIN%" --pnpm-command "%ACTIVE_PNPM_CMD%"
+if errorlevel 1 goto :fail
+for /f "delims=" %%V in ('pnpm --version 2^>nul') do set "LOCAL_PNPM_VERSION=%%V"
+echo [build] Using repository-local pnpm %LOCAL_PNPM_VERSION%: %ACTIVE_PNPM_CMD%
+
+:pnpm_ready
+rem build.mjs prepares the exact sealed Runtime, verifies real Harness Web readiness,
+rem checks Rust first, then pins tauri-cli only when native packaging is requested.
 node scripts\build.mjs --skip-install %*
 if errorlevel 1 goto :fail
 

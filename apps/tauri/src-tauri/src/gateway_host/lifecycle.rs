@@ -1,11 +1,9 @@
 //! Gateway admission: actor phase machine, port/URL validation, spawn and
 //! the stop path that serialises against a late publish.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub(crate) struct GatewayActorState {
     pub phase: GatewayPhase,

@@ -1,33 +1,28 @@
 #!/usr/bin/env node
 /**
- * Release discipline gate for HarnessDock + the pinned DeepSeek Harness Runtime.
+ * Release discipline gate for HarnessDock + pinned DeepSeek Harness Runtime.
  *
- * Product-version policy:
- *   HarnessDock tracks the base SemVer of the pinned dsh release. Prerelease
- *   qualifiers belong to Runtime provenance, not to the HarnessDock product
- *   version. Example: dsh 0.1.2-rc.1 => HarnessDock 0.1.2.
- *
- * Rules:
- *  1. origin.json.dshVersion must be an exact SemVer (never latest/next).
- *  2. HarnessDock client version must equal the dsh base SemVer.
- *  3. origin.json.clientVersion must equal package.json version.
- *  4. release-manifest Runtime version/tag/commit must equal origin.json.
- *  5. If the pinned dsh changed since released-origin.json, the client version
- *     must also have changed so the updater/release identity cannot stay stale.
+ * This validates provenance/version alignment and the complete platform release
+ * contract before candidate or publish workflows are allowed to proceed.
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DESKTOP_BUILD_TARGETS } from './build-targets.mjs'
+import {
+  releaseManifest as manifest,
+  releasePlan,
+  validateReleaseContract,
+} from './release/contract.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const rootPkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
 const origin = JSON.parse(
   readFileSync(path.join(repoRoot, 'packages', 'docs-sync', 'origin.json'), 'utf8'),
 )
-const manifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
 const releasedPath = path.join(repoRoot, 'packages', 'docs-sync', 'released-origin.json')
 
-const errors = []
+const errors = [...validateReleaseContract(manifest)]
 const clientVersion = rootPkg.version
 const { dshVersion } = origin
 const exactDshMatch =
@@ -83,6 +78,67 @@ if (origin.clientVersion !== clientVersion) {
   )
 }
 
+// Desktop local builds and release candidates must describe the same native
+// host target. Release CI may add wrappers such as DMG around the canonical app,
+// but platform, arch, Runtime, runner, and Tauri bundle policy cannot drift.
+const desktopProfiles = Object.values(DESKTOP_BUILD_TARGETS)
+for (const buildTarget of desktopProfiles) {
+  const releaseTarget = manifest.targets?.[buildTarget.id]
+  if (!releaseTarget) {
+    errors.push(`release-manifest.json.targets is missing desktop build target ${buildTarget.id}`)
+    continue
+  }
+  if (releaseTarget.platform !== buildTarget.platform) {
+    errors.push(`${buildTarget.id}.platform (${releaseTarget.platform}) != build target (${buildTarget.platform})`)
+  }
+  if (releaseTarget.arch !== buildTarget.arch) {
+    errors.push(`${buildTarget.id}.arch (${releaseTarget.arch}) != build target (${buildTarget.arch})`)
+  }
+  if (releaseTarget.runtimeMode !== 'sealed-local') {
+    errors.push(`${buildTarget.id}.runtimeMode must be sealed-local`)
+  }
+  if (releaseTarget.runtimeKey !== buildTarget.runtimeKey) {
+    errors.push(`${buildTarget.id}.runtimeKey (${releaseTarget.runtimeKey}) != build target (${buildTarget.runtimeKey})`)
+  }
+  if (releaseTarget.candidateRunner !== buildTarget.ciRunner) {
+    errors.push(`${buildTarget.id}.candidateRunner (${releaseTarget.candidateRunner}) != build target (${buildTarget.ciRunner})`)
+  }
+  if (JSON.stringify(releaseTarget.bundles ?? []) !== JSON.stringify(buildTarget.bundles)) {
+    errors.push(
+      `${buildTarget.id}.bundles (${(releaseTarget.bundles ?? []).join(',')}) != build target (${buildTarget.bundles.join(',')})`,
+    )
+  }
+
+  const runtimeBundle = manifest.runtimeBundles?.[buildTarget.runtimeKey]
+  if (!runtimeBundle) {
+    errors.push(`release-manifest.json.runtimeBundles is missing ${buildTarget.runtimeKey}`)
+  } else {
+    if (runtimeBundle.platform !== buildTarget.platform) {
+      errors.push(`runtime ${buildTarget.runtimeKey}.platform (${runtimeBundle.platform}) != ${buildTarget.platform}`)
+    }
+    if (runtimeBundle.arch !== buildTarget.arch) {
+      errors.push(`runtime ${buildTarget.runtimeKey}.arch (${runtimeBundle.arch}) != ${buildTarget.arch}`)
+    }
+    if (typeof runtimeBundle.prepareRunner !== 'string' || runtimeBundle.prepareRunner.length === 0) {
+      errors.push(`runtime ${buildTarget.runtimeKey}.prepareRunner is missing`)
+    }
+  }
+}
+
+for (const [targetId, target] of Object.entries(manifest.targets ?? {})) {
+  if (typeof target.candidateRunner !== 'string' || target.candidateRunner.length === 0) {
+    errors.push(`${targetId}.candidateRunner is missing`)
+  }
+  if (target.platform === 'android' || target.platform === 'ios') {
+    if (target.runtimeMode !== 'remote-gateway') {
+      errors.push(`${targetId} mobile release target must use remote-gateway Runtime mode`)
+    }
+    if (target.runtimeKey) {
+      errors.push(`${targetId} mobile release target must not package a desktop Runtime`)
+    }
+  }
+}
+
 if (existsSync(releasedPath)) {
   const released = JSON.parse(readFileSync(releasedPath, 'utf8'))
   if (released.dshVersion !== dshVersion && released.clientVersion === clientVersion) {
@@ -93,6 +149,16 @@ if (existsSync(releasedPath)) {
   }
 }
 
+let plan = null
+try {
+  plan = releasePlan(manifest)
+  if (!existsSync(path.join(repoRoot, plan.notesPath))) {
+    errors.push(`release notes are missing for contract tag ${plan.tag}: ${plan.notesPath}`)
+  }
+} catch (error) {
+  errors.push(`unable to build release plan: ${error.message}`)
+}
+
 if (errors.length > 0) {
   console.error('check:release FAILED:')
   for (const error of errors) console.error(`  - ${error}`)
@@ -100,5 +166,6 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `check:release OK: dsh=${dshVersion} dshBase=${dshBaseVersion} client=${clientVersion}${existsSync(releasedPath) ? '' : ' (no released-origin baseline yet)'}`,
+  `check:release OK: tag=${plan.tag} channel=${manifest.channel} assets=${plan.expectedAssetCount} ` +
+    `dsh=${dshVersion} client=${clientVersion}${existsSync(releasedPath) ? '' : ' (no released-origin baseline yet)'}`,
 )

@@ -25,6 +25,7 @@ mod host_protocol;
 mod lease;
 #[cfg(not(mobile))]
 mod lifecycle;
+mod net;
 mod platform;
 #[cfg(not(mobile))]
 mod plugin_quarantine;

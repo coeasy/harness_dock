@@ -31,6 +31,30 @@ import {
 
 const execFileAsync = promisify(execFile)
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+
+function packageManagerEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env }
+  // pnpm exports npm lifecycle variables for package scripts. When this
+  // builder invokes npm while creating the bundled runtime, those variables
+  // can redirect npm to the runtime being built (and already pruned), rather
+  // than the portable build-tool Node installation.
+  for (const key of ['npm_execpath', 'npm_node_execpath', 'npm_config_user_agent', 'NPM_CONFIG_USER_AGENT']) {
+    delete environment[key]
+  }
+  return {
+    ...environment,
+    NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+  }
+}
+
+function npmInvocation(args: string[]): { command: string; args: string[] } {
+  if (process.platform !== 'win32') return { command: 'npm', args }
+  return {
+    command: process.execPath,
+    args: [path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'), ...args],
+  }
+}
+
 // Bump whenever the on-disk runtime composition/selection rules change. This
 // prevents an Actions restore-key or a local cache from bypassing new runtime
 // builder logic merely because the pinned dsh version stayed the same.
@@ -90,35 +114,27 @@ if (existingLayout) {
 }
 
 async function installTargetNativePackages(): Promise<void> {
-  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const packages = requiredNativePackages(platform, arch)
+  const npm = npmInvocation([
+    'install',
+    '--no-save',
+    '--force',
+    '--omit=dev',
+    '--include=optional',
+    '--ignore-scripts',
+    '--no-fund',
+    '--no-audit',
+    `--os=${platform}`,
+    `--cpu=${arch}`,
+    ...(platform === 'linux' ? ['--libc=glibc'] : []),
+    ...packages,
+  ])
   console.log(`repairing target-native runtime packages: ${packages.join(', ')}`)
-  await execFileAsync(
-    npmBin,
-    [
-      'install',
-      '--no-save',
-      '--force',
-      '--omit=dev',
-      '--include=optional',
-      '--ignore-scripts',
-      '--no-fund',
-      '--no-audit',
-      `--os=${platform}`,
-      `--cpu=${arch}`,
-      ...(platform === 'linux' ? ['--libc=glibc'] : []),
-      ...packages,
-    ],
-    {
-      cwd: dest,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
-      },
-      shell: process.platform === 'win32',
-    },
-  )
+  await execFileAsync(npm.command, npm.args, {
+    cwd: dest,
+    windowsHide: true,
+    env: packageManagerEnvironment(),
+  })
 }
 
 async function packedTarballMetadata(tarball: string): Promise<PackedPackageMeta> {
@@ -166,7 +182,20 @@ async function installPackedRuntime(root: string): Promise<void> {
     'utf8',
   )
 
-  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const npm = npmInvocation([
+    'install',
+    '--omit=dev',
+    '--omit=optional',
+    '--ignore-scripts',
+    '--no-fund',
+    '--no-audit',
+    '--package-lock=false',
+    `--os=${platform}`,
+    `--cpu=${arch}`,
+    ...(platform === 'linux' ? ['--libc=glibc'] : []),
+    '--fetch-timeout=60000',
+    '--fetch-retries=3',
+  ])
   console.log(
     `installing ${selectedNames.length}/${entries.length} required official packed upstream tarballs for dsh ${origin.dshVersion}`,
   )
@@ -175,33 +204,12 @@ async function installPackedRuntime(root: string): Promise<void> {
   // only the target-native optional packages it actually needs immediately
   // afterwards via installTargetNativePackages(), avoiding unrelated release
   // packages and cross-feature optional dependency payloads in shipped runtimes.
-  await execFileAsync(
-    npmBin,
-    [
-      'install',
-      '--omit=dev',
-      '--omit=optional',
-      '--ignore-scripts',
-      '--no-fund',
-      '--no-audit',
-      '--package-lock=false',
-      `--os=${platform}`,
-      `--cpu=${arch}`,
-      ...(platform === 'linux' ? ['--libc=glibc'] : []),
-      '--fetch-timeout=60000',
-      '--fetch-retries=3',
-    ],
-    {
-      cwd: dest,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
-      },
-      shell: process.platform === 'win32',
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  )
+  await execFileAsync(npm.command, npm.args, {
+    cwd: dest,
+    windowsHide: true,
+    env: packageManagerEnvironment(),
+    maxBuffer: 16 * 1024 * 1024,
+  })
 
   const installedPkg = JSON.parse(
     await readFile(path.join(dest, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'),
@@ -332,7 +340,6 @@ if (packedRuntimeDir) {
       `dsh ${origin.dshVersion} is not published to npm; set DSH_PACKED_RUNTIME_DIR to the official packed tarballs`,
     )
   }
-  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const registries = [
     ...(process.env.DSH_NPM_MIRROR ? [process.env.DSH_NPM_MIRROR] : []),
     'https://registry.npmjs.org',
@@ -343,34 +350,27 @@ if (packedRuntimeDir) {
   for (const registry of registries) {
     console.log(`npm install @deepseek-ai/dsh@${origin.dshVersion} --registry ${registry}`)
     try {
-      await execFileAsync(
-        npmBin,
-        [
-          'install',
-          '--omit=dev',
-          '--include=optional',
-          '--no-fund',
-          '--no-audit',
-          `--os=${platform}`,
-          `--cpu=${arch}`,
-          ...(platform === 'linux' ? ['--libc=glibc'] : []),
-          '--fetch-timeout=60000',
-          '--fetch-retries=3',
-          '--fetch-retry-mintimeout=1000',
-          '--fetch-retry-maxtimeout=10000',
-          `--registry=${registry}`,
-          `@deepseek-ai/dsh@${origin.dshVersion}`,
-        ],
-        {
-          cwd: dest,
-          windowsHide: true,
-          env: {
-            ...process.env,
-            NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
-          },
-          shell: process.platform === 'win32',
-        },
-      )
+      const npm = npmInvocation([
+        'install',
+        '--omit=dev',
+        '--include=optional',
+        '--no-fund',
+        '--no-audit',
+        `--os=${platform}`,
+        `--cpu=${arch}`,
+        ...(platform === 'linux' ? ['--libc=glibc'] : []),
+        '--fetch-timeout=60000',
+        '--fetch-retries=3',
+        '--fetch-retry-mintimeout=1000',
+        '--fetch-retry-maxtimeout=10000',
+        `--registry=${registry}`,
+        `@deepseek-ai/dsh@${origin.dshVersion}`,
+      ])
+      await execFileAsync(npm.command, npm.args, {
+        cwd: dest,
+        windowsHide: true,
+        env: packageManagerEnvironment(),
+      })
       installed = true
       break
     } catch (error) {
@@ -423,3 +423,4 @@ await writeFile(
 )
 
 console.log(`bundled runtime ready: ${dest}`)
+

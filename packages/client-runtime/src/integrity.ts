@@ -62,6 +62,7 @@ export function requiredNativePackages(
   }
   if (platform === 'linux') {
     return [
+      `@deepseek-ai/node-addon-landlock-run-linux-${arch}`,
       `node-addon-require-builtin-linux-${arch}-gnu`,
       `@koromix/koffi-linux-${arch}`,
       `@img/sharp-linux-${arch}`,

@@ -1,10 +1,8 @@
 //! WebView creation, navigation and restart orchestration.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 #[cfg(not(mobile))]
 pub async fn harness_open_impl(

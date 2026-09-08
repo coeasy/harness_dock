@@ -1,10 +1,8 @@
 //! Minimal HTTP response writers used by the Gateway handlers.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub fn write_json(
     stream: &mut TcpStream,

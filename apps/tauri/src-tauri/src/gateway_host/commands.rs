@@ -1,10 +1,8 @@
 //! Tauri commands that expose the Gateway to the native UI surfaces.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 #[tauri::command]
 pub fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStatus, String> {
@@ -30,10 +28,7 @@ pub fn gateway_host_status(state: State<'_, AppState>) -> Result<GatewayHostStat
             return Ok(stopped());
         }
     }
-    let actor = state
-        .gateway
-        .lock()
-        .map_err(|_| lock_err("GatewayActor"))?;
+    let actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     Ok(actor
         .server
         .as_ref()
@@ -58,9 +53,7 @@ pub fn gateway_host_start(
     let port = validated_gateway_port(local_port)?;
     let lifecycle = lifecycle_lock(&state.gateway)?;
     let generation = {
-        let _serial = lifecycle
-            .lock()
-            .map_err(|_| lock_err("GatewayLifecycle"))?;
+        let _serial = lifecycle.lock().map_err(|_| lock_err("GatewayLifecycle"))?;
         if let Ok(actor) = state.gateway.lock() {
             if let Some(server) = actor.server.as_ref() {
                 if server.runtime_generation == lease.generation.id && !server.is_finished() {
@@ -77,10 +70,7 @@ pub fn gateway_host_start(
             return Err("Gateway 正在处理另一个生命周期操作，请稍候。".into());
         }
         stop_managed_inner(&state.gateway);
-        let mut actor = state
-            .gateway
-            .lock()
-            .map_err(|_| lock_err("GatewayActor"))?;
+        let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
         actor.begin_start()?
     };
     let server = match spawn_native_gateway(lease.clone(), port, public_url) {
@@ -103,13 +93,8 @@ pub fn gateway_host_start(
         return Err("RuntimeLease 在 Gateway 启动期间已失效。".into());
     }
     let status = {
-        let _serial = lifecycle
-            .lock()
-            .map_err(|_| lock_err("GatewayLifecycle"))?;
-        let mut actor = state
-            .gateway
-            .lock()
-            .map_err(|_| lock_err("GatewayActor"))?;
+        let _serial = lifecycle.lock().map_err(|_| lock_err("GatewayLifecycle"))?;
+        let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
         if let Err(mut stale) = actor.publish(generation, server) {
             stale.stop();
             return Err("陈旧 Gateway generation 已被丢弃。".into());
@@ -131,10 +116,7 @@ pub fn gateway_host_create_pairing(
     state: State<'_, AppState>,
 ) -> Result<GatewayPairingTicket, String> {
     let current = require_live_lease(&*state)?;
-    let mut actor = state
-        .gateway
-        .lock()
-        .map_err(|_| lock_err("GatewayActor"))?;
+    let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     let server = actor
         .server
         .as_mut()
@@ -163,10 +145,7 @@ pub fn gateway_host_create_pairing(
 #[tauri::command]
 pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Result<bool, String> {
     let current = require_live_lease(&*state)?;
-    let mut actor = state
-        .gateway
-        .lock()
-        .map_err(|_| lock_err("GatewayActor"))?;
+    let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     let server = actor
         .server
         .as_mut()
@@ -198,10 +177,7 @@ pub fn gateway_host_revoke(state: State<'_, AppState>, device_id: String) -> Res
 #[tauri::command]
 pub fn gateway_host_revoke_all(state: State<'_, AppState>) -> Result<usize, String> {
     let current = require_live_lease(&*state)?;
-    let mut actor = state
-        .gateway
-        .lock()
-        .map_err(|_| lock_err("GatewayActor"))?;
+    let mut actor = state.gateway.lock().map_err(|_| lock_err("GatewayActor"))?;
     let server = actor
         .server
         .as_mut()

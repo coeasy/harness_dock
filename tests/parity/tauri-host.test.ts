@@ -213,28 +213,66 @@ describe('Tauri host contract', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const releaseManifest = readJson('release-manifest.json')
+    const releaseContract = read('scripts/release/contract.mjs')
+    const publisher = read('scripts/release/publish-github.mjs')
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
+
     expect(candidate).toContain('Verify full runtime before packaging')
     expect(candidate).toContain('Confirm unsigned beta packaging')
     expect(candidate).not.toContain('@dsh/desktop')
     expect(release).not.toContain('-thin')
-    expect(release).toContain('eq 15')
+
+    expect(releaseManifest.schemaVersion).toBe(2)
+    expect(releaseManifest.channel).toBe('beta')
     expect(releaseManifest.prerelease).toBe('beta.3')
-    expect(release).toContain("require('./release-manifest.json').prerelease")
-    expect(release).toContain('expected_tag="v${version}-${prerelease}"')
-    expect(release).not.toContain('latest.json')
-    expect(release).not.toContain('.app.tar.gz.sig')
+    expect(releaseManifest.publication).toMatchObject({
+      tagTemplate: 'v{version}',
+      githubPrerelease: true,
+      replaceablePrerelease: true,
+      candidateWorkflow: '.github/workflows/tauri-candidate.yml',
+    })
+    expect(releaseManifest.publication.requiredSameShaWorkflows).toEqual(
+      expect.arrayContaining([
+        '.github/workflows/ci.yml',
+        '.github/workflows/windows-packaged-startup.yml',
+      ]),
+    )
+
+    const clientAssetCount = Object.values(releaseManifest.targets).reduce(
+      (total: number, target: any) => total + target.assets.length,
+      0,
+    )
+    const runtimeAssetCount = Object.keys(releaseManifest.runtimeBundles).length
+    expect(clientAssetCount).toBe(10)
+    expect(runtimeAssetCount).toBe(4)
+    expect(clientAssetCount + runtimeAssetCount + 1).toBe(15)
+
+    expect(releaseContract).toContain('expectedAssetCount: expectedAssetNames.length')
+    expect(releaseContract).toContain('release asset names must be unique')
+    expect(release).toContain('node scripts/release/contract.mjs tag')
+    expect(release).toContain('node scripts/release/assemble.mjs release-input release-assets')
+    expect(release).toContain('node scripts/release/verify-assets.mjs release-assets')
+    expect(release).toContain('node scripts/release/publish-github.mjs release-assets')
     expect(release).toContain('candidate is stale:')
     expect(release).toContain('candidate is not green:')
-    expect(release).toContain('no successful same-SHA main CI found')
-    expect(release).toContain('published asset differs from exact candidate')
-    expect(release).toContain('Existing same-SHA release asset matches')
-    expect(release).toContain('Replacing broken test prerelease')
-    expect(release).toContain('existing_prerelease')
-    expect(release).toContain('is not the replaceable published test prerelease')
-    expect(release).toContain('without a managed prerelease; refusing to move it')
-    expect(release).toContain('--method DELETE')
-    expect(release).not.toContain('--clobber')
+    expect(release).toContain('same-SHA release gate failed:')
+
+    expect(publisher).toContain('published asset differs from exact candidate')
+    expect(publisher).toContain('replacing gated test prerelease')
+    expect(publisher).toContain('without a managed GitHub release; refusing to move it')
+    expect(publisher).toContain('assertExistingReleaseClassification')
+    expect(publisher).toContain("gh(['release', 'upload', releaseTag, localFile])")
+    expect(publisher).toContain("'--method', 'DELETE'")
+
+    const allOutputs = [
+      ...Object.values(releaseManifest.targets).flatMap((target: any) =>
+        target.assets.map((asset: any) => asset.output),
+      ),
+      ...Object.values(releaseManifest.runtimeBundles).map((runtime: any) => runtime.output),
+      releaseManifest.checksums.file,
+    ]
+    expect(allOutputs.some((name: string) => name === 'latest.json')).toBe(false)
+    expect(allOutputs.some((name: string) => name.endsWith('.app.tar.gz.sig'))).toBe(false)
     expect(tauri.bundle.createUpdaterArtifacts).toBe(false)
     expect(tauri.bundle.windows.allowDowngrades).toBe(false)
   })
@@ -243,7 +281,10 @@ describe('Tauri host contract', () => {
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const smoke = read('.github/workflows/tauri-ci.yml')
-    const release = read('.github/workflows/release.yml')
+    const releaseManifest = readJson('release-manifest.json')
+    const androidTarget = releaseManifest.targets['android-arm64']
+    const androidOutputs = androidTarget.assets.map((asset: any) => asset.output)
+
     expect(tauri.bundle.windows.nsis.installerIcon).toBe('icons/icon.ico')
     expect(tauri.bundle.windows.nsis.uninstallerIcon).toBe('icons/icon.ico')
     expect(tauri.bundle.windows.nsis.installMode).toBe('currentUser')
@@ -252,7 +293,16 @@ describe('Tauri host contract', () => {
     expect(smoke).toContain('cargo tauri android build --apk')
     expect(candidate).not.toContain('cargo tauri android build --release')
     expect(smoke).not.toContain('cargo tauri android build --release')
-    expect(release).toContain('android-arm64-release.apk')
-    expect(release).not.toContain('android-arm64-debug.apk')
+
+    expect(androidTarget).toMatchObject({
+      platform: 'android',
+      arch: 'arm64',
+      runtimeMode: 'remote-gateway',
+      candidateArtifact: 'tauri-android-arm64-candidate',
+    })
+    expect(androidTarget.runtimeKey).toBeUndefined()
+    expect(androidOutputs).toContain('HarnessDock-{version}-android-arm64-release.apk')
+    expect(androidOutputs).toContain('HarnessDock-{version}-android-arm64-release.aab')
+    expect(androidOutputs.some((name: string) => name.includes('debug'))).toBe(false)
   })
 })

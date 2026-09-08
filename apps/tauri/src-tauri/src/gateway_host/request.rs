@@ -1,10 +1,8 @@
 //! HTTP/1.1 request parsing and validation for the Gateway proxy.
 
-
 // The parent module owns the shared imports; every submodule can see
 // them and its siblings through this glob (glob imports never warn).
 use super::*;
-
 
 pub struct ParsedRequest {
     pub method: String,
