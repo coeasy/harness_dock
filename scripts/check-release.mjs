@@ -78,10 +78,9 @@ if (origin.clientVersion !== clientVersion) {
   )
 }
 
-// Desktop source builds and desktop release targets must describe the same
-// platform/architecture/Runtime identity. Packaging details may differ (for
-// example release CI adds DMG around the canonical macOS .app), but Runtime
-// identity is never allowed to drift between local build and release modules.
+// Desktop local builds and release candidates must describe the same native
+// host target. Release CI may add wrappers such as DMG around the canonical app,
+// but platform, arch, Runtime, runner, and Tauri bundle policy cannot drift.
 const desktopProfiles = Object.values(DESKTOP_BUILD_TARGETS)
 for (const buildTarget of desktopProfiles) {
   const releaseTarget = manifest.targets?.[buildTarget.id]
@@ -101,6 +100,14 @@ for (const buildTarget of desktopProfiles) {
   if (releaseTarget.runtimeKey !== buildTarget.runtimeKey) {
     errors.push(`${buildTarget.id}.runtimeKey (${releaseTarget.runtimeKey}) != build target (${buildTarget.runtimeKey})`)
   }
+  if (releaseTarget.candidateRunner !== buildTarget.ciRunner) {
+    errors.push(`${buildTarget.id}.candidateRunner (${releaseTarget.candidateRunner}) != build target (${buildTarget.ciRunner})`)
+  }
+  if (JSON.stringify(releaseTarget.bundles ?? []) !== JSON.stringify(buildTarget.bundles)) {
+    errors.push(
+      `${buildTarget.id}.bundles (${(releaseTarget.bundles ?? []).join(',')}) != build target (${buildTarget.bundles.join(',')})`,
+    )
+  }
 
   const runtimeBundle = manifest.runtimeBundles?.[buildTarget.runtimeKey]
   if (!runtimeBundle) {
@@ -112,10 +119,16 @@ for (const buildTarget of desktopProfiles) {
     if (runtimeBundle.arch !== buildTarget.arch) {
       errors.push(`runtime ${buildTarget.runtimeKey}.arch (${runtimeBundle.arch}) != ${buildTarget.arch}`)
     }
+    if (typeof runtimeBundle.prepareRunner !== 'string' || runtimeBundle.prepareRunner.length === 0) {
+      errors.push(`runtime ${buildTarget.runtimeKey}.prepareRunner is missing`)
+    }
   }
 }
 
 for (const [targetId, target] of Object.entries(manifest.targets ?? {})) {
+  if (typeof target.candidateRunner !== 'string' || target.candidateRunner.length === 0) {
+    errors.push(`${targetId}.candidateRunner is missing`)
+  }
   if (target.platform === 'android' || target.platform === 'ios') {
     if (target.runtimeMode !== 'remote-gateway') {
       errors.push(`${targetId} mobile release target must use remote-gateway Runtime mode`)
