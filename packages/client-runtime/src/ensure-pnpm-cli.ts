@@ -90,11 +90,19 @@ if (!ready) {
 }
 
 await assertBundledPnpm(dest, platform)
+const smokeEnvironment = { ...process.env }
+// pnpm is smoke-tested with the bundled Node, not inside the outer pnpm run
+// that builds HarnessDock. Leaving npm's lifecycle variables in place makes
+// pnpm resolve the already-pruned runtime npm-cli.js on Windows.
+for (const key of ['npm_execpath', 'npm_node_execpath', 'npm_config_user_agent', 'NPM_CONFIG_USER_AGENT']) {
+  delete smokeEnvironment[key]
+}
 const { stdout } = await execFileAsync(process.execPath, [bundledPnpmEntry(dest), '--version'], {
   // pnpm discovers the nearest packageManager field from cwd. The embedded
   // runtime deliberately pins a different pnpm major than HarnessDock.
   cwd: tmpdir(),
   windowsHide: true,
+  env: smokeEnvironment,
 })
 if (stdout.trim() !== PNPM_BUNDLE_VERSION) {
   throw new Error(`bundled pnpm smoke returned ${stdout.trim() || 'empty'}, expected ${PNPM_BUNDLE_VERSION}`)
