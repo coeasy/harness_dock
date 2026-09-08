@@ -96,6 +96,8 @@ jobs:
           test -s apps/tauri/src-tauri/src/error.rs
 
   # Exercise the real portable Node download on POSIX, once per primary mirror.
+  # The same gate also activates the extracted Node in the parent shell and
+  # proves npm resolves back into that exact portable home.
   node-bootstrap:
     if: github.event_name != 'schedule'
     strategy:
@@ -114,7 +116,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Bootstrap portable Node and verify the published artifact
+      - name: Bootstrap portable Node, activate it, and verify the published artifact
         shell: bash
         run: |
           set -euo pipefail
@@ -138,10 +140,14 @@ jobs:
           portable_version="$($node_home/bin/node --version | sed 's/^v//')"
           test "$portable_version" = "$node_version"
           "$node_home/bin/node" scripts/node-version-check.cjs
+          export PATH="$node_home/bin:$PATH"
+          npm_command="$(command -v npm)"
+          node scripts/verify-build-toolchain.mjs --node-home "$node_home" --npm-command "$npm_command"
           bash scripts/bootstrap-node.sh
 
   # Windows previously parsed bootstrap-node.ps1 but never executed its download,
-  # checksum, extraction, and node-home contract. Exercise both mirrors for real.
+  # checksum, extraction, node-home, parent PATH activation, and npm shim contract.
+  # Exercise both mirrors for real so .cmd invocation regressions fail here quickly.
   node-bootstrap-windows:
     if: github.event_name != 'schedule'
     strategy:
@@ -152,7 +158,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Bootstrap portable Node and verify the published Windows artifact
+      - name: Bootstrap portable Node, activate it, and verify the published Windows artifact
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -176,6 +182,10 @@ jobs:
           if ($portableVersion -ne $nodeVersion) { throw "portable Node $portableVersion != pinned $nodeVersion" }
           & $nodeExe scripts/node-version-check.cjs
           if ($LASTEXITCODE -ne 0) { throw 'portable Node failed version gate' }
+          $env:PATH = "$nodeHome;$env:PATH"
+          $npmCmd = (Get-Command npm.cmd -CommandType Application -ErrorAction Stop).Source
+          & $nodeExe scripts/verify-build-toolchain.mjs --node-home $nodeHome --npm-command $npmCmd
+          if ($LASTEXITCODE -ne 0) { throw 'portable Node activation verifier failed' }
           ./scripts/bootstrap-node.ps1
 
   sync:
