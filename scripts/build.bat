@@ -56,8 +56,18 @@ if not exist "%NODE_HOME%\node.exe" (
   goto :fail
 )
 set "PATH=%NODE_HOME%;%PATH%"
+
+set "ACTIVE_NPM_CMD="
+for /f "delims=" %%I in ('where npm.cmd 2^>nul') do if not defined ACTIVE_NPM_CMD set "ACTIVE_NPM_CMD=%%I"
+if not defined ACTIVE_NPM_CMD (
+  echo [build] ERROR: portable npm is not available after activating "%NODE_HOME%"
+  goto :fail
+)
+node scripts\verify-build-toolchain.mjs --node-home "%NODE_HOME%" --npm-command "%ACTIVE_NPM_CMD%"
+if errorlevel 1 goto :fail
 for /f "delims=" %%V in ('node --version 2^>nul') do set "PORTABLE_NODE_VERSION=%%V"
-echo [build] Using verified portable Node %PORTABLE_NODE_VERSION%: %NODE_HOME%\node.exe
+for /f "delims=" %%I in ('where node.exe 2^>nul') do if not defined ACTIVE_NODE_EXE set "ACTIVE_NODE_EXE=%%I"
+echo [build] Using verified portable Node %PORTABLE_NODE_VERSION%: %ACTIVE_NODE_EXE%
 
 :node_ready
 node scripts\node-version-check.cjs
@@ -75,8 +85,17 @@ if not exist "%PNPM_BIN%\pnpm.cmd" (
   goto :fail
 )
 set "PATH=%PNPM_BIN%;%PATH%"
+
+set "ACTIVE_PNPM_CMD="
+for /f "delims=" %%I in ('where pnpm.cmd 2^>nul') do if not defined ACTIVE_PNPM_CMD set "ACTIVE_PNPM_CMD=%%I"
+if not defined ACTIVE_PNPM_CMD (
+  echo [build] ERROR: repository-local pnpm is not available after activating "%PNPM_BIN%"
+  goto :fail
+)
+node scripts\verify-build-toolchain.mjs --pnpm-bin "%PNPM_BIN%" --pnpm-command "%ACTIVE_PNPM_CMD%"
+if errorlevel 1 goto :fail
 for /f "delims=" %%V in ('pnpm --version 2^>nul') do set "LOCAL_PNPM_VERSION=%%V"
-echo [build] Using repository-local pnpm %LOCAL_PNPM_VERSION%: %PNPM_BIN%\pnpm.cmd
+echo [build] Using repository-local pnpm %LOCAL_PNPM_VERSION%: %ACTIVE_PNPM_CMD%
 
 :pnpm_ready
 rem build.mjs prepares the exact sealed Runtime, verifies real Harness Web readiness,
