@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runtimeCandidateMatrix, desktopCandidateMatrix } from './release/candidate-matrix.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 import { rustSource } from './lib/rust-source.mjs'
@@ -46,10 +47,53 @@ if (tauri.bundle?.resources?.['resources/'] !== '') {
 }
 
 // Candidate must construct, publish, rehydrate and smoke the exact target Runtime
-// that will be embedded in the installer. Step labels are not contractual.
+// that will be embedded in each desktop installer. Runtime/desktop artifact names
+// now come from release-manifest.json through candidate-matrix.mjs, so this gate
+// validates that semantic producer/consumer graph instead of requiring duplicated
+// literal artifact names in workflow YAML.
+const runtimeMatrix = runtimeCandidateMatrix()
+const desktopMatrix = desktopCandidateMatrix()
+if (!Array.isArray(runtimeMatrix.include) || runtimeMatrix.include.length === 0) {
+  fail('release contract must produce at least one sealed Runtime candidate')
+}
+if (!Array.isArray(desktopMatrix.include) || desktopMatrix.include.length === 0) {
+  fail('release contract must produce at least one desktop candidate')
+}
+for (const runtimeTarget of runtimeMatrix.include) {
+  if (!runtimeTarget.candidateArtifact?.startsWith('tauri-runtime-')) {
+    fail(`Runtime candidate artifact has invalid identity: ${runtimeTarget.candidateArtifact ?? 'missing'}`)
+  }
+  const consumers = desktopMatrix.include.filter(
+    (desktopTarget) => desktopTarget.runtimeArtifact === runtimeTarget.candidateArtifact,
+  )
+  if (consumers.length === 0) {
+    fail(`prepared Runtime ${runtimeTarget.candidateArtifact} has no desktop candidate consumer`)
+  }
+  for (const consumer of consumers) {
+    if (consumer.runtimeKey !== runtimeTarget.runtimeKey) {
+      fail(
+        `desktop ${consumer.targetId} Runtime key ${consumer.runtimeKey} does not match producer ${runtimeTarget.runtimeKey}`,
+      )
+    }
+  }
+}
+for (const desktopTarget of desktopMatrix.include) {
+  const producer = runtimeMatrix.include.find(
+    (runtimeTarget) => runtimeTarget.candidateArtifact === desktopTarget.runtimeArtifact,
+  )
+  if (!producer) {
+    fail(`desktop ${desktopTarget.targetId} references missing Runtime artifact ${desktopTarget.runtimeArtifact}`)
+  }
+}
+
 for (const [marker, message] of [
   ['pnpm --filter @dsh/client-runtime bundle-runtime', 'candidate must build each target Runtime from the pinned official source closure'],
-  ['name: tauri-runtime-${{ matrix.artifact }}', 'candidate must publish a target-specific prepared Runtime artifact'],
+  ['node scripts/release/candidate-matrix.mjs runtime', 'candidate must derive Runtime producers from the release contract'],
+  ['node scripts/release/candidate-matrix.mjs desktop', 'candidate must derive desktop consumers from the release contract'],
+  ['matrix: ${{ fromJSON(needs.validate.outputs.runtime_matrix) }}', 'candidate Runtime job must consume the contract-derived matrix'],
+  ['matrix: ${{ fromJSON(needs.validate.outputs.desktop_matrix) }}', 'candidate desktop job must consume the contract-derived matrix'],
+  ['name: ${{ matrix.candidateArtifact }}', 'candidate must publish target-specific artifacts using contract identities'],
+  ['name: ${{ matrix.runtimeArtifact }}', 'desktop candidate must rehydrate the exact Runtime artifact selected by the contract'],
   ['path: apps/tauri/src-tauri/resources/dsh-runtime', 'candidate must place the prepared Runtime under Tauri resources'],
   ['pnpm --filter @dsh/client-runtime smoke-runtime -- --runtime-dir apps/tauri/src-tauri/resources/dsh-runtime', 'candidate must smoke-verify the exact Runtime copied into Tauri resources'],
   ['check-tauri-size-budget.mjs', 'candidate must enforce desktop package size budgets'],
