@@ -105,6 +105,12 @@ describe('self-contained local client build', () => {
     expect(bundledPnpmSmoke).toContain('const smokeEnvironment = { ...process.env }')
     expect(bundledPnpmSmoke).toContain("'npm_execpath'")
     expect(bundledPnpmSmoke).toContain('env: smokeEnvironment')
+    const runtimePrepare = read('packages/client-runtime/src/prepare-cli.ts')
+    expect(runtimePrepare).toContain('function packageManagerEnvironment()')
+    expect(runtimePrepare).toContain('function npmInvocation(args: string[])')
+    expect(runtimePrepare).toContain("path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')")
+    expect(runtimePrepare).toContain("'npm_node_execpath'")
+    expect(runtimePrepare).toContain('env: packageManagerEnvironment()')
 
     const builderLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(runtimeBuilder)?.[1]
     const localLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(prepare)?.[1]
@@ -326,3 +332,4 @@ describe('self-contained local client build', () => {
     expect(runtime).toContain("process.on('SIGINT', shutdown)")
   })
 })
+
