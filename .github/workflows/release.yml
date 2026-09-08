@@ -107,7 +107,7 @@ jobs:
           deadline=$((SECONDS + 900))
           for workflow_path in "${required_workflows[@]}"; do
             while true; do
-              runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=main&per_page=100")"
+              runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${candidate_sha}&per_page=100")"
               success_id="$(printf '%s' "$runs_json" | jq -r --arg sha "$candidate_sha" --arg path "$workflow_path" \
                 '.workflow_runs[] | select(.head_sha == $sha and .path == $path and .status == "completed" and .conclusion == "success") | .id' | head -1)"
               if [ -n "$success_id" ]; then
