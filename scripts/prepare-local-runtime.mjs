@@ -333,18 +333,27 @@ async function patchPinnedUpstreamWindowsCommandLaunchers() {
   const processPath = path.join(upstreamRoot, 'scripts/release/process.ts')
   const source = await readFile(processPath, 'utf8')
   const marker = 'export interface RunOptions {'
-  if (source.includes('function commandForPlatform(command: string): string')) return
-  const helper = `function commandForPlatform(command: string): string {
-  if (process.platform !== 'win32') return command
-  return ['npm', 'npx', 'pnpm'].includes(command) ? \`${'${command}'}.cmd\` : command
+  if (source.includes('function useShellForPackageManager(command: string): boolean')) return
+  const helper = `function useShellForPackageManager(command: string): boolean {
+  return process.platform === 'win32' && ['npm', 'npx', 'pnpm'].includes(command)
 }
 
 `
   if (!source.includes(marker)) throw new Error(`unexpected pinned release process helper: ${processPath}`)
   const patched = source
     .replace(marker, `${helper}${marker}`)
-    .replaceAll('spawnSync(command', 'spawnSync(commandForPlatform(command)')
-    .replace('spawn(command', 'spawn(commandForPlatform(command)')
+    .replace(
+      "spawnSync(command, [...args], { cwd: options.cwd, env: options.env, encoding: 'utf8' })",
+      "spawnSync(command, [...args], { cwd: options.cwd, env: options.env, encoding: 'utf8', shell: useShellForPackageManager(command) })",
+    )
+    .replace(
+      "encoding: 'utf8',\n    stdio: ['inherit', 'pipe', 'pipe'],",
+      "encoding: 'utf8',\n    shell: useShellForPackageManager(command),\n    stdio: ['inherit', 'pipe', 'pipe'],",
+    )
+    .replace(
+      "stdio: 'inherit' })",
+      "stdio: 'inherit', shell: useShellForPackageManager(command) })",
+    )
   if (patched === source) return
   await writeFile(processPath, patched, 'utf8')
   console.log('[runtime] applied Windows package-manager launcher compatibility to pinned release helpers')
