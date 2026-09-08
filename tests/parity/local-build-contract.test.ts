@@ -101,6 +101,10 @@ describe('self-contained local client build', () => {
     expect(prepare).toContain('shell: useShellForPackageManager(command)')
     expect(prepare).toContain('npm_config_legacy_peer_deps')
     expect(prepare).toContain('npm_config_ignore_scripts')
+    const bundledPnpmSmoke = read('packages/client-runtime/src/ensure-pnpm-cli.ts')
+    expect(bundledPnpmSmoke).toContain('const smokeEnvironment = { ...process.env }')
+    expect(bundledPnpmSmoke).toContain("'npm_execpath'")
+    expect(bundledPnpmSmoke).toContain('env: smokeEnvironment')
 
     const builderLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(runtimeBuilder)?.[1]
     const localLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(prepare)?.[1]
