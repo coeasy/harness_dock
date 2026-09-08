@@ -68,9 +68,11 @@ Platform packaging policy:
   macOS x64   : .app only (DMG remains release-workflow owned)
   macOS arm64 : .app only (DMG remains release-workflow owned)
 
-Runtime source builds are opt-in. Normal local builds consume an exact published
-sealed Runtime and fail if it is unavailable instead of silently cloning and
-building upstream DeepSeek Harness.`)
+Normal local builds prefer an exact published sealed Runtime with a trusted
+SHA-256 digest. If no trusted matching bundle is available, the build falls back
+to the exact pinned upstream tag+commit and feeds its official dsh/vendor packs
+through the same sealed Runtime builder and verification path. Use
+--source-runtime to skip release lookup and force that pinned source path.`)
   process.exit(0)
 }
 
@@ -177,11 +179,11 @@ function runtimePrepareArgs(force = false) {
   if (force) args.push('--force')
   if (values['source-runtime']) {
     args.push('--source-only')
-  } else {
-    // Local builds are Runtime consumers. Never turn a missing release artifact
-    // into an implicit upstream source build; producer mode must be explicit.
-    args.push('--no-source-fallback')
   }
+  // The user-facing local build must remain usable from a clean clone before a
+  // matching release Runtime exists. prepare-local-runtime already verifies a
+  // trusted published bundle first, then falls back to the exact pinned source
+  // checkout and the same sealed Runtime builder/identity checks.
   return args
 }
 
@@ -246,7 +248,7 @@ if (!values['skip-runtime-prepare']) {
     runtimePrepareArgs(Boolean(values['force-runtime'])),
     values['source-runtime']
       ? `build ${target.runtimeKey} sealed Runtime from pinned upstream source`
-      : `prepare exact published ${target.runtimeKey} sealed Runtime`,
+      : `prepare ${target.runtimeKey} sealed Runtime from trusted release or pinned source fallback`,
   )
 }
 verifyRuntime()
