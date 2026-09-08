@@ -235,6 +235,8 @@ describe('self-contained local client build', () => {
 
   it('runs portable Node bootstrap for real on POSIX and Windows, with both mirrors', () => {
     const workflow = read('.github/workflows/ci.yml')
+    const posixBootstrap = read('scripts/bootstrap-node.sh')
+    const windowsBootstrap = read('scripts/bootstrap-node.ps1')
 
     expect(workflow).toContain('node-bootstrap:')
     expect(workflow).toContain('bash scripts/bootstrap-node.sh')
@@ -251,6 +253,14 @@ describe('self-contained local client build', () => {
     expect(workflow).toContain('NODE_DOWNLOAD_BASES')
     expect(workflow).toContain('.local-tools/node-home.txt')
     expect(workflow).toContain('.local-cache/node')
+
+    // Mirrors may serve the archive, but must not be allowed to choose the
+    // digest used to authenticate it.
+    expect(posixBootstrap).toContain('checksum_base="https://nodejs.org/dist/v${node_version}"')
+    expect(posixBootstrap).toContain('install_from_mirror "$base" "$checksum_base"')
+    expect(posixBootstrap).toContain('"$checksum_base/SHASUMS256.txt"')
+    expect(windowsBootstrap).toContain('$ChecksumBaseUrl = "https://nodejs.org/dist/v$Version"')
+    expect(windowsBootstrap).toContain('Get-ExpectedHash $ChecksumBaseUrl')
   })
 
   it('gates the actual clean-clone one-click entrypoints and the exact Windows installer startup', () => {
