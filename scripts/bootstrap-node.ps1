@@ -16,6 +16,7 @@ $NodeExe = Join-Path $NodeHome 'node.exe'
 $PathFile = Join-Path $ToolRoot 'node-home.txt'
 $DownloadDir = Join-Path $RepoRoot '.local-cache\node'
 $Archive = Join-Path $DownloadDir $ArchiveName
+$ChecksumBaseUrl = "https://nodejs.org/dist/v$Version"
 
 function Test-Node([string]$Exe) {
     if (-not (Test-Path $Exe)) { return $false }
@@ -36,7 +37,10 @@ function Get-ExpectedHash([string]$BaseUrl) {
 
 function Install-FromMirror([string]$BaseUrl) {
     Write-Host "[bootstrap-node] source: $BaseUrl"
-    $expected = Get-ExpectedHash $BaseUrl
+    # The archive mirror is not a trust root. Always obtain the checksum
+    # manifest from the canonical Node.js distribution host so a mirror cannot
+    # replace both the archive and the expected digest.
+    $expected = Get-ExpectedHash $ChecksumBaseUrl
     New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
 
     $needsDownload = $true
