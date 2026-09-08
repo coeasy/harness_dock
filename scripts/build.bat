@@ -4,6 +4,7 @@ rem HarnessDock one-click local Tauri build for Windows.
 rem Build-time Node/pnpm/Rust are developer tools only; the packaged client
 rem always runs the sealed Node+dsh Runtime embedded into the installer.
 rem Node resolution is local-first unless CI explicitly forces portable Node.
+rem pnpm reuses an exact PATH version or falls back to repository-local .local-tools.
 
 set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%.."
@@ -62,12 +63,24 @@ echo [build] Using verified portable Node %PORTABLE_NODE_VERSION%: %NODE_HOME%\n
 node scripts\node-version-check.cjs
 if errorlevel 1 goto :fail
 
-rem bootstrap.mjs provisions the exact packageManager pnpm and installs workspace dependencies when needed.
+rem bootstrap.mjs resolves exact pnpm without mutating global Corepack/npm state,
+rem then installs workspace dependencies using the selected pnpm.
 node scripts\bootstrap.mjs
 if errorlevel 1 goto :fail
 
+if not exist ".local-tools\pnpm-bin.txt" goto :pnpm_ready
+set /p "PNPM_BIN="<".local-tools\pnpm-bin.txt"
+if not exist "%PNPM_BIN%\pnpm.cmd" (
+  echo [build] ERROR: repository-local pnpm executable not found: "%PNPM_BIN%\pnpm.cmd"
+  goto :fail
+)
+set "PATH=%PNPM_BIN%;%PATH%"
+for /f "delims=" %%V in ('pnpm --version 2^>nul') do set "LOCAL_PNPM_VERSION=%%V"
+echo [build] Using repository-local pnpm %LOCAL_PNPM_VERSION%: %PNPM_BIN%\pnpm.cmd
+
+:pnpm_ready
 rem build.mjs prepares the exact sealed Runtime, verifies real Harness Web readiness,
-rem pins tauri-cli, checks Rust, and builds NSIS.
+rem checks Rust first, then pins tauri-cli only when native packaging is requested.
 node scripts\build.mjs --skip-install %*
 if errorlevel 1 goto :fail
 
