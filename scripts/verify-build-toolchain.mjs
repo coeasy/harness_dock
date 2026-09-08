@@ -41,21 +41,14 @@ function readOption(name) {
 }
 
 function commandVersion(command) {
-  let result
-  if (process.platform === 'win32') {
-    const comspec = process.env.ComSpec || 'cmd.exe'
-    result = spawnSync(comspec, ['/d', '/s', '/c', `""${command}" --version"`], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      env: process.env,
-    })
-  } else {
-    result = spawnSync(command, ['--version'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      env: process.env,
-    })
-  }
+  // Keep Windows .cmd execution identical to bootstrap.mjs. That path is
+  // already exercised for both PATH pnpm and repository-local pnpm shims.
+  const result = spawnSync(command, ['--version'], {
+    cwd: repoRoot,
+    shell: process.platform === 'win32',
+    encoding: 'utf8',
+    env: process.env,
+  })
   if (result.status !== 0) return null
   return String(result.stdout || '').trim()
 }
