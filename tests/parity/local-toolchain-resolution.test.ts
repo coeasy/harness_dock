@@ -24,10 +24,38 @@ describe('local build toolchain resolution', () => {
     expect(batch.indexOf('where node.exe')).toBeLessThan(batch.indexOf('bootstrap-node.ps1'))
   })
 
+  it('proves forced portable Node is active in the parent build process', () => {
+    const shell = read('scripts/build.sh')
+    const batch = read('scripts/build.bat')
+    const verifier = read('scripts/verify-build-toolchain.mjs')
+    const bootstrapShell = read('scripts/bootstrap-node.sh')
+    const bootstrapPowerShell = read('scripts/bootstrap-node.ps1')
+
+    expect(shell).toContain('export PATH="$node_home/bin:$PATH"')
+    expect(shell).toContain('command -v npm')
+    expect(shell).toContain('verify-build-toolchain.mjs --node-home "$node_home" --npm-command "$npm_command"')
+
+    expect(batch).toContain('set "PATH=%NODE_HOME%;%PATH%"')
+    expect(batch).toContain('where npm.cmd')
+    expect(batch).toContain(
+      'verify-build-toolchain.mjs --node-home "%NODE_HOME%" --npm-command "%ACTIVE_NPM_CMD%"',
+    )
+
+    expect(verifier).toContain('canonicalPath(process.execPath)')
+    expect(verifier).toContain('isPathWithin(nodeHome, activeNode)')
+    expect(verifier).toContain('isPathWithin(nodeHome, activeNpm)')
+    expect(verifier).toContain('process.versions.node !== expectedNodeVersion')
+    expect(verifier).toContain('path.relative(comparablePath(root), comparablePath(candidate))')
+
+    expect(bootstrapShell).toContain('[[ "$actual_version" == "$node_version" ]]')
+    expect(bootstrapPowerShell).toContain('$actual -eq $Version')
+  })
+
   it('reuses exact pnpm or provisions it under .local-tools without global mutation', () => {
     const bootstrap = read('scripts/bootstrap.mjs')
     const shell = read('scripts/build.sh')
     const batch = read('scripts/build.bat')
+    const verifier = read('scripts/verify-build-toolchain.mjs')
 
     expect(bootstrap).toContain("const localPnpmRoot = path.join(toolRoot, `pnpm-${expectedPnpmVersion}`)")
     expect(bootstrap).toContain("const pnpmBinFile = path.join(toolRoot, 'pnpm-bin.txt')")
@@ -40,10 +68,15 @@ describe('local build toolchain resolution', () => {
 
     expect(shell).toContain('.local-tools/pnpm-bin.txt')
     expect(shell).toContain('export PATH="$pnpm_bin:$PATH"')
+    expect(shell).toContain('verify-build-toolchain.mjs --pnpm-bin "$pnpm_bin" --pnpm-command "$pnpm_command"')
     expect(shell).toContain('Using repository-local pnpm')
 
     expect(batch).toContain('.local-tools\\pnpm-bin.txt')
     expect(batch).toContain('set "PATH=%PNPM_BIN%;%PATH%"')
+    expect(batch).toContain('verify-build-toolchain.mjs --pnpm-bin "%PNPM_BIN%" --pnpm-command "%ACTIVE_PNPM_CMD%"')
     expect(batch).toContain('Using repository-local pnpm')
+
+    expect(verifier).toContain('isPathWithin(localPnpmRoot, activePnpm)')
+    expect(verifier).toContain('actualPnpmVersion !== expectedPnpmVersion')
   })
 })
