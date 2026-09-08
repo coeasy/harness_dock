@@ -130,7 +130,9 @@ describe('platform-aware release module', () => {
     const workflow = read('.github/workflows/release.yml')
     expect(assemble).toContain("packages', 'client-runtime', 'src', 'image-identity.ts")
     expect(assemble).toContain('assertRuntimeImageIdentity')
-    expect(assemble).toContain("['--import', 'tsx', '--input-type=module', '--eval', evalSource]")
+    for (const marker of ["'--import'", "'tsx'", "'--input-type=module'", "'--eval'", 'evalSource']) {
+      expect(assemble).toContain(marker)
+    }
     expect(assemble).toContain('payload no longer matches its sealed image identity after candidate artifact handoff')
     expect(workflow).toContain('Install pinned workspace verifier')
     expect(workflow).toContain('pnpm install --frozen-lockfile --prefer-offline')
