@@ -40,6 +40,27 @@ describe('self-contained local client build', () => {
     expect(posixBootstrap).toContain('bootstrap-node.ps1')
   })
 
+  it('prefers a compatible system Node locally while CI can force the verified portable fallback', () => {
+    const batch = read('scripts/build.bat')
+    const shell = read('scripts/build.sh')
+
+    expect(shell).toContain('command -v node')
+    expect(shell).toContain('node scripts/node-version-check.cjs')
+    expect(shell).toContain('Using compatible system Node')
+    expect(shell).toContain('System Node not found; falling back to verified portable Node')
+    expect(shell).toContain('System Node $(node --version')
+    expect(shell).toContain('HARNESSDOCK_FORCE_PORTABLE_NODE=1; bypassing system Node')
+    expect(shell.indexOf('command -v node')).toBeLessThan(shell.indexOf('bash scripts/bootstrap-node.sh'))
+
+    expect(batch).toContain('where node.exe')
+    expect(batch).toContain('node scripts\\node-version-check.cjs')
+    expect(batch).toContain('Using compatible system Node')
+    expect(batch).toContain('System Node not found; falling back to verified portable Node')
+    expect(batch).toContain('System Node %SYSTEM_NODE_VERSION% is incompatible')
+    expect(batch).toContain('HARNESSDOCK_FORCE_PORTABLE_NODE=1; bypassing system Node')
+    expect(batch.indexOf('where node.exe')).toBeLessThan(batch.indexOf('bootstrap-node.ps1'))
+  })
+
   it('requires the exact sealed runtime identity rather than version-only reuse', () => {
     const prepare = read('scripts/prepare-local-runtime.mjs')
     const runtimeBuilder = read('packages/client-runtime/src/prepare-cli.ts')
