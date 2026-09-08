@@ -16,7 +16,7 @@
  */
 import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
@@ -323,8 +323,36 @@ async function ensurePinnedUpstreamCheckout() {
   }
 }
 
+async function patchPinnedUpstreamWindowsCommandLaunchers() {
+  if (process.platform !== 'win32') return
+
+  // The pinned release helper launches package-manager shims with Node's
+  // shell-free child_process APIs. Windows cannot execute .cmd shims by their
+  // extensionless names in that mode, so the source fallback fails even after
+  // this build has provisioned the exact repository-local pnpm.
+  const processPath = path.join(upstreamRoot, 'scripts/release/process.ts')
+  const source = await readFile(processPath, 'utf8')
+  const marker = 'export interface RunOptions {'
+  if (source.includes('function commandForPlatform(command: string): string')) return
+  const helper = `function commandForPlatform(command: string): string {
+  if (process.platform !== 'win32') return command
+  return ['npm', 'npx', 'pnpm'].includes(command) ? \`${'${command}'}.cmd\` : command
+}
+
+`
+  if (!source.includes(marker)) throw new Error(`unexpected pinned release process helper: ${processPath}`)
+  const patched = source
+    .replace(marker, `${helper}${marker}`)
+    .replaceAll('spawnSync(command', 'spawnSync(commandForPlatform(command)')
+    .replace('spawn(command', 'spawn(commandForPlatform(command)')
+  if (patched === source) return
+  await writeFile(processPath, patched, 'utf8')
+  console.log('[runtime] applied Windows package-manager launcher compatibility to pinned release helpers')
+}
+
 async function buildOfficialPackedRuntime() {
   await ensurePinnedUpstreamCheckout()
+  await patchPinnedUpstreamWindowsCommandLaunchers()
   if (!commandAvailable(npxCommand, ['--version'])) {
     throw new Error('npx is required for the pinned upstream source fallback')
   }
