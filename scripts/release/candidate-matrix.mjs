@@ -46,10 +46,25 @@ export function desktopCandidateMatrix(manifest = releaseManifest) {
   }
 }
 
-export function targetRunner(targetId, manifest = releaseManifest) {
+export function targetCandidate(targetId, manifest = releaseManifest) {
   const target = manifest.targets?.[targetId]
   if (!target) throw new Error(`unknown release target: ${targetId}`)
-  return requireString(target.candidateRunner, `targets.${targetId}.candidateRunner`)
+  return {
+    targetId,
+    runner: requireString(target.candidateRunner, `targets.${targetId}.candidateRunner`),
+    candidateArtifact: requireString(target.candidateArtifact, `targets.${targetId}.candidateArtifact`),
+    platform: requireString(target.platform, `targets.${targetId}.platform`),
+    arch: requireString(target.arch, `targets.${targetId}.arch`),
+    runtimeMode: requireString(target.runtimeMode, `targets.${targetId}.runtimeMode`),
+  }
+}
+
+export function targetRunner(targetId, manifest = releaseManifest) {
+  return targetCandidate(targetId, manifest).runner
+}
+
+export function targetArtifact(targetId, manifest = releaseManifest) {
+  return targetCandidate(targetId, manifest).candidateArtifact
 }
 
 function main() {
@@ -61,11 +76,17 @@ function main() {
     case 'desktop':
       console.log(JSON.stringify(desktopCandidateMatrix()))
       break
+    case 'target':
+      console.log(JSON.stringify(targetCandidate(process.argv[3])))
+      break
     case 'runner':
       console.log(targetRunner(process.argv[3]))
       break
+    case 'artifact':
+      console.log(targetArtifact(process.argv[3]))
+      break
     default:
-      throw new Error('usage: node scripts/release/candidate-matrix.mjs <runtime|desktop|runner TARGET_ID>')
+      throw new Error('usage: node scripts/release/candidate-matrix.mjs <runtime|desktop|target|runner|artifact> [TARGET_ID]')
   }
 }
 
