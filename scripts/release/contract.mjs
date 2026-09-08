@@ -20,6 +20,10 @@ function objectEntries(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : []
 }
 
+function isFlatAssetName(name) {
+  return typeof name === 'string' && name.length > 0 && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\')
+}
+
 export function releaseValues(manifest = releaseManifest) {
   return {
     product: manifest.product,
@@ -107,6 +111,12 @@ export function validateReleaseContract(manifest = releaseManifest) {
     Array.isArray(manifest.publication?.requiredSameShaWorkflows) && manifest.publication.requiredSameShaWorkflows.length > 0,
     'publication.requiredSameShaWorkflows must list same-SHA release gates',
   )
+  if (Array.isArray(manifest.publication?.requiredSameShaWorkflows)) {
+    add(
+      new Set(manifest.publication.requiredSameShaWorkflows).size === manifest.publication.requiredSameShaWorkflows.length,
+      'publication.requiredSameShaWorkflows must not contain duplicates',
+    )
+  }
   if (manifest.channel === 'stable') {
     add(manifest.publication?.githubPrerelease === false, 'stable releases cannot be GitHub prereleases')
     add(manifest.publication?.replaceablePrerelease === false, 'stable releases cannot move a replaceable prerelease tag')
@@ -119,15 +129,26 @@ export function validateReleaseContract(manifest = releaseManifest) {
 
   add(manifest.checksums?.algorithm === 'sha256', 'checksums.algorithm must be sha256')
   add(typeof manifest.checksums?.file === 'string' && manifest.checksums.file.length > 0, 'checksums.file is missing')
+  if (manifest.checksums?.file) {
+    add(isFlatAssetName(manifest.checksums.file), `checksums.file must be a flat release asset name: ${manifest.checksums.file}`)
+  }
 
   const runtimeKeys = new Set(objectEntries(manifest.runtimeBundles).map(([key]) => key))
   const referencedRuntimeKeys = new Set()
-  const candidateArtifacts = new Set()
+  const candidateArtifactOwners = new Map()
   const outputs = new Set()
+
+  const registerCandidateArtifact = (artifact, owner) => {
+    if (typeof artifact !== 'string' || artifact.length === 0) return
+    const previous = candidateArtifactOwners.get(artifact)
+    if (previous) errors.push(`candidate artifact ${artifact} is produced by both ${previous} and ${owner}`)
+    else candidateArtifactOwners.set(artifact, owner)
+  }
 
   const registerOutput = (output, owner) => {
     try {
       const resolved = expandTemplate(output, releaseValues(manifest))
+      if (!isFlatAssetName(resolved)) errors.push(`${owner}: release output must be a flat asset name: ${resolved}`)
       if (outputs.has(resolved)) errors.push(`duplicate release output ${resolved} (${owner})`)
       outputs.add(resolved)
     } catch (error) {
@@ -138,19 +159,27 @@ export function validateReleaseContract(manifest = releaseManifest) {
   for (const [targetId, target] of objectEntries(manifest.targets)) {
     add(typeof target.platform === 'string' && target.platform.length > 0, `${targetId}.platform is missing`)
     add(typeof target.arch === 'string' && target.arch.length > 0, `${targetId}.arch is missing`)
+    add(typeof target.candidateRunner === 'string' && target.candidateRunner.length > 0, `${targetId}.candidateRunner is missing`)
     add(typeof target.candidateArtifact === 'string' && target.candidateArtifact.length > 0, `${targetId}.candidateArtifact is missing`)
     add(['sealed-local', 'remote-gateway'].includes(target.runtimeMode), `${targetId}.runtimeMode is invalid`)
+    add(['installed', 'runtime-smoke', 'package-contract'].includes(target.startupGate), `${targetId}.startupGate is invalid`)
     add(Array.isArray(target.assets) && target.assets.length > 0, `${targetId}.assets must not be empty`)
+    registerCandidateArtifact(target.candidateArtifact, `targets.${targetId}`)
 
     if (target.runtimeMode === 'sealed-local') {
       add(typeof target.runtimeKey === 'string' && runtimeKeys.has(target.runtimeKey), `${targetId} references unknown runtimeKey ${target.runtimeKey}`)
+      add(Array.isArray(target.bundles) && target.bundles.length > 0, `${targetId}.bundles must list explicit desktop bundle formats`)
+      if (Array.isArray(target.bundles)) {
+        add(target.bundles.every((bundle) => typeof bundle === 'string' && bundle.length > 0), `${targetId}.bundles contains an invalid bundle name`)
+        add(new Set(target.bundles).size === target.bundles.length, `${targetId}.bundles must not contain duplicates`)
+      }
       if (target.runtimeKey) referencedRuntimeKeys.add(target.runtimeKey)
     }
     if (target.runtimeMode === 'remote-gateway') {
       add(!target.runtimeKey, `${targetId} is remote-gateway and must not declare a local runtimeKey`)
+      add(!target.bundles, `${targetId} is remote-gateway and must not declare desktop Tauri bundles`)
     }
 
-    candidateArtifacts.add(target.candidateArtifact)
     for (const [index, asset] of (target.assets ?? []).entries()) {
       add(typeof asset.match === 'string' && asset.match.length > 0, `${targetId}.assets[${index}].match is missing`)
       add(typeof asset.output === 'string' && asset.output.length > 0, `${targetId}.assets[${index}].output is missing`)
@@ -161,10 +190,11 @@ export function validateReleaseContract(manifest = releaseManifest) {
   for (const [runtimeKey, runtime] of objectEntries(manifest.runtimeBundles)) {
     add(typeof runtime.platform === 'string' && runtime.platform.length > 0, `runtimeBundles.${runtimeKey}.platform is missing`)
     add(typeof runtime.arch === 'string' && runtime.arch.length > 0, `runtimeBundles.${runtimeKey}.arch is missing`)
+    add(typeof runtime.prepareRunner === 'string' && runtime.prepareRunner.length > 0, `runtimeBundles.${runtimeKey}.prepareRunner is missing`)
     add(typeof runtime.candidateArtifact === 'string' && runtime.candidateArtifact.length > 0, `runtimeBundles.${runtimeKey}.candidateArtifact is missing`)
     add(typeof runtime.output === 'string' && runtime.output.length > 0, `runtimeBundles.${runtimeKey}.output is missing`)
     add(referencedRuntimeKeys.has(runtimeKey), `runtime bundle ${runtimeKey} is not referenced by any sealed-local target`)
-    candidateArtifacts.add(runtime.candidateArtifact)
+    registerCandidateArtifact(runtime.candidateArtifact, `runtimeBundles.${runtimeKey}`)
     if (runtime.output) registerOutput(runtime.output, `runtimeBundles.${runtimeKey}`)
   }
 
@@ -181,7 +211,9 @@ export function validateReleaseContract(manifest = releaseManifest) {
     errors.push(error.message)
   }
   if (plan) {
+    add(typeof plan.tag === 'string' && plan.tag.length > 0 && !/[\s\\/]/.test(plan.tag), `release tag is unsafe: ${plan.tag}`)
     add(new Set(plan.expectedAssetNames).size === plan.expectedAssetNames.length, 'release asset names must be unique')
+    add(plan.expectedAssetNames.every(isFlatAssetName), 'all release assets must be flat file names')
     add(plan.clientAssets.length > 0, 'release plan has no client assets')
     add(plan.runtimeAssets.length > 0, 'release plan has no runtime assets')
   }
