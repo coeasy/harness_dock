@@ -288,6 +288,15 @@ describe('self-contained local client build', () => {
     expect(workflow).toContain('./scripts/build.sh --skip-tests --check-only')
     expect(workflow).toContain('apps/tauri/src-tauri/resources/dsh-runtime')
     expect(workflow).toContain('smoke-windows-installer.ps1')
+    expect(workflow).toContain('git restore --source=HEAD -- $generatedBuildOutputs')
+    for (const generated of [
+      'apps/tauri/src-tauri/Cargo.toml',
+      'apps/tauri/src-tauri/icons/icon.icns',
+      'packages/plugin-embedded-client/lib/index.js',
+      'packages/plugin-harness-shell/lib/index.js',
+    ]) {
+      expect(workflow).toContain(generated)
+    }
     expect(workflow).toContain("git status --porcelain")
 
     expect(smoke).toContain('phase=runtime_ready')
