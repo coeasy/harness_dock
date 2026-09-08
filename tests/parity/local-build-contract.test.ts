@@ -118,16 +118,26 @@ describe('self-contained local client build', () => {
     expect(prepare).toContain('firstLaunchRuntimeDownloadRequired')
     expect(build).toContain('scripts/prepare-local-runtime.mjs')
     expect(build).toContain("'smoke-runtime'")
-    expect(build).toContain('verify sealed Runtime + Harness Web readiness')
-    expect(build).toContain('firstSmoke')
-    expect(build).toContain("['scripts/prepare-local-runtime.mjs', '--force']")
-    expect(build).toContain('force-refresh sealed local Harness Runtime after verification failure')
-    expect(build).toContain('verify refreshed sealed Runtime + Harness Web readiness')
-    expect(build).toContain('stale or corrupted local cache')
+    expect(build).toContain('function runtimePrepareArgs(')
+    expect(build).toContain("args.push('--no-source-fallback')")
+    expect(build).toContain("args.push('--source-only')")
+    expect(build).toContain('function verifyRuntime()')
+    expect(build).toContain('const firstSmoke = runStatus(')
+    expect(build).toContain('runtimePrepareArgs(true)')
+    expect(build).toContain('existing Runtime failed verification and --skip-runtime-prepare forbids repair')
+    expect(build).toContain('refreshing the same target Runtime once and re-verifying')
     expect(smoke).toContain('assertRuntimeImageIdentity(runtimeDir, manifest)')
     expect(smoke).toContain('assertBundledRuntimeIntegrity')
-    expect(build).toContain('cargoCommand')
-    expect(build).toContain('tauri-cli')
+
+    const rustGate = build.indexOf("run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:check']")
+    const runtimePrepareGate = build.indexOf("if (!values['skip-runtime-prepare'])")
+    expect(rustGate).toBeGreaterThan(-1)
+    expect(runtimePrepareGate).toBeGreaterThan(rustGate)
+
+    const checkOnlyGate = build.indexOf("if (values['check-only'])")
+    const packagingTauriGate = build.lastIndexOf('ensureTauriCli()')
+    expect(checkOnlyGate).toBeGreaterThan(runtimePrepareGate)
+    expect(packagingTauriGate).toBeGreaterThan(checkOnlyGate)
   })
 
   it('routes normal root desktop packaging through the safe local build chain', () => {
@@ -148,7 +158,12 @@ describe('self-contained local client build', () => {
   })
 
   it('keeps the JavaScript build entrypoints syntactically valid', () => {
-    for (const relative of ['scripts/bootstrap.mjs', 'scripts/build.mjs', 'scripts/prepare-local-runtime.mjs']) {
+    for (const relative of [
+      'scripts/bootstrap.mjs',
+      'scripts/build-targets.mjs',
+      'scripts/build.mjs',
+      'scripts/prepare-local-runtime.mjs',
+    ]) {
       const result = spawnSync(process.execPath, ['--check', path.join(repoRoot, relative)], {
         cwd: repoRoot,
         encoding: 'utf8',
@@ -191,7 +206,8 @@ describe('self-contained local client build', () => {
     }
     const build = read('scripts/build.mjs')
     expect(build).toContain("'smoke-runtime'")
-    expect(build).toContain('verify sealed Runtime + Harness Web readiness')
+    expect(build).toContain('function verifyRuntime()')
+    expect(build).toContain('runtimePrepareArgs')
   })
 
   it('runs portable Node bootstrap for real on POSIX and Windows, with both mirrors', () => {
