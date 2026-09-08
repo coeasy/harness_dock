@@ -2,10 +2,10 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { assertReleaseContract, repoRoot } from './contract.mjs'
 
 const plan = assertReleaseContract()
-const assetRoot = path.resolve(process.argv[2] ?? path.join(repoRoot, 'release-assets'))
 
 function fail(message) {
   throw new Error(`[release:verify-assets] ${message}`)
@@ -17,7 +17,8 @@ async function sha256File(file) {
   return hash.digest('hex')
 }
 
-async function main() {
+export async function verifyReleaseAssets(root = path.join(repoRoot, 'release-assets')) {
+  const assetRoot = path.resolve(root)
   if (!existsSync(assetRoot)) fail(`asset directory does not exist: ${assetRoot}`)
 
   const actualNames = readdirSync(assetRoot)
@@ -63,9 +64,12 @@ async function main() {
   }
 
   console.log(`[release:verify-assets] OK: ${plan.expectedAssetCount} exact non-empty assets, all payload digests verified`)
+  return { assetRoot, assetNames: actualNames }
 }
 
-main().catch((error) => {
-  console.error(error.message)
-  process.exit(1)
-})
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  verifyReleaseAssets(process.argv[2]).catch((error) => {
+    console.error(error.message)
+    process.exit(1)
+  })
+}
