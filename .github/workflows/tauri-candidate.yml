@@ -49,7 +49,9 @@ jobs:
       runtime_matrix: ${{ steps.matrix.outputs.runtime }}
       desktop_matrix: ${{ steps.matrix.outputs.desktop }}
       android_runner: ${{ steps.matrix.outputs.android_runner }}
+      android_artifact: ${{ steps.matrix.outputs.android_artifact }}
       ios_runner: ${{ steps.matrix.outputs.ios_runner }}
+      ios_artifact: ${{ steps.matrix.outputs.ios_artifact }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -67,7 +69,9 @@ jobs:
           echo "runtime=$(node scripts/release/candidate-matrix.mjs runtime)" >> "$GITHUB_OUTPUT"
           echo "desktop=$(node scripts/release/candidate-matrix.mjs desktop)" >> "$GITHUB_OUTPUT"
           echo "android_runner=$(node scripts/release/candidate-matrix.mjs runner android-arm64)" >> "$GITHUB_OUTPUT"
+          echo "android_artifact=$(node scripts/release/candidate-matrix.mjs artifact android-arm64)" >> "$GITHUB_OUTPUT"
           echo "ios_runner=$(node scripts/release/candidate-matrix.mjs runner ios-arm64-simulator)" >> "$GITHUB_OUTPUT"
+          echo "ios_artifact=$(node scripts/release/candidate-matrix.mjs artifact ios-arm64-simulator)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
@@ -441,7 +445,7 @@ jobs:
         run: node scripts/check-android-package.mjs '${{ steps.android.outputs.apk }}' '${{ steps.android.outputs.aab }}'
       - uses: actions/upload-artifact@v7
         with:
-          name: tauri-android-arm64-candidate
+          name: ${{ needs.validate.outputs.android_artifact }}
           path: |
             ${{ steps.android.outputs.apk }}
             ${{ steps.android.outputs.aab }}
@@ -496,7 +500,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$app" ios-candidate/HarnessDock-ios-arm64-simulator.zip
       - uses: actions/upload-artifact@v7
         with:
-          name: tauri-ios-simulator-candidate
+          name: ${{ needs.validate.outputs.ios_artifact }}
           path: ios-candidate/HarnessDock-ios-arm64-simulator.zip
           if-no-files-found: error
           retention-days: 7
