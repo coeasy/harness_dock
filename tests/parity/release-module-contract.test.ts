@@ -125,6 +125,17 @@ describe('platform-aware release module', () => {
     expect(workflow).toContain('harnessdock-release-assets-${{ needs.validate.outputs.sha }}')
   })
 
+  it('recomputes the sealed Runtime payload after artifact handoff before release repack', () => {
+    const assemble = read('scripts/release/assemble.mjs')
+    const workflow = read('.github/workflows/release.yml')
+    expect(assemble).toContain("packages', 'client-runtime', 'src', 'image-identity.ts")
+    expect(assemble).toContain('assertRuntimeImageIdentity')
+    expect(assemble).toContain("['--import', 'tsx', '--input-type=module', '--eval', evalSource]")
+    expect(assemble).toContain('payload no longer matches its sealed image identity after candidate artifact handoff')
+    expect(workflow).toContain('Install pinned workspace verifier')
+    expect(workflow).toContain('pnpm install --frozen-lockfile --prefer-offline')
+  })
+
   it('derives all candidate identities from the same release manifest', () => {
     const workflow = read('.github/workflows/tauri-candidate.yml')
     expect(workflow).toContain('node scripts/release/candidate-matrix.mjs runtime')
