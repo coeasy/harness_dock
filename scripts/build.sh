@@ -5,7 +5,8 @@
 # the packaged client runs the sealed Node+dsh Runtime embedded in the bundle.
 # Node resolution is deliberately local-first for developer builds:
 #   compatible system Node -> verified cached/downloaded portable Node.
-# CI can set HARNESSDOCK_FORCE_PORTABLE_NODE=1 to prove the bare-host fallback.
+# pnpm follows the same policy: exact PATH version -> repository-local isolated
+# version under .local-tools. CI can force portable Node to prove bare-host fallback.
 
 set -euo pipefail
 
@@ -40,6 +41,14 @@ fi
 
 node scripts/node-version-check.cjs
 node scripts/bootstrap.mjs
+
+if [[ -s .local-tools/pnpm-bin.txt ]]; then
+  pnpm_bin="$(cat .local-tools/pnpm-bin.txt)"
+  [[ -x "$pnpm_bin/pnpm" ]] || { echo "[build] ERROR: repository-local pnpm missing: $pnpm_bin/pnpm" >&2; exit 1; }
+  export PATH="$pnpm_bin:$PATH"
+  echo "[build] Using repository-local pnpm $(pnpm --version): $pnpm_bin/pnpm"
+fi
+
 node scripts/build.mjs --skip-install "$@"
 
 echo
