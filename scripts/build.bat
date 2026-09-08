@@ -3,6 +3,7 @@ setlocal EnableExtensions
 rem HarnessDock one-click local Tauri build for Windows.
 rem Build-time Node/pnpm/Rust are developer tools only; the packaged client
 rem always runs the sealed Node+dsh Runtime embedded into the installer.
+rem Node resolution is local-first unless CI explicitly forces portable Node.
 
 set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%.."
@@ -15,13 +16,30 @@ if not exist "package.json" (
 
 echo [build] HarnessDock local Windows build
 
-echo [build] Checking build-time Node...
-if /I "%HARNESSDOCK_FORCE_PORTABLE_NODE%"=="1" goto :portable_node
+echo [build] Resolving build-time Node...
+if /I "%HARNESSDOCK_FORCE_PORTABLE_NODE%"=="1" goto :force_portable_node
 where node.exe >nul 2>nul
-if errorlevel 1 goto :portable_node
+if errorlevel 1 goto :system_node_missing
 node scripts\node-version-check.cjs >nul 2>nul
-if errorlevel 1 goto :portable_node
+if errorlevel 1 goto :system_node_incompatible
+for /f "delims=" %%I in ('where node.exe 2^>nul') do if not defined SYSTEM_NODE_EXE set "SYSTEM_NODE_EXE=%%I"
+for /f "delims=" %%V in ('node --version 2^>nul') do set "SYSTEM_NODE_VERSION=%%V"
+echo [build] Using compatible system Node %SYSTEM_NODE_VERSION%: %SYSTEM_NODE_EXE%
 goto :node_ready
+
+:force_portable_node
+echo [build] HARNESSDOCK_FORCE_PORTABLE_NODE=1; bypassing system Node
+goto :portable_node
+
+:system_node_missing
+echo [build] System Node not found; falling back to verified portable Node
+goto :portable_node
+
+:system_node_incompatible
+for /f "delims=" %%V in ('node --version 2^>nul') do set "SYSTEM_NODE_VERSION=%%V"
+if not defined SYSTEM_NODE_VERSION set "SYSTEM_NODE_VERSION=unknown"
+echo [build] System Node %SYSTEM_NODE_VERSION% is incompatible; falling back to verified portable Node
+goto :portable_node
 
 :portable_node
 echo [build] Preparing verified portable Node...
@@ -37,6 +55,8 @@ if not exist "%NODE_HOME%\node.exe" (
   goto :fail
 )
 set "PATH=%NODE_HOME%;%PATH%"
+for /f "delims=" %%V in ('node --version 2^>nul') do set "PORTABLE_NODE_VERSION=%%V"
+echo [build] Using verified portable Node %PORTABLE_NODE_VERSION%: %NODE_HOME%\node.exe
 
 :node_ready
 node scripts\node-version-check.cjs
