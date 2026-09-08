@@ -19,12 +19,14 @@ describe('platform-aware release module', () => {
     expect(manifest.checksums).toEqual({ algorithm: 'sha256', file: 'SHA256SUMS' })
   })
 
-  it('models desktop platform and architecture differences explicitly', () => {
+  it('models desktop platform, architecture, runner, Runtime, and bundle differences explicitly', () => {
     expect(manifest.targets['windows-x64']).toMatchObject({
       platform: 'win32',
       arch: 'x64',
       runtimeMode: 'sealed-local',
       runtimeKey: 'win32-x64',
+      candidateRunner: 'windows-latest',
+      bundles: ['nsis'],
       candidateArtifact: 'tauri-desktop-win-x64',
       startupGate: 'installed',
     })
@@ -35,6 +37,8 @@ describe('platform-aware release module', () => {
       arch: 'x64',
       runtimeMode: 'sealed-local',
       runtimeKey: 'linux-x64',
+      candidateRunner: 'ubuntu-22.04',
+      bundles: ['deb', 'appimage'],
       candidateArtifact: 'tauri-desktop-linux-x64',
     })
     expect(manifest.targets['linux-x64'].assets.map((asset: any) => asset.match)).toEqual(['*.deb', '*.AppImage'])
@@ -43,19 +47,30 @@ describe('platform-aware release module', () => {
       platform: 'darwin',
       arch: 'x64',
       runtimeKey: 'darwin-x64',
+      candidateRunner: 'macos-15-intel',
+      bundles: ['app'],
       candidateArtifact: 'tauri-desktop-mac-x64',
     })
     expect(manifest.targets['macos-arm64']).toMatchObject({
       platform: 'darwin',
       arch: 'arm64',
       runtimeKey: 'darwin-arm64',
+      candidateRunner: 'macos-latest',
+      bundles: ['app'],
       candidateArtifact: 'tauri-desktop-mac-arm64',
     })
   })
 
   it('keeps mobile release targets remote-gateway only', () => {
+    expect(manifest.targets['android-arm64']).toMatchObject({
+      runtimeMode: 'remote-gateway',
+      candidateRunner: 'ubuntu-latest',
+    })
+    expect(manifest.targets['ios-arm64-simulator']).toMatchObject({
+      runtimeMode: 'remote-gateway',
+      candidateRunner: 'macos-latest',
+    })
     for (const id of ['android-arm64', 'ios-arm64-simulator']) {
-      expect(manifest.targets[id].runtimeMode).toBe('remote-gateway')
       expect(manifest.targets[id].runtimeKey).toBeUndefined()
     }
     expect(manifest.targets['android-arm64'].assets.map((asset: any) => asset.match)).toEqual(['*.apk', '*.aab'])
@@ -75,6 +90,7 @@ describe('platform-aware release module', () => {
       expect(runtime).toBeTruthy()
       expect(runtime.platform).toBe(target.platform)
       expect(runtime.arch).toBe(target.arch)
+      expect(runtime.prepareRunner).toBeTruthy()
     }
   })
 
@@ -106,9 +122,24 @@ describe('platform-aware release module', () => {
     expect(workflow).toContain('harnessdock-release-assets-${{ needs.validate.outputs.sha }}')
   })
 
-  it('keeps release scripts syntactically valid and the manifest contract executable', () => {
+  it('derives Runtime and desktop candidate matrices from the same release manifest', () => {
+    const workflow = read('.github/workflows/tauri-candidate.yml')
+    expect(workflow).toContain('node scripts/release/candidate-matrix.mjs runtime')
+    expect(workflow).toContain('node scripts/release/candidate-matrix.mjs desktop')
+    expect(workflow).toContain('matrix: ${{ fromJSON(needs.validate.outputs.runtime_matrix) }}')
+    expect(workflow).toContain('matrix: ${{ fromJSON(needs.validate.outputs.desktop_matrix) }}')
+    expect(workflow).toContain('name: ${{ matrix.candidateArtifact }}')
+    expect(workflow).toContain('name: ${{ matrix.runtimeArtifact }}')
+    expect(workflow).not.toContain('artifact: win-x64')
+    expect(workflow).not.toContain('artifact: mac-arm64')
+    expect(workflow).not.toContain('src/gateway_host.rs')
+    expect(workflow).toContain('src/gateway_host/mod.rs')
+  })
+
+  it('keeps release scripts syntactically valid and contract planners executable', () => {
     for (const relative of [
       'scripts/release/contract.mjs',
+      'scripts/release/candidate-matrix.mjs',
       'scripts/release/assemble.mjs',
       'scripts/release/verify-assets.mjs',
       'scripts/release/publish-github.mjs',
@@ -127,6 +158,20 @@ describe('platform-aware release module', () => {
     })
     expect(contract.status, contract.stderr).toBe(0)
     expect(contract.stdout).toContain('release contract OK: v0.1.2, 15 assets')
+
+    const desktopMatrix = spawnSync(process.execPath, ['scripts/release/candidate-matrix.mjs', 'desktop'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+    expect(desktopMatrix.status, desktopMatrix.stderr).toBe(0)
+    const matrix = JSON.parse(desktopMatrix.stdout)
+    expect(matrix.include).toHaveLength(4)
+    expect(matrix.include.find((entry: any) => entry.targetId === 'windows-x64')).toMatchObject({
+      runner: 'windows-latest',
+      runtimeArtifact: 'tauri-runtime-win-x64',
+      candidateArtifact: 'tauri-desktop-win-x64',
+      bundles: 'nsis',
+    })
   })
 
   it('ties release validation to the same desktop target source of truth', () => {
@@ -134,6 +179,7 @@ describe('platform-aware release module', () => {
     expect(check).toContain("from './build-targets.mjs'")
     expect(check).toContain("from './release/contract.mjs'")
     expect(check).toContain('DESKTOP_BUILD_TARGETS')
+    expect(check).toContain('releaseTarget.candidateRunner !== buildTarget.ciRunner')
     expect(check).toContain("target.runtimeMode !== 'remote-gateway'")
   })
 })
