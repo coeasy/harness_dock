@@ -130,11 +130,11 @@ describe('self-contained local client build', () => {
     expect(smoke).toContain('assertBundledRuntimeIntegrity')
 
     const rustGate = build.indexOf("run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:check']")
-    const runtimePrepareGate = build.indexOf("if (!values['skip-runtime-prepare'])")
+    const runtimePrepareGate = build.indexOf("if (!values['skip-runtime-prepare'])", rustGate)
     expect(rustGate).toBeGreaterThan(-1)
     expect(runtimePrepareGate).toBeGreaterThan(rustGate)
 
-    const checkOnlyGate = build.indexOf("if (values['check-only'])")
+    const checkOnlyGate = build.indexOf("if (values['check-only'])", runtimePrepareGate)
     const packagingTauriGate = build.lastIndexOf('ensureTauriCli()')
     expect(checkOnlyGate).toBeGreaterThan(runtimePrepareGate)
     expect(packagingTauriGate).toBeGreaterThan(checkOnlyGate)
