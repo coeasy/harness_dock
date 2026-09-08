@@ -98,6 +98,7 @@ describe('self-contained local client build', () => {
     expect(prepare).toContain('patchPinnedUpstreamWindowsCommandLaunchers')
     expect(prepare).toContain("['npm', 'npx', 'pnpm']")
     expect(prepare).toContain(".replace('spawn(command', 'spawn(commandForPlatform(command)')")
+    expect(prepare).toContain('npm_config_legacy_peer_deps')
 
     const builderLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(runtimeBuilder)?.[1]
     const localLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(prepare)?.[1]
