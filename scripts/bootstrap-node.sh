@@ -65,9 +65,12 @@ node_ready() {
 }
 
 install_from_mirror() {
-  local base="$1" sums expected
+  local base="$1" checksum_base="$2" sums expected
   echo "[bootstrap-node] source: $base"
-  if ! sums="$(curl --fail --location --silent --show-error --retry 3 "$base/SHASUMS256.txt")"; then
+  # The archive mirror is not a trust root. Always obtain the checksum manifest
+  # from the canonical Node.js distribution host so a mirror cannot replace
+  # both the archive and the expected digest.
+  if ! sums="$(curl --fail --location --silent --show-error --retry 3 "$checksum_base/SHASUMS256.txt")"; then
     return 1
   fi
   expected="$(printf '%s\n' "$sums" | awk -v name="$archive" '$2 == name || $2 == "*" name { print $1; exit }')"
@@ -97,10 +100,11 @@ mkdir -p "$tool_root"
 # `NODE_DOWNLOAD_BASES` lets CI exercise both mirrors explicitly (space separated,
 # first entry is primary). Without it the script keeps the default order.
 sources="${NODE_DOWNLOAD_BASES:-https://nodejs.org/dist/v${node_version} https://npmmirror.com/mirrors/node/v${node_version}}"
+checksum_base="https://nodejs.org/dist/v${node_version}"
 if ! node_ready; then
   installed=false
   for base in $sources; do
-    if install_from_mirror "$base"; then
+    if install_from_mirror "$base" "$checksum_base"; then
       installed=true
       break
     fi
