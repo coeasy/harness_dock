@@ -16,6 +16,7 @@ import {
 } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { finished } from 'node:stream/promises'
 import { assertReleaseContract, releaseManifest, repoRoot } from './contract.mjs'
 
@@ -69,6 +70,32 @@ function readRuntimeManifest(root) {
   return JSON.parse(readFileSync(manifestPath, 'utf8'))
 }
 
+function verifyRuntimePayloadIdentity(runtimeAsset, root) {
+  const verifierUrl = pathToFileURL(
+    path.join(repoRoot, 'packages', 'client-runtime', 'src', 'image-identity.ts'),
+  ).href
+  const evalSource = [
+    `import { assertRuntimeImageIdentity } from ${JSON.stringify(verifierUrl)};`,
+    `await assertRuntimeImageIdentity(${JSON.stringify(root)});`,
+  ].join('\n')
+  const result = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '--eval', evalSource],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  )
+  if (result.status !== 0) {
+    const details = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim()
+    fail(
+      `Runtime ${runtimeAsset.runtimeKey} payload no longer matches its sealed image identity after candidate artifact handoff` +
+        (details ? `:\n${details}` : ''),
+    )
+  }
+}
+
 function verifyRuntimeRoot(runtimeAsset, root) {
   const manifest = readRuntimeManifest(root)
   const expected = {
@@ -96,6 +123,8 @@ function verifyRuntimeRoot(runtimeAsset, root) {
   if (manifest.imageIdentityAlgorithm !== 'sha256-v1') {
     fail(`Runtime ${runtimeAsset.runtimeKey} imageIdentityAlgorithm must be sha256-v1`)
   }
+
+  verifyRuntimePayloadIdentity(runtimeAsset, root)
 
   const nodePath = path.join(root, 'bin', runtimeAsset.platform === 'win32' ? 'node.exe' : 'node')
   if (!existsSync(nodePath)) fail(`Runtime ${runtimeAsset.runtimeKey} is missing bundled Node: ${nodePath}`)
