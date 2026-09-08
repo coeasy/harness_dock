@@ -19,8 +19,8 @@ $Archive = Join-Path $DownloadDir $ArchiveName
 
 function Test-Node([string]$Exe) {
     if (-not (Test-Path $Exe)) { return $false }
-    & $Exe (Join-Path $ScriptDir 'node-version-check.cjs') *> $null
-    return $LASTEXITCODE -eq 0
+    $actual = (& $Exe -p 'process.versions.node' 2>$null | Out-String).Trim()
+    return $LASTEXITCODE -eq 0 -and $actual -eq $Version
 }
 
 function Get-ExpectedHash([string]$BaseUrl) {
@@ -66,7 +66,7 @@ function Install-FromMirror([string]$BaseUrl) {
     Expand-Archive -LiteralPath $Archive -DestinationPath $ToolRoot -Force
 
     if (-not (Test-Node $NodeExe)) {
-        throw "Portable Node was extracted but failed the HarnessDock Node version gate: $NodeExe"
+        throw "Portable Node was extracted but does not match the pinned Node $Version exactly: $NodeExe"
     }
 }
 
