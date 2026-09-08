@@ -65,13 +65,16 @@ describe('platform-aware release module', () => {
     expect(manifest.targets['android-arm64']).toMatchObject({
       runtimeMode: 'remote-gateway',
       candidateRunner: 'ubuntu-latest',
+      candidateArtifact: 'tauri-android-arm64-candidate',
     })
     expect(manifest.targets['ios-arm64-simulator']).toMatchObject({
       runtimeMode: 'remote-gateway',
       candidateRunner: 'macos-latest',
+      candidateArtifact: 'tauri-ios-simulator-candidate',
     })
     for (const id of ['android-arm64', 'ios-arm64-simulator']) {
       expect(manifest.targets[id].runtimeKey).toBeUndefined()
+      expect(manifest.targets[id].bundles).toBeUndefined()
     }
     expect(manifest.targets['android-arm64'].assets.map((asset: any) => asset.match)).toEqual(['*.apk', '*.aab'])
     expect(manifest.targets['ios-arm64-simulator'].assets.map((asset: any) => asset.match)).toEqual(['*.zip'])
@@ -122,16 +125,24 @@ describe('platform-aware release module', () => {
     expect(workflow).toContain('harnessdock-release-assets-${{ needs.validate.outputs.sha }}')
   })
 
-  it('derives Runtime and desktop candidate matrices from the same release manifest', () => {
+  it('derives all candidate identities from the same release manifest', () => {
     const workflow = read('.github/workflows/tauri-candidate.yml')
     expect(workflow).toContain('node scripts/release/candidate-matrix.mjs runtime')
     expect(workflow).toContain('node scripts/release/candidate-matrix.mjs desktop')
+    expect(workflow).toContain('node scripts/release/candidate-matrix.mjs runner android-arm64')
+    expect(workflow).toContain('node scripts/release/candidate-matrix.mjs artifact android-arm64')
+    expect(workflow).toContain('node scripts/release/candidate-matrix.mjs runner ios-arm64-simulator')
+    expect(workflow).toContain('node scripts/release/candidate-matrix.mjs artifact ios-arm64-simulator')
     expect(workflow).toContain('matrix: ${{ fromJSON(needs.validate.outputs.runtime_matrix) }}')
     expect(workflow).toContain('matrix: ${{ fromJSON(needs.validate.outputs.desktop_matrix) }}')
     expect(workflow).toContain('name: ${{ matrix.candidateArtifact }}')
     expect(workflow).toContain('name: ${{ matrix.runtimeArtifact }}')
+    expect(workflow).toContain('name: ${{ needs.validate.outputs.android_artifact }}')
+    expect(workflow).toContain('name: ${{ needs.validate.outputs.ios_artifact }}')
     expect(workflow).not.toContain('artifact: win-x64')
     expect(workflow).not.toContain('artifact: mac-arm64')
+    expect(workflow).not.toContain('name: tauri-android-arm64-candidate')
+    expect(workflow).not.toContain('name: tauri-ios-simulator-candidate')
     expect(workflow).not.toContain('src/gateway_host.rs')
     expect(workflow).toContain('src/gateway_host/mod.rs')
   })
@@ -171,6 +182,17 @@ describe('platform-aware release module', () => {
       runtimeArtifact: 'tauri-runtime-win-x64',
       candidateArtifact: 'tauri-desktop-win-x64',
       bundles: 'nsis',
+    })
+
+    const android = spawnSync(process.execPath, ['scripts/release/candidate-matrix.mjs', 'target', 'android-arm64'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+    expect(android.status, android.stderr).toBe(0)
+    expect(JSON.parse(android.stdout)).toMatchObject({
+      runner: 'ubuntu-latest',
+      candidateArtifact: 'tauri-android-arm64-candidate',
+      runtimeMode: 'remote-gateway',
     })
   })
 
