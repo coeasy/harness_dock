@@ -125,6 +125,12 @@ describe('platform-aware release module', () => {
     expect(workflow).toContain('harnessdock-release-assets-${{ needs.validate.outputs.sha }}')
   })
 
+  it('looks up same-SHA release gates directly instead of relying on the latest main runs', () => {
+    const workflow = read('.github/workflows/release.yml')
+    expect(workflow).toContain('actions/runs?head_sha=${candidate_sha}&per_page=100')
+    expect(workflow).not.toContain('actions/runs?branch=main&per_page=100')
+  })
+
   it('recomputes the sealed Runtime payload after artifact handoff before release repack', () => {
     const assemble = read('scripts/release/assemble.mjs')
     const workflow = read('.github/workflows/release.yml')
