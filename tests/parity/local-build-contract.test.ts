@@ -100,6 +100,7 @@ describe('self-contained local client build', () => {
     expect(prepare).toContain('useShellForPackageManager')
     expect(prepare).toContain('shell: useShellForPackageManager(command)')
     expect(prepare).toContain('npm_config_legacy_peer_deps')
+    expect(prepare).toContain('npm_config_ignore_scripts')
 
     const builderLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(runtimeBuilder)?.[1]
     const localLayout = /const RUNTIME_LAYOUT_VERSION = (\d+)/.exec(prepare)?.[1]
