@@ -72,7 +72,7 @@ describe('desktop interaction feedback contract', () => {
     expect(hidePrimary).toContain('系统托盘不可用，无法隐藏 Harness 主窗口。')
     expect(hidePrimary).toContain('surface.primary_visible()')
     expect(hidePrimary).toContain('Harness Web 尚未就绪，启动或恢复完成后才能隐藏到托盘。')
-    expect(hidePrimary).toContain('window.hide()')
+    expect((hidePrimary.match(/\.hide\(\)/g) ?? []).length).toBeGreaterThanOrEqual(2)
     expect(hidePrimary).not.toContain('request_exit')
     expect(hidePrimary).not.toContain('runtime::')
     expect(hidePrimary).not.toContain('cancel_harness_load')
