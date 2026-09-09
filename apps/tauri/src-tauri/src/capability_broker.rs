@@ -107,7 +107,6 @@ pub(crate) fn authorize(
         SubjectKind::HarnessWeb => unreachable!("handled above"),
     }
 }
-
 pub(crate) fn allowed_capabilities(
     subject: SubjectKind,
     surface: SurfaceKind,
