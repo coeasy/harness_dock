@@ -25,10 +25,12 @@
     'gateway.manage': '正在打开移动设备管理',
     'diagnostics.open': '正在打开诊断与更新',
   })
+  const transitionStatus = Object.freeze({
+    'web.reload': '正在重新加载 Harness Web…',
+    'web.restart': 'Runtime 正在重启，Harness Web 会自动恢复…',
+    'runtime.safe-mode': '正在以隔离插件模式恢复 Harness Web…',
+  })
 
-  // Shell errors can originate in native IPC or third-party hosts. Never put a
-  // reusable launch token, Authorization value, password or query string into
-  // the Harness document even though textContent already prevents HTML injection.
   const publicText = (value) => {
     const raw = value && typeof value === 'object' && 'message' in value
       ? String(value.message || '')
@@ -83,17 +85,20 @@
       button.is-running .icon { display: inline-block; animation: icon-breathe .72s ease-in-out infinite alternate; }
       button[data-action="web.reload"].is-running .icon { animation: icon-spin .85s linear infinite; }
       .icon { font-size: 16px; line-height: 1; transform-origin: 50% 50%; }
-      .activity { background: rgba(110,168,254,.08); height: 2px; left: 0; opacity: 0; overflow: hidden; pointer-events: none; position: fixed; right: 0; top: 43px; transition: opacity .15s ease; z-index: 2147483002; }
+      .activity { background: rgba(110,168,254,.08); height: 2px; left: 0; opacity: 0; overflow: hidden; pointer-events: none; position: fixed; right: 0; top: 43px; transition: opacity .15s ease; z-index: 2147483004; }
       .activity::after { background: linear-gradient(90deg, transparent, #6ea8fe 24%, #9b8cff 58%, #5eead4 78%, transparent); content: ""; height: 100%; left: 0; position: absolute; top: 0; transform: translateX(-110%); width: 42%; }
       .activity.show { opacity: 1; }
       .activity.show::after { animation: activity-run 1.15s cubic-bezier(.42,0,.58,1) infinite; }
-      .menu { background: rgba(28,35,48,.985); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,.38); min-width: 214px; opacity: 0; padding: 6px; pointer-events: none; position: fixed; right: 8px; top: 48px; transform: translateY(-7px) scale(.985); transform-origin: top right; transition: opacity .14s ease, transform .16s cubic-bezier(.2,.8,.2,1); visibility: hidden; z-index: 2147483001; }
+      .menu { background: rgba(28,35,48,.985); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,.38); min-width: 214px; opacity: 0; padding: 6px; pointer-events: none; position: fixed; right: 8px; top: 48px; transform: translateY(-7px) scale(.985); transform-origin: top right; transition: opacity .14s ease, transform .16s cubic-bezier(.2,.8,.2,1); visibility: hidden; z-index: 2147483003; }
       .menu.open { opacity: 1; pointer-events: auto; transform: translateY(0) scale(1); visibility: visible; }
       .menu button { display: block; text-align: left; width: 100%; }
       .menu button.hidden { display: none; }
       .separator { border-top: 1px solid rgba(255,255,255,.1); margin: 5px 4px; }
-      .toast { background: rgba(21, 27, 38, .97); border: 1px solid rgba(255,255,255,.13); border-radius: 9px; bottom: 16px; box-shadow: 0 12px 30px rgba(0,0,0,.28); color: #edf2f7; font-size: 12px; left: 50%; max-width: min(480px, calc(100vw - 40px)); opacity: 0; padding: 9px 12px; pointer-events: none; position: fixed; transform: translate(-50%, 9px) scale(.98); transition: opacity .16s ease, transform .2s cubic-bezier(.2,.8,.2,1); visibility: hidden; z-index: 2147483002; }
+      .toast { background: rgba(21, 27, 38, .97); border: 1px solid rgba(255,255,255,.13); border-radius: 9px; bottom: 16px; box-shadow: 0 12px 30px rgba(0,0,0,.28); color: #edf2f7; font-size: 12px; left: 50%; max-width: min(480px, calc(100vw - 40px)); opacity: 0; padding: 9px 12px; pointer-events: none; position: fixed; transform: translate(-50%, 9px) scale(.98); transition: opacity .16s ease, transform .2s cubic-bezier(.2,.8,.2,1); visibility: hidden; z-index: 2147483005; }
       .toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); visibility: visible; }
+      .transition-mask { align-items: center; backdrop-filter: blur(2px); background: rgba(5,11,20,.34); color: #dbe7f7; display: flex; font-size: 12px; inset: 44px 0 0; justify-content: center; opacity: 0; pointer-events: none; position: fixed; transform: translateY(3px); transition: opacity .16s ease, transform .18s ease; visibility: hidden; z-index: 2147482999; }
+      .transition-mask.show { opacity: 1; transform: translateY(0); visibility: visible; }
+      .transition-mask span { background: rgba(20,27,39,.9); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; box-shadow: 0 10px 28px rgba(0,0,0,.22); padding: 8px 12px; }
       @keyframes shell-enter { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes mark-idle { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
       @keyframes mark-busy { 0%,100% { transform: scale(.94); } 50% { transform: scale(1.1); } }
@@ -102,9 +107,9 @@
       @keyframes activity-run { 0% { transform: translateX(-115%); } 100% { transform: translateX(345%); } }
       @media (max-width: 640px) { .status { display: none; } .menu { right: 4px; } }
       @media (prefers-reduced-motion: reduce) {
-        .bar, .mark, button, .activity, .menu, .toast, .icon { animation: none !important; transition-duration: .01ms !important; }
+        .bar, .mark, button, .activity, .menu, .toast, .icon, .transition-mask { animation: none !important; transition-duration: .01ms !important; }
         .activity.show::after { animation: none !important; transform: none; width: 100%; opacity: .72; }
-        button:hover, button:active { transform: none; }
+        button:hover, button:active, .transition-mask { transform: none; }
       }
     `
   }
@@ -119,13 +124,14 @@
       <div class="bar" data-tauri-drag-region role="toolbar" aria-label="HarnessDock 外壳">
         <div class="brand"><span class="mark" aria-hidden="true"></span><span class="title">HarnessDock</span><span class="status" data-status>Harness Web</span></div>
         <button data-action="web.reload" title="刷新 Harness Web" aria-label="刷新 Harness Web"><span class="icon">↻</span></button>
-        <button data-menu-toggle title="菜单" aria-label="菜单" aria-expanded="false"><span class="icon">☰</span></button>
+        <button data-menu-toggle title="菜单" aria-label="菜单" aria-expanded="false" aria-controls="dsh-shell-menu"><span class="icon">☰</span></button>
         <button data-action="window.minimize" title="最小化" aria-label="最小化"><span class="icon">−</span></button>
         <button data-action="window.toggleMaximize" title="最大化" aria-label="最大化"><span class="icon" data-maximize-icon>□</span></button>
-        <button data-action="window.close" title="关闭窗口" aria-label="关闭窗口"><span class="icon">×</span></button>
+        <button data-action="window.close" title="退出 HarnessDock" aria-label="退出 HarnessDock"><span class="icon">×</span></button>
       </div>
       <div class="activity" data-activity aria-hidden="true"></div>
-      <div class="menu" data-menu role="menu"></div>
+      <div id="dsh-shell-menu" class="menu" data-menu role="menu" aria-label="HarnessDock 菜单"></div>
+      <div class="transition-mask" data-transition aria-live="polite"><span data-transition-text></span></div>
       <div class="toast" data-toast role="status" aria-live="polite"></div>`
     document.documentElement.appendChild(host)
 
@@ -135,6 +141,8 @@
     const activity = shadow.querySelector('[data-activity]')
     const menu = shadow.querySelector('[data-menu]')
     const menuToggle = shadow.querySelector('[data-menu-toggle]')
+    const transition = shadow.querySelector('[data-transition]')
+    const transitionText = shadow.querySelector('[data-transition-text]')
     const layout = document.createElement('style')
     layout.id = 'dsh-shell-layout'
     layout.textContent = `html.dsh-shell-mounted { height: 100% !important; overflow: hidden !important; }\nbody.dsh-shell-mounted { box-sizing: border-box !important; height: 100vh !important; min-height: 0 !important; margin: 0 !important; padding-top: 44px !important; overflow: hidden !important; }\nbody.dsh-shell-mounted #root, body.dsh-shell-mounted #app, body.dsh-shell-mounted [data-reactroot] { box-sizing: border-box !important; height: 100% !important; min-height: 0 !important; max-height: 100% !important; overflow: auto !important; }`
@@ -147,12 +155,18 @@
       const icon = shadow.querySelector('[data-maximize-icon]')
       if (icon) icon.textContent = state.maximized ? '❐' : '□'
     }
-    const showToast = (message) => {
+    const showToast = (message, duration = 2600) => {
       if (!toast) return
       window.clearTimeout(state.toastTimer)
       toast.textContent = publicText(message)
       toast.classList.add('show')
-      state.toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2600)
+      state.toastTimer = window.setTimeout(() => toast.classList.remove('show'), duration)
+    }
+    const setTransition = (command, active) => {
+      const message = transitionStatus[command]
+      if (!transition || !message) return
+      if (active && transitionText) transitionText.textContent = message
+      transition.classList.toggle('show', active)
     }
     const setBusinessActionsDisabled = (disabled) => {
       shadow.querySelectorAll('button[data-action]').forEach((button) => {
@@ -163,6 +177,7 @@
       state.busyCommand = active ? command : null
       bar?.classList.toggle('busy', active)
       activity?.classList.toggle('show', active)
+      setTransition(command, active)
       shadow.querySelectorAll('button[data-action]').forEach((button) => {
         button.classList.toggle('is-running', active && button.dataset.action === command)
       })
@@ -188,7 +203,7 @@
       } catch (error) {
         const message = error?.message || String(error)
         if (!windowCommand) setStatus('外壳操作失败')
-        showToast(`${label}失败：${message}`)
+        showToast(`${label}失败：${message}`, 4800)
       } finally {
         if (!windowCommand) {
           state.busy = false
@@ -198,14 +213,33 @@
       }
     }
 
-    const closeMenu = () => {
+    const visibleMenuItems = () => [...menu.querySelectorAll('button[role="menuitem"]')]
+      .filter((button) => !button.classList.contains('hidden') && !button.disabled)
+    const closeMenu = (restoreFocus = false) => {
       menu.classList.remove('open')
       menuToggle?.setAttribute('aria-expanded', 'false')
+      if (restoreFocus) menuToggle?.focus()
+    }
+    const openMenu = (focusLast = false) => {
+      menu.classList.add('open')
+      menuToggle?.setAttribute('aria-expanded', 'true')
+      queueMicrotask(() => {
+        const items = visibleMenuItems()
+        const target = focusLast ? items.at(-1) : items[0]
+        target?.focus()
+      })
     }
     const toggleMenu = () => {
-      const open = !menu.classList.contains('open')
-      menu.classList.toggle('open', open)
-      menuToggle?.setAttribute('aria-expanded', String(open))
+      if (menu.classList.contains('open')) closeMenu(true)
+      else openMenu(false)
+    }
+    const moveMenuFocus = (direction) => {
+      const items = visibleMenuItems()
+      if (!items.length) return
+      const current = shadow.activeElement
+      const index = Math.max(0, items.indexOf(current))
+      const next = (index + direction + items.length) % items.length
+      items[next]?.focus()
     }
 
     const sectionStarts = new Set(['runtime.safe-mode', 'gateway.manage'])
@@ -213,33 +247,54 @@
       if (sectionStarts.has(command)) {
         const separator = document.createElement('div')
         separator.className = 'separator'
+        separator.setAttribute('role', 'separator')
         menu.appendChild(separator)
       }
       const button = document.createElement('button')
       button.textContent = label
       button.dataset.action = command
       button.setAttribute('role', 'menuitem')
+      button.tabIndex = -1
       if (!can(command)) button.className = 'hidden'
       button.addEventListener('click', () => {
-        closeMenu()
+        closeMenu(false)
         void run(command, label)
       })
       menu.appendChild(button)
     })
 
-    // Toolbar controls are wired here. Menu controls already own their listener
-    // above; keeping the selectors separate avoids duplicate dispatch attempts.
     shadow.querySelectorAll('.bar [data-action]').forEach((button) => {
       const command = button.dataset.action
       if (!can(command)) button.style.display = 'none'
       button.addEventListener('click', () => void run(command, button.getAttribute('title') || command))
     })
     menuToggle.addEventListener('click', toggleMenu)
-    document.addEventListener('click', (event) => {
-      if (!host.contains(event.target)) closeMenu()
+    menuToggle.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+      event.preventDefault()
+      openMenu(event.key === 'ArrowUp')
     })
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') closeMenu()
+    shadow.addEventListener('keydown', (event) => {
+      if (!menu.classList.contains('open')) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeMenu(true)
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        moveMenuFocus(1)
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        moveMenuFocus(-1)
+      } else if (event.key === 'Home') {
+        event.preventDefault()
+        visibleMenuItems()[0]?.focus()
+      } else if (event.key === 'End') {
+        event.preventDefault()
+        visibleMenuItems().at(-1)?.focus()
+      }
+    })
+    document.addEventListener('click', (event) => {
+      if (!host.contains(event.target)) closeMenu(false)
     })
 
     if (compatibleBridge && bridge.invoke && can('window.state')) {
@@ -250,7 +305,7 @@
     }
     if (compatibleBridge && bridge.subscribe) {
       const unsubscribe = bridge.subscribe((event) => {
-        if (event?.state === 'error') showToast(event.message || '外壳状态异常')
+        if (event?.state === 'error') showToast(event.message || '外壳状态异常', 4800)
       })
       window.addEventListener('pagehide', () => unsubscribe?.(), { once: true })
     }
