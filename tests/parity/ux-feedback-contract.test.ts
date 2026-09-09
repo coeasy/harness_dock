@@ -38,6 +38,17 @@ describe('desktop interaction feedback contract', () => {
     expect(supervisor).toContain('正在完成退出…')
   })
 
+  it('makes the shell close button mean supervised exit regardless of tray availability', () => {
+    const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
+    const closeCommand = shellHost.slice(
+      shellHost.indexOf('pub async fn harness_shell_close'),
+      shellHost.indexOf('/// Initialisation script order matters'),
+    )
+    expect(closeCommand).toContain('crate::request_exit(&app);')
+    expect(closeCommand).not.toContain('tray_available')
+    expect(closeCommand).not.toContain('harness_close(app)')
+  })
+
   it('keeps motion optional and explains a prolonged startup without weakening timeouts', () => {
     const html = read('apps/tauri/web/splash.html')
     const css = read('apps/tauri/web/splash.css')
@@ -66,6 +77,18 @@ describe('desktop interaction feedback contract', () => {
     expect(source).toContain("menuToggle?.setAttribute('aria-expanded'")
   })
 
+  it('provides keyboard-complete shell menus and a nonblank reload/restart transition', () => {
+    const source = read('packages/plugin-harness-shell/src/web/shell.js')
+    expect(source).toContain('transition-mask')
+    expect(source).toContain('transitionStatus')
+    expect(source).toContain("event.key === 'ArrowDown'")
+    expect(source).toContain("event.key === 'ArrowUp'")
+    expect(source).toContain("event.key === 'Home'")
+    expect(source).toContain("event.key === 'End'")
+    expect(source).toContain('closeMenu(true)')
+    expect(source).toContain('退出 HarnessDock')
+  })
+
   it('does not propagate AbortSignal.any cancellation back into source signals', () => {
     const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
     expect(shellHost).toContain('const controller = new AbortController();')
@@ -73,6 +96,31 @@ describe('desktop interaction feedback contract', () => {
     expect(shellHost).toContain("signal.removeEventListener('abort', listener)")
     expect(shellHost).not.toContain("signal.dispatchEvent(new Event('abort'))")
     expect(shellHost).not.toContain('for (const signal of live)')
+  })
+
+  it('coalesces control focus refreshes and prevents conflicting lifecycle actions', () => {
+    const app = read('apps/tauri/web/app.js')
+    const styles = read('apps/tauri/web/styles.css')
+    expect(app).toContain('refreshInFlight')
+    expect(app).toContain('refreshAgain')
+    expect(app).toContain('scheduleVisibleRefresh')
+    expect(app).toContain('operationGroups')
+    expect(app).toContain("'runtime-lifecycle'")
+    expect(app).toContain("'gateway-admin'")
+    expect(app).toContain('withOperation')
+    expect(styles).toContain('.actions button.is-busy')
+    expect(styles).toContain('.device button.is-busy')
+  })
+
+  it('uses nonblocking second-click confirmation and keeps errors visible across background refreshes', () => {
+    const app = read('apps/tauri/web/app.js')
+    const styles = read('apps/tauri/web/styles.css')
+    expect(app).not.toContain('window.confirm')
+    expect(app).toContain('confirmSecondClick')
+    expect(app).toContain('confirmations')
+    expect(app).toContain('statusHoldUntil')
+    expect(app).toContain('now + 4800')
+    expect(styles).toContain('button.confirming')
   })
 
   it('coalesces diagnostics event bursts instead of repainting for every HostEvent', () => {
