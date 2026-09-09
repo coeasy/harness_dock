@@ -126,7 +126,12 @@ function verifyRuntimeRoot(runtimeAsset, root) {
 
   verifyRuntimePayloadIdentity(runtimeAsset, root)
 
-  const nodePath = path.join(root, 'bin', runtimeAsset.platform === 'win32' ? 'node.exe' : 'node')
+  // The Windows Node distribution is extracted with node.exe at the runtime
+  // root, while Unix distributions place node under bin/. Keep release
+  // validation aligned with the runtime layout used by the desktop launcher.
+  const nodePath = runtimeAsset.platform === 'win32'
+    ? path.join(root, 'node.exe')
+    : path.join(root, 'bin', 'node')
   if (!existsSync(nodePath)) fail(`Runtime ${runtimeAsset.runtimeKey} is missing bundled Node: ${nodePath}`)
   if (runtimeAsset.platform !== 'win32') chmodSync(nodePath, 0o755)
 }
