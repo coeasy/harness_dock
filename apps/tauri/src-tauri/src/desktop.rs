@@ -89,7 +89,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             .tray_available
             .store(true, Ordering::Release),
         Err(error) => eprintln!(
-            "HarnessDock tray unavailable; primary-window close will exit cleanly: {error}"
+            "HarnessDock tray unavailable; continuing without tray controls: {error}"
         ),
     }
     if let Err(error) = app
@@ -117,20 +117,12 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
             .load(Ordering::SeqCst)
             && label == "harness" =>
         {
+            // The native title-bar close button and Alt+F4 have the same
+            // contract as the independent Harness Shell X: close means a
+            // supervised process exit. Tray visibility is an explicit native
+            // action and never changes the meaning of a close request.
             api.prevent_close();
-            crate::harness_window::cancel_harness_load(app_handle);
-            crate::harness_window::hide_splash(app_handle);
-            let tray_available = app_handle
-                .state::<AppState>()
-                .tray_available
-                .load(Ordering::Acquire);
-            if tray_available {
-                if let Some(window) = app_handle.get_webview_window("harness") {
-                    let _ = window.hide();
-                }
-            } else {
-                crate::supervisor::request_exit(app_handle);
-            }
+            crate::supervisor::request_exit(app_handle);
         }
         tauri::RunEvent::WindowEvent {
             label,
