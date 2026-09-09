@@ -336,7 +336,7 @@ jobs:
             export LINUXDEPLOY="$linuxdeploy"
           fi
           if [ '${{ matrix.targetId }}' = linux-x64 ]; then
-            cargo tauri build --bundles '${{ matrix.bundles }}' || cargo tauri build --bundles '${{ matrix.bundles }}'
+            cargo tauri build --verbose --bundles '${{ matrix.bundles }}' || cargo tauri build --verbose --bundles '${{ matrix.bundles }}'
           else
             cargo tauri build --bundles '${{ matrix.bundles }}'
           fi
