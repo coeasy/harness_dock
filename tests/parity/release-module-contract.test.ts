@@ -187,7 +187,7 @@ describe('platform-aware release module', () => {
       encoding: 'utf8',
     })
     expect(contract.status, contract.stderr).toBe(0)
-    expect(contract.stdout).toContain('release contract OK: v0.1.3, 15 assets')
+    expect(contract.stdout).toContain('release contract OK: v0.1.5, 15 assets')
 
     const desktopMatrix = spawnSync(process.execPath, ['scripts/release/candidate-matrix.mjs', 'desktop'], {
       cwd: repoRoot,
@@ -224,3 +224,4 @@ describe('platform-aware release module', () => {
     expect(check).toContain("target.runtimeMode !== 'remote-gateway'")
   })
 })
+

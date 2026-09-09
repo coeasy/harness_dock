@@ -22,10 +22,6 @@ const WEB_BOOT_PLUGIN_FAILURE_CALL = 'await this.runPluginBoot(a,l),await this.m
 const WEB_BOOT_PLUGIN_FAILURE_REPLACEMENT =
   `await this.runPluginBoot(a,l).catch(n=>{console.error("${WEB_BOOT_PLUGIN_FAILURE_MARKER}",n)}),await this.mountApp(a)`
 
-function fsExtBinaryPath(runtimeDir: string): string {
-  return path.join(runtimeDir, 'node_modules', 'fs-ext', 'build', 'Release', 'fs_ext.node')
-}
-
 function modulePath(runtimeDir: string, packageName: string): string {
   return path.join(runtimeDir, 'node_modules', ...packageName.split('/'))
 }
@@ -35,10 +31,35 @@ function landlockHelperPath(runtimeDir: string, arch: string): string {
     runtimeDir,
     'node_modules',
     '@deepseek-ai',
-    `node-addon-landlock-run-linux-${arch}`,
+    `node-addon-system-linux-${arch}`,
     'bin',
     'landlock-run',
   )
+}
+
+function systemAddonPath(runtimeDir: string, platform: NodeJS.Platform, arch: string): string | null {
+  if (platform === 'darwin') {
+    return path.join(
+      runtimeDir,
+      'node_modules',
+      '@deepseek-ai',
+      `node-addon-system-darwin-${arch}`,
+      'bin',
+      'system.node',
+    )
+  }
+  if (platform === 'linux') {
+    return path.join(
+      runtimeDir,
+      'node_modules',
+      '@deepseek-ai',
+      `node-addon-system-linux-${arch}`,
+      'bin',
+      'glibc',
+      'system.node',
+    )
+  }
+  return null
 }
 
 export function requiredNativePackages(
@@ -59,6 +80,7 @@ export function requiredNativePackages(
   }
   if (platform === 'darwin') {
     return [
+      `@deepseek-ai/node-addon-system-darwin-${arch}`,
       `node-addon-require-builtin-darwin-${arch}`,
       `@koromix/koffi-darwin-${arch}`,
       `@img/sharp-darwin-${arch}`,
@@ -66,7 +88,7 @@ export function requiredNativePackages(
   }
   if (platform === 'linux') {
     return [
-      `@deepseek-ai/node-addon-landlock-run-linux-${arch}`,
+      `@deepseek-ai/node-addon-system-linux-${arch}`,
       `node-addon-require-builtin-linux-${arch}-gnu`,
       `@koromix/koffi-linux-${arch}`,
       `@img/sharp-linux-${arch}`,
@@ -186,7 +208,6 @@ export async function assertBundledRuntimeIntegrity(
   const required = [
     '@deepseek-ai/dsh',
     '@earendil-works/pi-ai',
-    'fs-ext',
     ...requiredNativePackages(platform, arch),
   ]
   const missing: string[] = []
@@ -207,16 +228,19 @@ export async function assertBundledRuntimeIntegrity(
     try {
       const details = await stat(helper)
       if (!details.isFile() || (details.mode & 0o111) === 0) {
-        missing.push(`@deepseek-ai/node-addon-landlock-run-linux-${arch}/bin/landlock-run (executable)`)
+        missing.push(`@deepseek-ai/node-addon-system-linux-${arch}/bin/landlock-run (executable)`)
       }
     } catch {
-      missing.push(`@deepseek-ai/node-addon-landlock-run-linux-${arch}/bin/landlock-run (executable)`)
+      missing.push(`@deepseek-ai/node-addon-system-linux-${arch}/bin/landlock-run (executable)`)
     }
   }
-  try {
-    await access(fsExtBinaryPath(runtimeDir))
-  } catch {
-    missing.push('fs-ext/build/Release/fs_ext.node (native addon)')
+  const systemAddon = systemAddonPath(runtimeDir, platform, arch)
+  if (systemAddon) {
+    try {
+      await access(systemAddon)
+    } catch {
+      missing.push(`${path.relative(runtimeDir, systemAddon)} (prebuilt native addon)`)
+    }
   }
   if (missing.length > 0) {
     throw new Error(
@@ -224,3 +248,4 @@ export async function assertBundledRuntimeIntegrity(
     )
   }
 }
+

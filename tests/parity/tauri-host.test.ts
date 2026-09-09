@@ -50,7 +50,7 @@ describe('Tauri host contract', () => {
     const releaseManifest = readJson('release-manifest.json')
     const shellManifest = readJson('packages/plugin-harness-shell/manifest.json')
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
-    expect(root.version).toBe('0.1.3')
+    expect(root.version).toBe('0.1.5')
     expect(tauri.version).toBe(root.version)
     expect(releaseManifest.version).toBe(root.version)
     expect(releaseManifest.prerelease).toBeUndefined()
@@ -306,3 +306,4 @@ describe('Tauri host contract', () => {
     expect(androidOutputs.some((name: string) => name.includes('debug'))).toBe(false)
   })
 })
+

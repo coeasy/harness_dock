@@ -14,11 +14,11 @@
 
 ## 当前版本
 
-HarnessDock 当前产品版本为 **v0.1.3**，当前内置 Runtime 精确锁定：
+HarnessDock 当前产品版本为 **v0.1.5**，当前内置 Runtime 精确锁定：
 
 ```text
-dsh-v0.1.3-alpha.2
-82a5fd61a7cf5c293cec4bdff68f455398d685e9
+dsh-v0.1.5-alpha.1
+5dda764ed3aa172535a7967b06ff95d9cbfe536a
 ```
 
 HarnessDock 产品版本跟随 pinned dsh 的基础 SemVer；上游 prerelease 后缀仅作为 Runtime provenance 保存。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
@@ -77,7 +77,7 @@ pnpm tauri:dev
 
 ## 发布
 
-当前 v0.1.3 使用正式发布通道，目标 tag：`v0.1.3`。
+当前 v0.1.5 使用正式发布通道，目标 tag：`v0.1.5`。
 
 `.github/workflows/tauri-candidate.yml` 构建和验证 Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG 与 app archive、Android APK/AAB、iOS Simulator，以及四个平台 Full Runtime bundle。
 
@@ -103,3 +103,4 @@ pnpm --filter @dsh/plugin-harness-shell build
 ## License
 
 MIT。DeepSeek Harness 与其它第三方依赖遵循各自许可证和商标规则。
+

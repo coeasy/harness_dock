@@ -1,4 +1,4 @@
-# HarnessDock v0.1.3
+# HarnessDock v0.1.5
 
 > DeepSeek Harness 的跨平台原生客户端外壳。桌面端启动即进入官方 Harness Web，外壳只负责 Runtime 生命周期、窗口操作、插件隔离恢复、Gateway、诊断与发布更新边界。
 
@@ -8,11 +8,11 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| HarnessDock | `0.1.3` |
+| HarnessDock | `0.1.5` |
 | 发布通道 | `stable` |
-| 当前发布 tag | `v0.1.3` |
-| 内置 DeepSeek Harness Runtime | `dsh-v0.1.3-alpha.2` |
-| Runtime commit | `82a5fd61a7cf5c293cec4bdff68f455398d685e9` |
+| 当前发布 tag | `v0.1.5` |
+| 内置 DeepSeek Harness Runtime | `dsh-v0.1.5-alpha.1` |
+| Runtime commit | `5dda764ed3aa172535a7967b06ff95d9cbfe536a` |
 | 桌面宿主 | Tauri 2 |
 | 桌面 Runtime | Full / sealed / 首启零下载 |
 | 移动端 Runtime | Remote Gateway only |
@@ -22,7 +22,7 @@
 从 v0.1.2 起，HarnessDock 的产品版本与**当前锁定的最新 dsh 基础 SemVer**对齐：
 
 ```text
-dsh-v0.1.3-alpha.2 -> HarnessDock 0.1.3
+dsh-v0.1.5-alpha.1 -> HarnessDock 0.1.5
 dsh-v0.1.3-beta.2 -> HarnessDock 0.1.3
 dsh-v1.0.0         -> HarnessDock 1.0.0
 ```
@@ -58,7 +58,7 @@ HarnessDock
 
 ## 平台与交付
 
-| 平台 | 交付物 | Runtime 模式 | v0.1.3 状态 |
+| 平台 | 交付物 | Runtime 模式 | v0.1.5 状态 |
 | --- | --- | --- | --- |
 | Windows x64 | NSIS Setup | Full local | unsigned build |
 | Linux x64 | DEB / AppImage | Full local | unsigned build |
@@ -73,7 +73,7 @@ HarnessDock
 
 ### Windows
 
-下载 `HarnessDock-0.1.3-windows-x64-setup.exe` 并按当前用户安装。安装程序使用 HarnessDock 自有图标；CI 会直接校验最终 NSIS PE 图标资源，防止回退为默认图标。
+下载 `HarnessDock-0.1.5-windows-x64-setup.exe` 并按当前用户安装。安装程序使用 HarnessDock 自有图标；CI 会直接校验最终 NSIS PE 图标资源，防止回退为默认图标。
 
 ### Linux
 
@@ -176,12 +176,12 @@ pnpm tauri:dev
 
 ## 发布门禁
 
-v0.1.3 只有在同一个 `main` SHA 上满足以下条件才允许发布：
+v0.1.5 只有在同一个 `main` SHA 上满足以下条件才允许发布：
 
 1. `ci` 全绿；
 2. `tauri-candidate` 全绿；
-3. 根版本、workspace、Tauri、Rust crate/Cargo.lock、Shell、origin、Release manifest 全部为 `0.1.3`；
-4. pinned Runtime 精确为 `dsh-v0.1.3-alpha.2 @ 82a5fd61...`；
+3. 根版本、workspace、Tauri、Rust crate/Cargo.lock、Shell、origin、Release manifest 全部为 `0.1.5`；
+4. pinned Runtime 精确为 `dsh-v0.1.5-alpha.1 @ 5dda764e...`；
 5. HarnessDock 产品版本等于 pinned dsh 的基础 SemVer；
 6. Windows/Linux/macOS/Android/iOS 候选产物全部生成并通过校验；
 7. 发布资产来自同一个绿色 candidate，不允许用不同 SHA 的产物覆盖；
@@ -195,7 +195,7 @@ v0.1.3 只有在同一个 `main` SHA 上满足以下条件才允许发布：
 - [文档索引](docs/README.md)
 - [项目介绍](docs/PROJECT_INTRO.md)
 - [Tauri 客户端说明](apps/tauri/README.md)
-- [v0.1.3 发布说明](.github/release-notes/v0.1.3.md)
+- [v0.1.5 发布说明](.github/release-notes/v0.1.5.md)
 - [v0.1.2 验收发布说明](.github/release-notes/v0.1.2.md)
 - [v0.1.2 beta.2 启动链路修复说明](.github/release-notes/v0.1.2-beta.2.md)
 - [v0.1.2 beta.1 历史说明](.github/release-notes/v0.1.2-beta.1.md)
@@ -205,3 +205,4 @@ v0.1.3 只有在同一个 `main` SHA 上满足以下条件才允许发布：
 ## License
 
 MIT。DeepSeek Harness 与其它第三方依赖遵循各自许可证和商标规则。
+

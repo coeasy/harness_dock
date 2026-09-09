@@ -11,7 +11,7 @@ describe('runtime integrity permission repair', () => {
       root,
       'node_modules',
       '@deepseek-ai',
-      'node-addon-landlock-run-linux-x64',
+      'node-addon-system-linux-x64',
       'bin',
       'landlock-run',
     )
@@ -23,6 +23,7 @@ describe('runtime integrity permission repair', () => {
     const mode = (await stat(helper)).mode
 
     expect(mode & 0o111).not.toBe(0)
-    expect(repaired.some((entry) => entry.includes('node-addon-landlock-run-linux-x64'))).toBe(true)
+    expect(repaired.some((entry) => entry.includes('node-addon-system-linux-x64'))).toBe(true)
   })
 })
+

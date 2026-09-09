@@ -1,6 +1,6 @@
 {
   "name": "@dsh/plugin-embedded-client",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -13,3 +13,4 @@
   },
   "devDependencies": { "esbuild": "^0.25.9" }
 }
+

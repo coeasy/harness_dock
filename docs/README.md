@@ -2,9 +2,9 @@
 
 ## 当前活动版本
 
-HarnessDock 当前产品版本：**v0.1.3**。
+HarnessDock 当前产品版本：**v0.1.5**。
 
-当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.3-alpha.2`**，commit `82a5fd61a7cf5c293cec4bdff68f455398d685e9`。
+当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.5-alpha.1`**，commit `5dda764ed3aa172535a7967b06ff95d9cbfe536a`。
 
 桌面产品不再使用 Electron。唯一桌面宿主为 `apps/tauri`，正常启动链路是：
 
@@ -25,7 +25,7 @@ Tauri Native Host
 
 - HarnessDock 产品版本使用 pinned 最新 dsh 的**基础 SemVer**；
 - 上游 `-rc.* / -beta.* / -alpha.*` 后缀只保留在 Runtime provenance；
-- 例如 `dsh-v0.1.3-alpha.2 -> HarnessDock 0.1.3`；
+- 例如 `dsh-v0.1.5-alpha.1 -> HarnessDock 0.1.5`；
 - Release gate 会检查 root/workspace/Tauri/Rust/Shell/origin/manifest 版本一致，并检查 HarnessDock 与 dsh 基础 SemVer 一致；
 - Runtime `version + gitTag + gitCommit` 必须在 `release-manifest.json` 与 `origin.json` 完全一致。
 
@@ -45,7 +45,7 @@ Tauri Native Host
    Tauri Native Host、Runtime、WebView、Shell、Gateway 与构建说明。
 6. [`VERSIONING.md`](./VERSIONING.md)  
    HarnessDock 与 DeepSeek Harness/dsh 的版本对齐政策。
-7. [`../.github/release-notes/v0.1.3.md`](../.github/release-notes/v0.1.3.md)
+7. [`../.github/release-notes/v0.1.5.md`](../.github/release-notes/v0.1.5.md)
    当前正式版发布说明。
 
 ## 当前架构不变量
@@ -79,3 +79,4 @@ Tauri Native Host
 - 历史 `v0.2.1` / `v0.2.6` / `v0.2.7` / `v0.2.8` / `v0.2.9` 方案
 
 历史文档中的 Electron、Host-only 默认安装包、first-run Node/dsh download、Host Bridge v1 等路径不得重新成为当前主路径。
+

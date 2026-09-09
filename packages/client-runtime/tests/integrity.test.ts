@@ -28,7 +28,7 @@ describe('bundled runtime integrity', () => {
       'node-addon-require-builtin-linux-x64-gnu',
     )
     expect(requiredNativePackages('linux', 'x64')).toContain(
-      '@deepseek-ai/node-addon-landlock-run-linux-x64',
+      '@deepseek-ai/node-addon-system-linux-x64',
     )
   })
 
@@ -109,3 +109,4 @@ describe('bundled runtime integrity', () => {
     )
   })
 })
+

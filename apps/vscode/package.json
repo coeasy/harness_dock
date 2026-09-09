@@ -2,7 +2,7 @@
   "name": "dsh-full-client",
   "displayName": "HarnessDock",
   "description": "Full HarnessDock Web UI inside VS Code / Cursor",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "publisher": "harnessdock",
   "private": true,
   "type": "module",
@@ -42,3 +42,4 @@
     "esbuild": "^0.25.9"
   }
 }
+

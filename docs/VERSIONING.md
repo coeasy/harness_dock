@@ -29,13 +29,13 @@ dsh-v1.0.0-beta.1  -> HarnessDock 1.0.0
 - 精确 `gitTag`；
 - 精确 `gitCommit`。
 
-当前 v0.1.3：
+当前 v0.1.5：
 
 ```text
-HarnessDock: 0.1.3
-dshVersion:  0.1.3-alpha.2
-gitTag:      dsh-v0.1.3-alpha.2
-gitCommit:   82a5fd61a7cf5c293cec4bdff68f455398d685e9
+HarnessDock: 0.1.5
+dshVersion:  0.1.5-alpha.1
+gitTag:      dsh-v0.1.5-alpha.1
+gitCommit:   5dda764ed3aa172535a7967b06ff95d9cbfe536a
 ```
 
 禁止使用 `latest`、`next` 或未固定 commit 的 Runtime 进入发布候选。
@@ -89,6 +89,7 @@ gitCommit:   82a5fd61a7cf5c293cec4bdff68f455398d685e9
 
 ## 6. 历史 `v0.2.x` 文件名
 
-仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前已经重新校正产品版本到 `v0.1.3`；这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
+仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前已经重新校正产品版本到 `v0.1.5`；这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
 
 活动版本的唯一权威来源是根 `package.json`，发布关系由 `release-manifest.json` 与 `packages/docs-sync/origin.json` 补充描述。
+

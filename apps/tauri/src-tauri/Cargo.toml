@@ -1,6 +1,6 @@
 [package]
 name = "harnessdock-tauri"
-version = "0.1.3"
+version = "0.1.5"
 description = "HarnessDock Tauri host for desktop, Android and iOS"
 authors = ["HarnessDock contributors"]
 edition = "2021"
@@ -34,3 +34,4 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+

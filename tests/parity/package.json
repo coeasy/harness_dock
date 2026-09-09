@@ -1,6 +1,6 @@
 {
   "name": "@dsh/parity-tests",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,3 +10,4 @@
   "dependencies": { "@dsh/docs-sync": "workspace:*" },
   "devDependencies": { "@playwright/test": "^1.55.0" }
 }
+
