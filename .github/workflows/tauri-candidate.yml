@@ -112,6 +112,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Keep the official dsh closure build on the same SHA as every candidate asset.
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
