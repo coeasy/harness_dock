@@ -183,18 +183,11 @@ const BRIDGE_SCRIPT: &str = r#"
 })();
 "#;
 
-/// The custom shell close button hides to tray only when a tray actually
-/// exists. On desktops where tray creation failed, it performs supervised exit
-/// so the Runtime/Gateway actors are still drained before process termination.
+/// The shell close button always means exit. Hiding to tray is intentionally a
+/// separate native action so the top-right X never leaves Runtime/Gateway work
+/// alive after the user believes the application has closed.
 #[tauri::command]
 pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
-    let tray_available = app
-        .state::<crate::AppState>()
-        .tray_available
-        .load(std::sync::atomic::Ordering::Acquire);
-    if tray_available {
-        return crate::harness_window::harness_close(app).await;
-    }
     crate::request_exit(&app);
     Ok(())
 }
