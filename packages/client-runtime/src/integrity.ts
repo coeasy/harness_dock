@@ -22,6 +22,10 @@ const WEB_BOOT_PLUGIN_FAILURE_CALL = 'await this.runPluginBoot(a,l),await this.m
 const WEB_BOOT_PLUGIN_FAILURE_REPLACEMENT =
   `await this.runPluginBoot(a,l).catch(n=>{console.error("${WEB_BOOT_PLUGIN_FAILURE_MARKER}",n)}),await this.mountApp(a)`
 
+function fsExtBinaryPath(runtimeDir: string): string {
+  return path.join(runtimeDir, 'node_modules', 'fs-ext', 'build', 'Release', 'fs_ext.node')
+}
+
 function modulePath(runtimeDir: string, packageName: string): string {
   return path.join(runtimeDir, 'node_modules', ...packageName.split('/'))
 }
@@ -182,6 +186,7 @@ export async function assertBundledRuntimeIntegrity(
   const required = [
     '@deepseek-ai/dsh',
     '@earendil-works/pi-ai',
+    'fs-ext',
     ...requiredNativePackages(platform, arch),
   ]
   const missing: string[] = []
@@ -207,6 +212,11 @@ export async function assertBundledRuntimeIntegrity(
     } catch {
       missing.push(`@deepseek-ai/node-addon-landlock-run-linux-${arch}/bin/landlock-run (executable)`)
     }
+  }
+  try {
+    await access(fsExtBinaryPath(runtimeDir))
+  } catch {
+    missing.push('fs-ext/build/Release/fs_ext.node (native addon)')
   }
   if (missing.length > 0) {
     throw new Error(
