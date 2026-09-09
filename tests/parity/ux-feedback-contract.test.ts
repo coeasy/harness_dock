@@ -107,12 +107,14 @@ describe('desktop interaction feedback contract', () => {
     expect(app).toContain('operationGroups')
     expect(app).toContain("'runtime-lifecycle'")
     expect(app).toContain("'gateway-admin'")
+    expect(app).toContain('const operationBusy = new Map()')
+    expect(app).toContain('const active = element === activeElement')
     expect(app).toContain('withOperation')
     expect(styles).toContain('.actions button.is-busy')
     expect(styles).toContain('.device button.is-busy')
   })
 
-  it('uses nonblocking second-click confirmation and keeps errors visible across background refreshes', () => {
+  it('uses nonblocking second-click confirmation and keeps results visible across background refreshes', () => {
     const app = read('apps/tauri/web/app.js')
     const styles = read('apps/tauri/web/styles.css')
     expect(app).not.toContain('window.confirm')
@@ -120,7 +122,18 @@ describe('desktop interaction feedback contract', () => {
     expect(app).toContain('confirmations')
     expect(app).toContain('statusHoldUntil')
     expect(app).toContain('now + 4800')
+    expect(app).toContain('now + 1800')
     expect(styles).toContain('button.confirming')
+  })
+
+  it('keeps continuous control feedback compositor-friendly and motion-optional', () => {
+    const styles = read('apps/tauri/web/styles.css')
+    expect(styles).toContain('will-change:transform,opacity')
+    expect(styles).toContain('@keyframes boot-pulse{0%{opacity:.45;transform:scale(1)}')
+    expect(styles).toContain('@keyframes confirm-pulse{0%,100%{opacity:1}')
+    expect(styles).not.toContain('@keyframes boot-pulse{0%{box-shadow')
+    expect(styles).not.toContain('@keyframes confirm-pulse{0%,100%{box-shadow')
+    expect(styles).toContain('@media (prefers-reduced-motion:reduce)')
   })
 
   it('coalesces diagnostics event bursts instead of repainting for every HostEvent', () => {
