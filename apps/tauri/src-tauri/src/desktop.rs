@@ -95,9 +95,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             .state::<AppState>()
             .tray_available
             .store(true, Ordering::Release),
-        Err(error) => eprintln!(
-            "HarnessDock tray unavailable; continuing without tray controls: {error}"
-        ),
+        Err(error) => {
+            eprintln!("HarnessDock tray unavailable; continuing without tray controls: {error}")
+        }
     }
     if let Err(error) = app
         .handle()
