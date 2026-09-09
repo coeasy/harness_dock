@@ -18,30 +18,34 @@ describe('packaged startup Web chain regression', () => {
     expect(html).toContain('<script src="./splash.js" defer></script>')
     expect(html).not.toMatch(/<style(?:\s|>)/i)
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i)
-    expect(html).toContain('正在打开 Harness Web…')
+    expect(html).toContain('正在启动 Harness Runtime…')
     expect(html).not.toContain('正在验证内置 Harness Runtime')
     expect(css).toContain('.splash')
-    expect(css).toContain('.spinner')
-    expect(css).toContain('.progress::before')
+    expect(css).toContain('.mark-wrap')
+    expect(css).toContain('.progress span')
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)')
     expect(script).toContain('window.__harnessDockSetStatus')
+    expect(script).toContain('document.documentElement.dataset.state = state')
   })
 
-  it('keeps the normal packaged launch on the primary Harness Web surface', () => {
+  it('keeps the normal packaged launch on the primary Harness Web surface with presentation-only startup feedback', () => {
     const config = read('apps/tauri/src-tauri/tauri.conf.json')
     const startup = read('apps/tauri/src-tauri/src/startup.rs')
     const window = read('apps/tauri/src-tauri/src/harness_window.rs')
     const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
     const control = read('apps/tauri/web/app.js')
 
-    expect(config).toMatch(/"label": "splash"[\s\S]*?"visible": false/)
-    expect(startup).toContain('harness_window::hide_splash(&app)')
+    expect(config).toMatch(/"label": "splash"[\s\S]*?"visible": true/)
+    expect(startup).toContain('harness_window::show_splash(&app, "正在启动 Harness Runtime…")')
+    expect(startup).toContain('harness_window::set_splash_status(&app, "正在打开 Harness Web…")')
     expect(startup).not.toContain('正在验证内置 Harness Runtime')
-    expect(startup).not.toContain('正在打开 Harness Web')
-    expect(window).toContain('harness_open_impl(app, url, false).await')
+    expect(window).toContain('harness_open_impl(app, url, true).await')
+    expect(window).toContain('hide_splash(&app)')
 
     // The candidate already verifies the sealed Runtime image. Normal launch
     // resolves the packaged paths and spawns directly instead of doing a second
-    // node.exe/bin.js existence preflight in the user startup path.
+    // node.exe/bin.js existence preflight in the user startup path. The visible
+    // splash is presentation-only and must not re-introduce Runtime detection.
     expect(runtime).toContain('fn load_runtime_image(')
     expect(runtime).not.toContain('fn verify_runtime_image(')
     expect(runtime).not.toContain('!node.is_file()')
