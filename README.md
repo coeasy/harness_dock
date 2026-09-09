@@ -1,8 +1,146 @@
-# HarnessDock v0.1.5
+<div align="center">
 
-> DeepSeek Harness 的跨平台原生客户端外壳。桌面端启动即进入官方 Harness Web，外壳只负责 Runtime 生命周期、窗口操作、插件隔离恢复、Gateway、诊断与发布更新边界。
+<img src="apps/tauri/src-tauri/icons/app-icon.png" width="112" alt="HarnessDock icon" />
 
-> 本项目为独立第三方客户端，与 DeepSeek 官方无隶属或背书关系。DeepSeek、DeepSeek Harness 及相关标识归其权利人所有。
+# HarnessDock
+
+**DeepSeek Harness 的跨平台原生客户端**
+
+把 DeepSeek Harness 稳定地带到 Windows、macOS、Linux 桌面，并通过 Remote Gateway 延伸到 Android / iOS。
+
+[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.5 发布说明](.github/release-notes/v0.1.5.md)
+
+![Version](https://img.shields.io/badge/version-v0.1.5-blue)
+![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
+![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+</div>
+
+> [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — **Everything is a Plugin.**  
+> HarnessDock 不 fork、不重写 DeepSeek Harness Web UI，而是为官方 Harness Runtime / Web 提供独立的跨平台 Native Host、生命周期保护、桌面外壳和移动端 Gateway 能力。
+
+> **第三方项目声明**：HarnessDock 是独立的非官方客户端，与 DeepSeek 官方无隶属或背书关系。DeepSeek、DeepSeek Harness 及相关名称和标识归其权利人所有。
+
+---
+
+## HarnessDock 是什么？
+
+DeepSeek Harness 本身提供强大的 Harness Runtime、Web 与插件生态。HarnessDock 解决的是另一个问题：**如何把它变成一个可以直接安装、直接启动、长期稳定运行的跨平台客户端。**
+
+在桌面端，HarnessDock 使用 Tauri 2 作为原生宿主，把版本锁定的 Node、dsh Runtime 和必要 Runtime Tool 一起封装到安装包中。用户安装后直接启动 HarnessDock，客户端自动启动内置 Runtime，完成健康检查后立即进入 Harness Web，不需要先打开设置页，也不要求用户额外安装 Node、dsh 或 pnpm。
+
+```text
+启动 HarnessDock
+      ↓
+Tauri Native Host
+      ↓
+Sealed Node + pinned dsh Runtime
+      ↓
+Runtime ready / RuntimeLease
+      ↓
+受限本地 WebView
+      ↓
+DeepSeek Harness Web
+      ↓
+可选 Harness Shell / Gateway / Diagnostics
+```
+
+**一句话理解：HarnessDock 不是另一个 Harness，而是 DeepSeek Harness 的安装、运行与跨平台承载层。**
+
+---
+
+## 为什么使用 HarnessDock？
+
+### 1. 安装后直接进入 Harness Web
+
+Windows、macOS、Linux 桌面版本默认启动链路只有一个目标：**尽快、安全地打开 Harness Web。**
+
+- 不先进入设置页；
+- 不要求用户手动启动 dsh；
+- 不要求用户配置本地 Web 地址；
+- Runtime ready 后直接创建 Harness WebView；
+- Runtime 或 WebView 异常时进入 Recovery，而不是留下空白窗口或直接退出。
+
+### 2. 桌面版内置完整 Runtime
+
+桌面安装包采用 **Full / sealed Runtime**：
+
+- 内置受版本约束的 Node；
+- 内置 pinned dsh Runtime；
+- 内置必要 Runtime Tool；
+- 首次启动不下载 Node / dsh；
+- 客户端运行时不依赖用户系统 PATH 中的 Node；
+- Runtime image 会进行来源与完整性身份校验。
+
+这意味着普通用户安装客户端后即可使用，不需要自己维护一套 Node + dsh 开发环境。
+
+### 3. 原生桌面外壳
+
+HarnessDock 在 Harness Web 之外只提供必要的宿主能力，不改变 Harness Web 主业务界面：
+
+| 功能 | 说明 |
+| --- | --- |
+| 菜单 | 打开宿主操作入口 |
+| 刷新 Web | 重新加载当前 Harness Web |
+| 重启 Runtime | 有界停止当前 Runtime，并创建新的 Runtime generation |
+| 隔离插件启动 | 在第三方插件异常时使用受控隔离恢复路径 |
+| Gateway | 为移动端或远程访问提供受控 Gateway 能力 |
+| 插件诊断 | 查看插件 / Runtime 相关诊断信息 |
+| 最小化 | 原生窗口最小化 |
+| 最大化 / 还原 | 原生窗口状态切换 |
+| 关闭 / 退出 | 受控关闭窗口并清理受管后台进程 |
+
+独立 `@dsh/plugin-harness-shell` 只是一层可选控制外壳。Shell 注入失败时，HarnessDock 会恢复原生窗口 decorations，**不会因为可选 Shell 故障阻断 Harness Web。**
+
+### 4. Runtime 生命周期保护
+
+桌面客户端不仅负责“启动一个进程”，还负责完整生命周期：
+
+- Runtime generation / lease 防止旧进程重新接管新会话；
+- Refresh / Restart 等操作使用互斥与 single-flight 控制，避免重复并发命令；
+- Windows 使用 Job Object 管理受控子进程树；
+- macOS / Linux 使用独立 process group，并执行有界 TERM → KILL 退出流程；
+- 应用退出阶段拒绝再创建新的受管后台进程；
+- Runtime、Gateway、Surface、Update 使用统一 Host Kernel / Reconciler 管理状态。
+
+### 5. 插件故障不应该拖垮客户端
+
+DeepSeek Harness 的核心理念是插件化。HarnessDock 因此把“插件异常”和“主客户端可用性”分离：
+
+- 第三方插件异常进入受控隔离 / Recovery；
+- 必要时可以使用临时 clean profile 恢复 Harness Web；
+- 不直接修改用户真实配置；
+- 可选插件、Tray、Updater、Shell 等异常采用 fail-open；
+- 主业务目标始终是让 Harness Web 保持可进入、可恢复。
+
+### 6. WebView 与本地权限边界
+
+桌面 Harness WebView 只允许当前 RuntimeLease 对应的受管本地 origin：
+
+```text
+http://127.0.0.1:<managed-port>
+```
+
+Runtime generation、origin 与 navigation 必须一致。远程 Web 文档不会直接获得完整 Tauri 高权限 API，宿主操作通过受控 Host Protocol 进入 Native Host。
+
+### 7. Android / iOS 使用 Remote Gateway
+
+移动设备不适合直接承载完整 Node + dsh 桌面 Runtime，因此 HarnessDock 在移动端采用不同架构：
+
+```text
+Android / iOS Client
+        ↓ HTTPS
+Trusted HarnessDock Gateway
+        ↓
+Desktop / Server Runtime
+        ↓
+DeepSeek Harness
+```
+
+Android / iOS **不会在设备内启动 Node / dsh**。移动端只连接可信 HTTPS Gateway，桌面 Runtime 与移动客户端保持职责分离。
+
+---
 
 ## 当前版本
 
@@ -10,123 +148,384 @@
 | --- | --- |
 | HarnessDock | `0.1.5` |
 | 发布通道 | `stable` |
-| 当前发布 tag | `v0.1.5` |
-| 内置 DeepSeek Harness Runtime | `dsh-v0.1.5-alpha.1` |
+| 当前 tag | `v0.1.5` |
+| DeepSeek Harness Runtime | `dsh-v0.1.5-alpha.1` |
 | Runtime commit | `5dda764ed3aa172535a7967b06ff95d9cbfe536a` |
 | 桌面宿主 | Tauri 2 |
 | 桌面 Runtime | Full / sealed / 首启零下载 |
-| 移动端 Runtime | Remote Gateway only |
+| 移动 Runtime | Remote Gateway only |
 
-### 版本规则
-
-从 v0.1.2 起，HarnessDock 的产品版本与**当前锁定的最新 dsh 基础 SemVer**对齐：
+HarnessDock 产品版本与当前 pinned dsh 的**基础 SemVer**对齐：
 
 ```text
 dsh-v0.1.5-alpha.1 -> HarnessDock 0.1.5
-dsh-v0.1.3-beta.2 -> HarnessDock 0.1.3
+dsh-v0.1.3-beta.2  -> HarnessDock 0.1.3
 dsh-v1.0.0         -> HarnessDock 1.0.0
 ```
 
-`rc / beta / alpha` 后缀属于上游 Runtime 的精确来源信息，不附加到 HarnessDock 产品版本。发布门禁会同时检查客户端版本、Runtime version/tag/commit、Shell 版本和下载 URL，防止再次出现版本线错位。
+上游 `alpha / beta / rc` 后缀会继续保存在 Runtime provenance 中，但不附加到 HarnessDock 产品版本。
 
-## 产品定位
+---
 
-HarnessDock 不 fork、不重写 DeepSeek Harness Web UI。桌面端只做 Native Host：
+## 平台支持与下载
 
-```text
-HarnessDock
-  -> sealed Node + pinned dsh Runtime
-  -> Runtime ready / RuntimeLease
-  -> isolated loopback WebView
-  -> official Harness Web
-  -> optional Harness Shell controls
+最新版统一从 [GitHub Releases](https://github.com/coeasy/harness_dock/releases/latest) 下载。
+
+| 平台 | 推荐安装包 | Runtime 模式 | 当前状态 |
+| --- | --- | --- | --- |
+| Windows x64 | `HarnessDock-0.1.5-windows-x64-setup.exe` | Full local | 可安装，未签名 |
+| Linux x64 | `.deb` / `.AppImage` | Full local | 可安装，未签名 |
+| macOS Apple Silicon | `macos-arm64.dmg` | Full local | 可安装，未 notarize |
+| macOS Intel | `macos-x64.dmg` | Full local | 可安装，未 notarize |
+| Android arm64 | `.apk` / `.aab` | Remote Gateway | 非商店签名 |
+| iOS Simulator | `ios-arm64-simulator.zip` | Remote Gateway | 仅 Simulator |
+
+### 直接下载 v0.1.5
+
+- **Windows x64**：[`HarnessDock-0.1.5-windows-x64-setup.exe`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-windows-x64-setup.exe)
+- **Linux x64 / DEB**：[`HarnessDock-0.1.5-linux-x64.deb`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-linux-x64.deb)
+- **Linux x64 / AppImage**：[`HarnessDock-0.1.5-linux-x64.AppImage`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-linux-x64.AppImage)
+- **macOS Apple Silicon / DMG**：[`HarnessDock-0.1.5-macos-arm64.dmg`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-macos-arm64.dmg)
+- **macOS Intel / DMG**：[`HarnessDock-0.1.5-macos-x64.dmg`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-macos-x64.dmg)
+- **Android arm64 / APK**：[`HarnessDock-0.1.5-android-arm64-release.apk`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-android-arm64-release.apk)
+- **Android arm64 / AAB**：[`HarnessDock-0.1.5-android-arm64-release.aab`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-android-arm64-release.aab)
+- **iOS Simulator**：[`HarnessDock-0.1.5-ios-arm64-simulator.zip`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/HarnessDock-0.1.5-ios-arm64-simulator.zip)
+- **完整性校验**：[`SHA256SUMS`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/SHA256SUMS)
+
+> 当前 v0.1.5 尚未启用 Windows Authenticode、Apple notarization、正式移动商店签名和 Tauri `latest.json/.sig` 自动更新资产。请优先从本仓库 Release 下载，并使用 `SHA256SUMS` 校验。
+
+---
+
+# 安装与使用
+
+## Windows 10 / 11 x64
+
+### 安装
+
+1. 打开 [最新 Release](https://github.com/coeasy/harness_dock/releases/latest)。
+2. 下载 `HarnessDock-0.1.5-windows-x64-setup.exe`。
+3. 建议先使用 PowerShell 校验 SHA-256：
+
+```powershell
+Get-FileHash .\HarnessDock-0.1.5-windows-x64-setup.exe -Algorithm SHA256
 ```
 
-正常启动不进入设置页。Runtime 就绪后直接打开 Harness Web；Recovery、Gateway、Diagnostics 和 Update 都是按需 Surface，不得成为主界面的前置依赖。
+将结果与 Release 中的 `SHA256SUMS` 对照。
 
-## 核心能力
+4. 双击安装程序。HarnessDock 使用 current-user 安装，不需要把系统 Node / dsh 安装到全局环境。
+5. 当前版本没有 Authenticode 签名，因此 Windows SmartScreen 可能显示“Windows 已保护你的电脑”。确认安装包来自本仓库 Release 且 SHA-256 匹配后，可选择 **更多信息 → 仍要运行**。
+6. 安装完成后从开始菜单或桌面入口启动 HarnessDock。
 
-- **启动即用 Harness Web**：Windows、macOS、Linux 启动后自动拉起安装包内置 Runtime 并显示 Harness Web。
-- **Full Runtime 桌面包**：Node、dsh 与必要 Runtime Tool 随安装包分发；首次启动不下载 Node/dsh，离线环境仍可启动已内置的 Harness Web。
-- **桌面外壳操作**：菜单、刷新 Web、重启 Runtime、隔离插件启动、Gateway、插件诊断、最小化、最大化/还原、关闭与受控退出。
-- **Shell fail-open**：独立 `@dsh/plugin-harness-shell` 注入失败时恢复原生窗口边框，不允许可选 Shell 故障阻断 Harness Web。
-- **Runtime 隔离恢复**：第三方插件故障进入受控隔离/恢复路径，不直接修改用户真实配置，也不会让可选插件异常退出客户端。
-- **进程生命周期保护**：Runtime/Gateway 使用 generation、lease、single-flight 与退出保护；Windows 使用 Job Object，Unix 使用独立 process group，减少后台孤儿进程。
-- **受限 WebView**：桌面 Harness WebView 只接受当前受管 `http://127.0.0.1:<port>` Runtime origin。
-- **移动端 Remote Gateway**：Android/iOS 不在设备内启动 Node/dsh，只连接可信 HTTPS Gateway。
-- **独立 Shell 插件**：`packages/plugin-harness-shell` 可独立构建/发布，宿主能力缺失时隐藏对应操作而不是阻断 Web。
+### 第一次启动
 
-## 平台与交付
+正常流程是：
 
-| 平台 | 交付物 | Runtime 模式 | v0.1.5 状态 |
-| --- | --- | --- | --- |
-| Windows x64 | NSIS Setup | Full local | unsigned build |
-| Linux x64 | DEB / AppImage | Full local | unsigned build |
-| macOS x64 | DMG / app archive | Full local | unsigned, not notarized |
-| macOS arm64 | DMG / app archive | Full local | unsigned, not notarized |
-| Android arm64 | APK / AAB | Remote Gateway | release-optimized, non-store signing |
-| iOS Simulator | ZIP | Remote Gateway | Simulator only |
+```text
+启动 HarnessDock
+  -> 启动内置 Runtime
+  -> Runtime 健康检查
+  -> 创建 Harness WebView
+  -> 直接进入 Harness Web
+```
 
-当前发布不启用 Tauri 自动更新签名资产，也不生成 `latest.json`。正式签名通道启用前，更新检查只引导用户进入 GitHub Release，下载后可使用 `SHA256SUMS` 校验完整性。
+无需手动启动 Node、dsh，也无需先打开设置页。
 
-## 安装与使用
+### 日常使用
 
-### Windows
+顶部外壳可以执行刷新 Web、重启 Runtime、隔离插件启动、Gateway、插件诊断、最小化、最大化 / 还原和关闭等操作。
 
-下载 `HarnessDock-0.1.5-windows-x64-setup.exe` 并按当前用户安装。安装程序使用 HarnessDock 自有图标；CI 会直接校验最终 NSIS PE 图标资源，防止回退为默认图标。
+关闭应用时 HarnessDock 会进入受控退出流程，并清理属于当前客户端的受管 Runtime / Gateway 子进程。
 
-### Linux
+### 卸载
 
-优先使用发行版对应的 DEB，或直接运行 AppImage。桌面包已包含 Full Runtime，不要求系统预装 Node 或 dsh。
+在 Windows **设置 → 应用 → 已安装的应用** 中找到 HarnessDock 并卸载即可。
+
+---
+
+## macOS Apple Silicon / Intel
+
+### 选择正确版本
+
+- Apple Silicon（M1 / M2 / M3 / M4 等）：下载 `HarnessDock-0.1.5-macos-arm64.dmg`
+- Intel Mac：下载 `HarnessDock-0.1.5-macos-x64.dmg`
+
+### 安装
+
+1. 从 [GitHub Release](https://github.com/coeasy/harness_dock/releases/latest) 下载对应 DMG。
+2. 可先校验 SHA-256：
+
+```bash
+shasum -a 256 HarnessDock-0.1.5-macos-arm64.dmg
+```
+
+Intel 版本请替换为对应文件名，并与 `SHA256SUMS` 对照。
+
+3. 打开 DMG，将 HarnessDock 复制到 `Applications`。
+4. 当前版本尚未进行 Apple notarization。首次启动如果被 Gatekeeper 阻止，请确认文件来自本仓库并完成哈希校验，然后可以：
+   - 在 Finder 中按住 Control 点击 HarnessDock，选择 **打开**；或
+   - 进入 **系统设置 → 隐私与安全性**，对 HarnessDock 选择 **仍要打开 / Open Anyway**。
+5. 启动后无需单独配置 Runtime，HarnessDock 会自动启动内置 dsh 并进入 Harness Web。
+
+### 使用与退出
+
+功能与 Windows 桌面端一致：刷新、Runtime 重启、插件隔离、Gateway、诊断、窗口控制等都在原生外壳中完成。
+
+退出 HarnessDock 时会同步终止受管 Runtime，避免残留后台进程。
+
+---
+
+## Linux x64
+
+HarnessDock 同时提供 DEB 和 AppImage。
+
+### 方式 A：Debian / Ubuntu 使用 DEB
+
+1. 下载：
+
+```text
+HarnessDock-0.1.5-linux-x64.deb
+```
+
+2. 安装：
+
+```bash
+sudo apt install ./HarnessDock-0.1.5-linux-x64.deb
+```
+
+3. 安装完成后从桌面应用菜单启动 HarnessDock。
+4. 客户端会自动使用安装包内置 Runtime，不要求系统提前安装 Node / dsh。
+
+卸载时可以通过系统软件管理器，或使用发行版对应的包管理命令完成。
+
+### 方式 B：使用 AppImage
+
+1. 下载：
+
+```text
+HarnessDock-0.1.5-linux-x64.AppImage
+```
+
+2. 增加执行权限：
+
+```bash
+chmod +x HarnessDock-0.1.5-linux-x64.AppImage
+```
+
+3. 直接运行：
+
+```bash
+./HarnessDock-0.1.5-linux-x64.AppImage
+```
+
+### 校验文件
+
+```bash
+sha256sum HarnessDock-0.1.5-linux-x64.AppImage
+```
+
+或：
+
+```bash
+sha256sum HarnessDock-0.1.5-linux-x64.deb
+```
+
+将输出与 Release 中的 `SHA256SUMS` 对照。
+
+---
+
+## Android arm64
+
+Android 版本是 **Remote Gateway 客户端**，不是桌面 Full Runtime 的移动移植版。
+
+### 安装 APK
+
+1. 从 [GitHub Release](https://github.com/coeasy/harness_dock/releases/latest) 下载 `HarnessDock-0.1.5-android-arm64-release.apk`。
+2. 如果 Android 阻止侧载，请只在确认 APK 来自本仓库 Release 后，为当前下载来源临时允许“安装未知应用”。
+3. 安装并打开 HarnessDock。
+
+`.aab` 主要用于分发 / 商店或测试流程，普通用户手动安装优先使用 `.apk`。
+
+### 使用
+
+Android 设备不会启动 Node / dsh，需要连接一个已经运行的 HarnessDock Gateway：
+
+1. 在受信任的桌面端或服务器环境运行 HarnessDock / Harness Runtime。
+2. 从桌面 HarnessDock 菜单进入 **Gateway** 能力。
+3. 为移动端提供受信任的 **HTTPS** Gateway 地址。
+4. Android 客户端连接该 Gateway 后访问 Harness。
+
+不要把本地 Gateway 端口直接裸露到不可信公网。远程访问应使用受信任的 HTTPS Tunnel、Reverse Proxy 或等价的 TLS 终止方案。
+
+---
+
+## iOS Simulator
+
+当前 Release **只提供 iOS Simulator 构建**，不提供真机 IPA，也不代表已经通过 App Store 签名 / 审核。
+
+### 安装
+
+1. 在 macOS 上安装 Xcode 并启动一个 iOS Simulator。
+2. 下载 `HarnessDock-0.1.5-ios-arm64-simulator.zip`。
+3. 解压得到 Simulator 应用包。
+4. 可以把 `.app` 拖入已启动的 Simulator，或使用：
+
+```bash
+xcrun simctl install booted /path/to/HarnessDock.app
+```
+
+5. 在 Simulator 中启动 HarnessDock。
+
+### 使用
+
+iOS Simulator 与 Android 一样采用 Remote Gateway 模式，需要连接可信 HTTPS HarnessDock Gateway，不会在 Simulator 中启动 Node / dsh。
+
+---
+
+## 移动端 Gateway 使用原则
+
+桌面端与移动端的职责不同：
+
+| 能力 | Windows / macOS / Linux | Android / iOS |
+| --- | --- | --- |
+| 本地 Node | 内置 | 不运行 |
+| 本地 dsh Runtime | 内置 | 不运行 |
+| Harness Web | 本地受管 Runtime | 经 Gateway 访问 |
+| Gateway Server | 可提供 | 作为客户端连接 |
+| 适合离线本地运行 | 是，使用已内置 Runtime | 否，需要可达 Gateway |
+
+Gateway 的设计目标是“把已经受控运行的 Harness 安全地延伸到移动端”，而不是直接把桌面本地端口暴露到公网。
+
+---
+
+## 更新 HarnessDock
+
+当前 v0.1.5 不启用签名自动更新资产，因此客户端更新流程是：
+
+1. 检查是否有新版本；
+2. 前往 [GitHub Releases](https://github.com/coeasy/harness_dock/releases/latest)；
+3. 下载对应平台的新安装包；
+4. 使用 `SHA256SUMS` 校验；
+5. 手动安装更新。
+
+正式代码签名与签名自动更新通道启用前，不应把当前更新检查理解为“后台静默自动安装”。
+
+---
+
+## Release 完整性校验
+
+每个正式 Release 都提供 `SHA256SUMS`。推荐在安装前进行校验。
+
+### Windows PowerShell
+
+```powershell
+Get-FileHash .\HarnessDock-0.1.5-windows-x64-setup.exe -Algorithm SHA256
+```
 
 ### macOS
 
-按 CPU 架构选择 x64 或 arm64 DMG。本版本未做 Apple notarization，下载后请校验 `SHA256SUMS`。
+```bash
+shasum -a 256 HarnessDock-0.1.5-macos-arm64.dmg
+```
 
-### Android / iOS
+### Linux
 
-移动端不包含桌面 Runtime，需要连接桌面端/服务器端 HarnessDock Gateway。不要把本地 Gateway 端口直接暴露到不可信公网；远程访问应通过受信任的 HTTPS Tunnel / Reverse Proxy。
+```bash
+sha256sum HarnessDock-0.1.5-linux-x64.AppImage
+```
 
-## 桌面外壳
+[v0.1.5 SHA256SUMS](https://github.com/coeasy/harness_dock/releases/download/v0.1.5/SHA256SUMS)
 
-主 Harness Web 顶部提供：
+---
 
-- 菜单
-- 刷新 Web
-- 最小化
-- 最大化 / 还原
-- 关闭
+## 与 DeepSeek Harness 的关系
 
-菜单业务操作通过 Host Protocol 进入统一 Host Kernel/Reconciler，而不是由远程 Web 页面直接持有高权限 Tauri API。插件异常、Tray/Updater/菜单初始化异常采用 fail-open 策略，不得阻断正常 Harness Web 启动。
+官方项目：**[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)**
 
-## 本地一键构建自己的客户端
+DeepSeek Harness 提供 Harness Runtime、Web 与插件生态；HarnessDock 不尝试替代或重新实现这些核心能力。
 
-普通用户不需要手动准备 `resources/dsh-runtime`，也不需要提前全局安装 pnpm 或 Tauri CLI。先安装当前平台的 Rust/Tauri 2 系统依赖，然后从仓库根目录执行对应入口。
+HarnessDock 的职责边界是：
 
-Node 采用 **local-first** 策略：如果 `PATH` 中已有满足项目版本门禁的 Node（当前为 `^22.19.0` 或 `>=24`），一键构建会直接使用本机 Node，不做 Node 下载；只有 Node 缺失或版本不兼容时，才使用 `.local-tools/` 中已缓存或按官方 SHA-256 校验后下载的 portable Node。CI 使用 `HARNESSDOCK_FORCE_PORTABLE_NODE=1` 强制验证裸机 fallback，不影响开发机的本地快路径。
+```text
+DeepSeek Harness
+  ├─ Runtime / dsh
+  ├─ Harness Web
+  └─ Plugin ecosystem
+          ↑
+          │ pinned runtime contract
+          │
+HarnessDock
+  ├─ Native desktop host
+  ├─ Runtime lifecycle
+  ├─ Window / shell controls
+  ├─ Plugin isolation / recovery
+  ├─ Gateway
+  ├─ Diagnostics
+  └─ Packaging / release gates
+```
 
-Windows：
+当前 v0.1.5 精确锁定 `dsh-v0.1.5-alpha.1 @ 5dda764ed3aa172535a7967b06ff95d9cbfe536a`，从而让客户端安装包、Runtime provenance 与发布资产保持可追踪。
+
+---
+
+## 架构原则
+
+### 桌面：Harness Web 是唯一正常主业务 Surface
+
+```text
+Tauri setup
+  -> Host Kernel / startup coordinator
+  -> sealed Full Runtime
+  -> RuntimeActor / RuntimeLease
+  -> validate loopback origin
+  -> Harness WebView
+  -> Harness Web visible
+  -> optional Harness Shell
+```
+
+Recovery、Gateway、Diagnostics、Update 都是按需能力，不应该抢占正常首屏。
+
+### Shell fail-open
+
+Harness Shell 是独立可选插件。Shell 失败时回退原生窗口控件，不允许可选 UI 故障阻断 Harness Web。
+
+### Runtime identity
+
+只有与当前 `platform / arch / clientVersion / dshVersion / tag / commit / layout / schema / image identity` 完整匹配的 Runtime 才允许复用。
+
+### 发布同源
+
+正式 Release 只接受同一个 `main` SHA 上生成并通过验证的 candidate 资产，避免跨提交拼装安装包。
+
+---
+
+## 本地一键构建
+
+普通用户下载 Release 即可，不需要源码构建。
+
+如果你要开发 HarnessDock 或构建自己的客户端，先安装当前平台的 Rust / Tauri 2 系统依赖，然后在仓库根目录使用一键入口。
+
+### Windows
 
 ```bat
 scripts\build.bat
 ```
 
-macOS / Linux：
+### macOS / Linux
 
 ```bash
 ./scripts/build.sh
 ```
 
-一键入口会按顺序完成：
+一键构建会：
 
-1. 优先查找并复用兼容的本机 Node；不存在或版本不满足要求时，使用仓库锁定的 portable Node，并按官方 `SHASUMS256.txt` 校验 SHA-256；
-2. 使用根 `packageManager` 声明的**精确 pnpm 版本**，并以 `--frozen-lockfile --prefer-offline` 幂等校准 workspace，避免 `git pull` 后继续误用旧 `node_modules`；
-3. 构建 embedded client 与独立 Harness Shell 插件；
-4. 先执行 Tauri Rust host check。该阶段只需要 Rust/Cargo，不要求先准备 Runtime，也不要求安装 Tauri CLI；
-5. 准备当前平台的 sealed Runtime。优先消费可信的已发布 Runtime；不可用时允许回退到锁定的 DeepSeek Harness tag+commit 源码生产路径。只允许复用与当前 `platform / arch / clientVersion / dshVersion / dsh tag / dsh commit / layout / schema / image identity` 全部一致的 Runtime；
-6. 对 Runtime 重新计算整棵 payload 的 SHA-256 image identity，并实际启动 dsh，完成 Harness Web token→cookie→HTML 健康验证；本地 Runtime 损坏时只进行一次强制刷新后复验，不会无限重试；
-7. 只有真正生成原生安装包/Bundle 时，才使用 `scripts/versions.json` 锁定的**精确 Tauri CLI**；`--check-only` 不依赖 Tauri CLI；
-8. 按当前平台 profile 生成原生安装包/Bundle。
+1. 优先复用满足版本门禁的本机 Node；缺失或版本不兼容时使用校验过的 portable Node；
+2. 使用根 `packageManager` 锁定的精确 pnpm；
+3. 构建 embedded client 与 Harness Shell；
+4. 执行 Tauri Rust host check；
+5. 准备并验证当前平台 sealed Runtime；
+6. 实际启动 dsh，完成 Harness Web token → cookie → HTML 健康验证；
+7. 仅在真正生成安装包时使用锁定的 Tauri CLI；
+8. 输出当前平台原生安装包 / Bundle。
 
 常用模式：
 
@@ -140,8 +539,6 @@ scripts\build.bat --source-runtime --force-runtime
 ./scripts/build.sh --source-runtime --force-runtime
 ```
 
-`--check-only` 会完成 Node/pnpm、插件、Rust host、Runtime 与 Harness Web 校验但不生成最终安装包，也不会为此安装 Tauri CLI；`--source-runtime` 强制从锁定的 DeepSeek Harness tag+commit 构建 official dsh/vendor packs，而不是优先使用已发布 Runtime bundle。
-
 默认产物目录：
 
 ```text
@@ -149,19 +546,19 @@ Windows: apps/tauri/src-tauri/target/release/bundle/nsis/
 macOS/Linux: apps/tauri/src-tauri/target/release/bundle/
 ```
 
-`.local-tools/`、`.local-cache/`、本地 `resources/dsh-runtime/` 和构建产物均不进入 Git。CI 另外从清空这些目录的 fresh checkout 直接执行上述用户入口；Windows 还会安装**这次一键构建本身生成的 NSIS**，从中立工作目录启动，并要求 `runtime_ready -> webview_requested -> primary_visible` 与稳定的 cookie-authenticated Harness HTML 同时成立。
+> 源码构建时使用的系统 Node / pnpm / Rust / Tauri 仅属于**构建工具链**。最终安装后的 HarnessDock 始终使用安装包内经过 identity 校验的 sealed Node + dsh Runtime，不依赖用户系统 Node。
 
-注意：这里的系统 Node/pnpm/Rust/Tauri 都只属于**源码构建工具链**。即使一键构建复用了开发机已安装的 Node，也不会把该 Node 直接复制进最终安装包。生成并安装 HarnessDock 后，客户端始终只使用安装包内经过 identity 校验的 sealed Node+dsh Runtime，不检查或依赖用户系统 Node。
+---
 
 ## 开发
 
-要求：
+当前开发工具链：
 
 - Node.js `^22.19.0` 或 `>=24`
-- pnpm 版本以根 `package.json#packageManager` 为准（当前 `10.12.1`）
-- Rust toolchain 由 `rust-toolchain.toml` 固定
-- Tauri CLI 由 `scripts/versions.json` 固定（当前 `2.11.4`）
-- Tauri 2 系统依赖
+- pnpm：以根 `package.json#packageManager` 为准，当前 `10.12.1`
+- Rust：由 `rust-toolchain.toml` 固定
+- Tauri CLI：由 `scripts/versions.json` 固定，当前 `2.11.4`
+- Tauri 2 平台系统依赖
 
 ```bash
 pnpm install --frozen-lockfile
@@ -174,35 +571,39 @@ pnpm tauri:check
 pnpm tauri:dev
 ```
 
+---
+
 ## 发布门禁
 
-v0.1.5 只有在同一个 `main` SHA 上满足以下条件才允许发布：
+v0.1.5 的正式发布必须在同一个 `main` SHA 上满足：
 
 1. `ci` 全绿；
 2. `tauri-candidate` 全绿；
-3. 根版本、workspace、Tauri、Rust crate/Cargo.lock、Shell、origin、Release manifest 全部为 `0.1.5`；
-4. pinned Runtime 精确为 `dsh-v0.1.5-alpha.1 @ 5dda764e...`；
-5. HarnessDock 产品版本等于 pinned dsh 的基础 SemVer；
-6. Windows/Linux/macOS/Android/iOS 候选产物全部生成并通过校验；
-7. 发布资产来自同一个绿色 candidate，不允许用不同 SHA 的产物覆盖；
-8. 同一 candidate 的 Windows 安装包必须完成真实安装启动 smoke，并到达 `primary_visible`；
-9. 涉及本地构建链的变更还必须通过 `local-one-click-build` clean-clone 门禁。
+3. root / workspace / Tauri / Rust / Shell / origin / manifest 版本一致；
+4. Runtime 精确锁定 `dsh-v0.1.5-alpha.1 @ 5dda764e...`；
+5. HarnessDock 产品版本与 pinned dsh 基础 SemVer 一致；
+6. Windows / Linux / macOS / Android / iOS 候选产物全部生成并验证；
+7. Release 资产全部来自同一个绿色 candidate；
+8. Windows 安装包完成真实安装启动 smoke，并到达 `primary_visible`；
+9. 本地构建链变更通过 `local-one-click-build` clean-clone 门禁。
 
-当前 beta 契约发布 15 个资产：桌面/移动端候选包、4 个平台 Runtime bundle 与 `SHA256SUMS`。
+---
 
 ## 文档
 
 - [文档索引](docs/README.md)
 - [项目介绍](docs/PROJECT_INTRO.md)
 - [Tauri 客户端说明](apps/tauri/README.md)
+- [版本策略](docs/VERSIONING.md)
 - [v0.1.5 发布说明](.github/release-notes/v0.1.5.md)
-- [v0.1.2 验收发布说明](.github/release-notes/v0.1.2.md)
-- [v0.1.2 beta.2 启动链路修复说明](.github/release-notes/v0.1.2-beta.2.md)
-- [v0.1.2 beta.1 历史说明](.github/release-notes/v0.1.2-beta.1.md)
+- [DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness)
 
-`docs/` 中仍保留部分文件名含 `v0.2.x` 的历史架构设计稿，用于记录 Native Host 重构过程；这些文件名**不再代表 HarnessDock 当前产品版本**。当前活动产品版本以根 `package.json`、`release-manifest.json` 和本页为准。
+`docs/` 中部分文件名包含 `v0.2.x`，它们是 Native Host 重构阶段留下的历史架构设计稿，不代表当前产品版本。当前活动版本以根 `package.json`、`release-manifest.json` 与本 README 为准。
+
+---
 
 ## License
 
-MIT。DeepSeek Harness 与其它第三方依赖遵循各自许可证和商标规则。
+HarnessDock 使用 MIT License。
 
+DeepSeek Harness 与其它第三方依赖遵循各自许可证、版权与商标规则。
