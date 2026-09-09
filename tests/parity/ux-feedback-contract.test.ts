@@ -1,0 +1,74 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const read = (relative: string) =>
+  readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
+
+describe('desktop interaction feedback contract', () => {
+  it('paints the startup surface immediately and keeps it until Harness claims primary_visible', () => {
+    const config = JSON.parse(read('apps/tauri/src-tauri/tauri.conf.json'))
+    const splash = config.app.windows.find((window: { label?: string }) => window.label === 'splash')
+    expect(splash?.visible).toBe(true)
+
+    const startup = read('apps/tauri/src-tauri/src/startup.rs')
+    expect(startup).toContain('show_splash(&app, "正在启动 Harness Runtime…")')
+    expect(startup).toContain('set_splash_status(&app, "Runtime 已就绪，正在准备 Harness Web…")')
+    expect(startup).toContain('set_splash_status(&app, "正在打开 Harness Web…")')
+
+    const commands = read('apps/tauri/src-tauri/src/harness_window/commands.rs')
+    const startupOpen = commands.slice(
+      commands.indexOf('pub(crate) async fn open_for_startup'),
+      commands.indexOf('#[tauri::command]\npub async fn harness_close'),
+    )
+    expect(startupOpen).toContain('harness_open_impl(app, url, true).await')
+
+    const navigation = read('apps/tauri/src-tauri/src/harness_window/navigation.rs')
+    expect(navigation).toContain('hide_splash(&app);')
+    expect(navigation).toContain('StartupPhase::PrimaryVisible')
+  })
+
+  it('acknowledges supervised quit before waiting for managed processes', () => {
+    const supervisor = read('apps/tauri/src-tauri/src/supervisor.rs')
+    expect(supervisor).toContain('show_splash(app, "正在安全退出 HarnessDock…")')
+    expect(supervisor).toContain('正在关闭 Runtime、Gateway 与后台任务…')
+    expect(supervisor).toContain('正在等待受管进程安全退出…')
+    expect(supervisor).toContain('正在完成退出…')
+  })
+
+  it('keeps motion optional and state-driven on the splash surface', () => {
+    const html = read('apps/tauri/web/splash.html')
+    const css = read('apps/tauri/web/splash.css')
+    const js = read('apps/tauri/web/splash.js')
+
+    expect(html).toContain('data-state="loading"')
+    expect(html).toContain('id="splash-status"')
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(css).toContain('html[data-state="exiting"]')
+    expect(js).toContain("document.documentElement.dataset.state = state")
+    expect(js).toContain("state === 'exiting'")
+  })
+
+  it('keeps the independent Harness Shell source and shipped web artifact identical', () => {
+    const source = read('packages/plugin-harness-shell/src/web/shell.js')
+    const shipped = read('packages/plugin-harness-shell/web/shell.js')
+    expect(shipped).toBe(source)
+
+    expect(source).toContain('data-activity')
+    expect(source).toContain('activity-run')
+    expect(source).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(source).toContain("shadow.querySelectorAll('.bar [data-action]')")
+    expect(source).toContain("menuToggle?.setAttribute('aria-expanded'")
+  })
+
+  it('exposes visible busy state in the diagnostics surface', () => {
+    const settings = read('apps/tauri/web/settings.js')
+    const styles = read('apps/tauri/web/styles.css')
+    expect(settings).toContain("button.classList.toggle('is-busy', busy)")
+    expect(settings).toContain("button.setAttribute('aria-busy', String(busy))")
+    expect(styles).toContain('.settings-page button.is-busy')
+    expect(styles).toContain('@media (prefers-reduced-motion:reduce)')
+  })
+})
