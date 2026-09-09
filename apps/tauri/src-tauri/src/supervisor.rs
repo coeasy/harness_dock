@@ -24,7 +24,9 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
     // blocking thread is tied up for up to 30s, and the deadline is derived
     // from a monotonic clock just like before. The `State` borrow is taken
     // inside each iteration so it never spans an `.await` point.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let started = tokio::time::Instant::now();
+    let deadline = started + Duration::from_secs(30);
+    let mut feedback_stage = 0_u8;
     loop {
         stop_managed_processes(&app);
         let idle = {
@@ -36,6 +38,19 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
         if idle {
             break;
         }
+
+        let elapsed = started.elapsed();
+        if feedback_stage == 0 && elapsed >= Duration::from_secs(1) {
+            crate::harness_window::set_splash_status(
+                &app,
+                "正在关闭 Runtime、Gateway 与后台任务…",
+            );
+            feedback_stage = 1;
+        } else if feedback_stage == 1 && elapsed >= Duration::from_secs(5) {
+            crate::harness_window::set_splash_status(&app, "正在等待受管进程安全退出…");
+            feedback_stage = 2;
+        }
+
         if tokio::time::Instant::now() >= deadline {
             eprintln!(
                 "HarnessDock shutdown timed out while waiting for actor lifecycle operations; forcing process exit."
@@ -45,6 +60,7 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     stop_managed_processes(&app);
+    crate::harness_window::set_splash_status(&app, "正在完成退出…");
 }
 
 pub(crate) fn request_exit(app: &tauri::AppHandle) {
@@ -53,6 +69,12 @@ pub(crate) fn request_exit(app: &tauri::AppHandle) {
         return;
     }
     state.revision.fetch_add(1, Ordering::AcqRel);
+
+    // Show feedback before lifecycle draining starts. The shutdown work remains
+    // exactly as strict as before; the user simply sees that HarnessDock has
+    // accepted the quit request instead of interpreting the wait as a freeze.
+    crate::harness_window::show_splash(app, "正在安全退出 HarnessDock…");
+
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         wait_for_managed_processes(handle.clone()).await;
