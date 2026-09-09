@@ -4,8 +4,6 @@
 //! plugin. Tauri supplies only minimum window primitives plus Host Protocol v2.
 //! The remote Harness document never receives direct Runtime/update/quit IPC.
 
-use tauri::Manager;
-
 const SHELL_WEB_SCRIPT: &str =
     include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
