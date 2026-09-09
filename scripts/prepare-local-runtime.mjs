@@ -373,11 +373,10 @@ async function buildOfficialPackedRuntime() {
   run(pnpmCommand, ['install', '--frozen-lockfile'], { cwd: upstreamRoot })
   run(pnpmCommand, ['build:official'], { cwd: upstreamRoot })
   await rm(packedRoot, { recursive: true, force: true })
-  run(pnpmCommand, ['exec', 'tsx', 'scripts/release/pack.ts', '--family', 'vendor', '--out', 'dist/vendor'], { cwd: upstreamRoot })
-  run(pnpmCommand, ['exec', 'tsx', 'scripts/release/pack.ts', '--family', 'dsh', '--out', 'dist/dsh'], { cwd: upstreamRoot })
+  run(pnpmCommand, ['run', 'release:pack', '--', '--family', 'vendor', '--out', 'dist/vendor'], { cwd: upstreamRoot })
+  run(pnpmCommand, ['run', 'release:pack', '--', '--family', 'dsh', '--out', 'dist/dsh'], { cwd: upstreamRoot })
   run(pnpmCommand, [
-    'exec', 'tsx',
-    'scripts/release/verify-packed-install.ts',
+    'run', 'release:verify-packed-install', '--',
     '--family', 'dsh', '--from', 'dist/dsh', '--from', 'dist/vendor',
   ], {
     cwd: upstreamRoot,
