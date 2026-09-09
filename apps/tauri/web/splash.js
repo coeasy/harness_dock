@@ -2,6 +2,7 @@
   'use strict'
 
   let transitionTimer
+  let longWaitTimer
 
   function stateFor(value) {
     const text = String(value || '')
@@ -18,6 +19,16 @@
     return '保持窗口打开，Harness Web 就绪后会自动进入'
   }
 
+  function scheduleLongWaitHint(state) {
+    window.clearTimeout(longWaitTimer)
+    if (state !== 'loading') return
+    longWaitTimer = window.setTimeout(() => {
+      if (document.documentElement.dataset.state !== 'loading') return
+      const hint = document.querySelector('.hint')
+      if (hint) hint.textContent = '启动时间较长，但 HarnessDock 仍在等待本地 Runtime / Harness Web；无需重复点击或重新启动'
+    }, 8000)
+  }
+
   window.__harnessDockSetStatus = (value) => {
     const element = document.getElementById('splash-status')
     if (!element) return
@@ -30,6 +41,7 @@
     document.documentElement.dataset.state = state
     if (main) main.setAttribute('aria-busy', state === 'ready' || state === 'error' ? 'false' : 'true')
     if (hint) hint.textContent = hintFor(state)
+    scheduleLongWaitHint(state)
 
     window.clearTimeout(transitionTimer)
     element.classList.add('changing')
@@ -38,4 +50,6 @@
       element.classList.remove('changing')
     }, 90)
   }
+
+  scheduleLongWaitHint('loading')
 })()
