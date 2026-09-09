@@ -218,7 +218,7 @@ jobs:
           case "$EXPECTED_PLATFORM" in
             win32)
               test ! -e runtime-prepared/node_modules/@koromix/koffi-linux-x64
-              test ! -e runtime-prepared/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64
+              test ! -e runtime-prepared/node_modules/@deepseek-ai/node-addon-system-linux-x64
               ;;
             linux)
               test ! -e runtime-prepared/node_modules/@koromix/koffi-linux-x64/musl_x64
@@ -226,7 +226,7 @@ jobs:
               ;;
             darwin)
               test ! -e runtime-prepared/node_modules/@koromix/koffi-linux-x64
-              test ! -e runtime-prepared/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64
+              test ! -e runtime-prepared/node_modules/@deepseek-ai/node-addon-system-linux-x64
               ;;
           esac
       - uses: actions/upload-artifact@v7
@@ -291,7 +291,7 @@ jobs:
           if [ "${{ runner.os }}" = Linux ]; then
             test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@koromix/koffi-linux-x64/musl_x64
             test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@img/sharp-linuxmusl-x64
-            test -x apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@deepseek-ai/node-addon-landlock-run-linux-x64/bin/landlock-run
+            test -x apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/landlock-run
           fi
       - name: Install exact Tauri CLI
         shell: bash
@@ -299,11 +299,11 @@ jobs:
           set -euo pipefail
           tauri_version="$(node -p "require('./scripts/versions.json').tauriCli")"
           cargo install tauri-cli --version "$tauri_version" --locked
-      - name: Confirm unsigned beta packaging
+      - name: Confirm unsigned stable packaging
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node -p "require('./release-manifest.json').channel")" = beta
+          test "$(node -p "require('./release-manifest.json').channel")" = stable
           test "$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').bundle.createUpdaterArtifacts")" = false
       - name: Prepare canonical HarnessDock icon set
         working-directory: apps/tauri
