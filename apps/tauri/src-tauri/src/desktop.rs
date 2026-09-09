@@ -37,6 +37,7 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         .text("shell-gateway", "移动设备 / Gateway")
         .text("shell-settings", "插件诊断")
         .text("shell-update", "自动更新")
+        .text("shell-hide-to-tray", "隐藏到托盘")
         .build()
         .map_err(|error| format!("无法创建 HarnessDock 菜单项: {error}"))?;
     let menu = MenuBuilder::new(app)
@@ -54,6 +55,10 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
             "shell-gateway" => Some(workflow::HostIntent::ShowGateway),
             "shell-settings" => Some(workflow::HostIntent::ShowDiagnostics),
             "shell-update" => Some(workflow::HostIntent::InstallUpdate),
+            "shell-hide-to-tray" => {
+                crate::tray::hide_primary(app_handle);
+                None
+            }
             _ => None,
         };
         if let Some(intent) = intent {
