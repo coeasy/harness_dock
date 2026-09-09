@@ -1,6 +1,6 @@
 # HarnessDock 优化改进方案
 
-> 编制日期：2026-09-05 | 基线版本：v0.1.2-beta.3 | 配套文档：`ARCHITECTURE_REVIEW.md`
+> 编制日期：2026-09-05 | 基线版本：v0.1.2 | 配套文档：`ARCHITECTURE_REVIEW.md`
 
 ---
 

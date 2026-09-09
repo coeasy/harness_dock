@@ -1,6 +1,6 @@
 # HarnessDock 架构审查报告
 
-> 审查日期：2026-09-05 | 版本：v0.1.2-beta.3 | Runtime：dsh-v0.1.2-rc.1
+> 审查日期：2026-09-05 | 版本：v0.1.2 | Runtime：dsh-v0.1.2-rc.1
 
 ---
 
@@ -198,7 +198,7 @@ Shell 所有敏感操作经 Host Protocol 集中鉴权，远程 Harness 文档�
 - HarnessDock 版本 = pinned dsh 的基础 SemVer（去掉 prerelease 后缀）
 - 10+ 处版本必须一致（`check:versions` 机器校验）
 - 禁止 `latest` / 浮动版本进入发布候选
-- 当前：channel=beta, prerelease=beta.3
+- 当前：channel=stable
 
 ---
 
