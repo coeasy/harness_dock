@@ -305,7 +305,7 @@
     }
     if (compatibleBridge && bridge.subscribe) {
       const unsubscribe = bridge.subscribe((event) => {
-        if (event?.state === 'error') showToast(event.message || '外壳状态异常', 4800)
+        if (event?.state === 'error') showToast(event.message || '外壳状态异常')
       })
       window.addEventListener('pagehide', () => unsubscribe?.(), { once: true })
     }
