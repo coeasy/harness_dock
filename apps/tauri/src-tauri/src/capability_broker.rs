@@ -221,4 +221,3 @@ mod tests {
         assert!(allowed.contains(&Capability::AppQuit));
     }
 }
-
