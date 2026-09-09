@@ -59,13 +59,25 @@ fn show_primary(app: &AppHandle) {
 /// Runtime/Surface actors, cancel navigation, or drain managed processes. The
 /// current RuntimeLease remains authoritative and `show_primary` revalidates it
 /// through the Host Kernel before the Harness surface is shown again.
-pub(crate) fn hide_primary(app: &AppHandle) {
+pub(crate) fn hide_primary(app: &AppHandle) -> Result<(), String> {
+    if !app
+        .state::<crate::AppState>()
+        .tray_available
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("系统托盘不可用，无法隐藏 Harness 主窗口。".into());
+    }
     if let Some(window) = app.get_webview_window("harness") {
-        let _ = window.hide();
+        window
+            .hide()
+            .map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
     }
     if let Some(window) = app.get_webview_window("splash") {
-        let _ = window.hide();
+        window
+            .hide()
+            .map_err(|error| format!("无法隐藏 Harness 启动状态窗口: {error}"))?;
     }
+    Ok(())
 }
 
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -124,7 +136,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     None
                 }
                 "tray-hide" => {
-                    hide_primary(app);
+                    let _ = hide_primary(app);
                     None
                 }
                 "tray-settings" => Some(workflow::HostIntent::ShowDiagnostics),
