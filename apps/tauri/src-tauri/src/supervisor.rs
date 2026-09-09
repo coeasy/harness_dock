@@ -41,10 +41,7 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
 
         let elapsed = started.elapsed();
         if feedback_stage == 0 && elapsed >= Duration::from_secs(1) {
-            crate::harness_window::set_splash_status(
-                &app,
-                "正在关闭 Runtime、Gateway 与后台任务…",
-            );
+            crate::harness_window::set_splash_status(&app, "正在关闭 Runtime、Gateway 与后台任务…");
             feedback_stage = 1;
         } else if feedback_stage == 1 && elapsed >= Duration::from_secs(5) {
             crate::harness_window::set_splash_status(&app, "正在等待受管进程安全退出…");
