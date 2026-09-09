@@ -56,7 +56,7 @@
 
   const statusHoldUntil = new WeakMap()
   const confirmations = new WeakMap()
-  const operationBusy = new Set()
+  const operationBusy = new Map()
   const operationGroups = Object.freeze({
     'runtime-lifecycle': ['runtime-start', 'runtime-stop', 'runtime-clear-quarantine'],
     'gateway-admin': ['gateway-host-start', 'gateway-host-refresh', 'gateway-host-stop', 'gateway-create-pairing', 'gateway-revoke-all'],
@@ -71,7 +71,7 @@
     element.textContent = bad ? publicText(value) : (value || '')
     element.classList.toggle('error', bad)
     if (bad) statusHoldUntil.set(element, now + 4800)
-    else if (force) statusHoldUntil.delete(element)
+    else if (force) statusHoldUntil.set(element, now + 1800)
   }
 
   function bootStatus(value, state = 'loading') {
@@ -101,10 +101,13 @@
   function applyOperationLocks() {
     for (const group of Object.keys(operationGroups)) {
       if (!operationBusy.has(group)) continue
+      const activeElement = operationBusy.get(group)
       for (const element of groupElements(group)) {
+        const active = element === activeElement
         element.disabled = true
-        element.classList.add('is-busy')
-        element.setAttribute('aria-busy', 'true')
+        element.classList.toggle('is-busy', active)
+        if (active) element.setAttribute('aria-busy', 'true')
+        else element.removeAttribute('aria-busy')
       }
     }
   }
@@ -116,9 +119,9 @@
     }
   }
 
-  async function withOperation(group, task, restore) {
+  async function withOperation(group, activeElement, task, restore) {
     if (operationBusy.has(group)) return undefined
-    operationBusy.add(group)
+    operationBusy.set(group, activeElement || null)
     applyOperationLocks()
     try {
       return await task()
@@ -229,7 +232,7 @@
         const label = device.name || device.id
         if (!confirmSecondClick(revoke, `确认撤销设备“${label}”的 Gateway 会话？该设备需要重新配对才能连接。`, '确认撤销')) return
         try {
-          await withOperation('gateway-admin', async () => {
+          await withOperation('gateway-admin', revoke, async () => {
             status(hostDetail, `正在撤销设备“${label}”…`, false, true)
             await call('gateway_host_revoke', { deviceId: device.id })
             status(hostDetail, `设备“${label}”已撤销。`, false, true)
@@ -314,7 +317,7 @@
 
   function autoStartDesktopRuntime() {
     if (desktopStartup) return desktopStartup
-    desktopStartup = withOperation('runtime-lifecycle', async () => {
+    desktopStartup = withOperation('runtime-lifecycle', $('runtime-start'), async () => {
       runtimeState.textContent = 'starting'
       bootStatus('正在启动本地 Runtime，界面保持可操作…')
       status(runtimeDetail, '正在启动 Harness Web Runtime…', false, true)
@@ -387,6 +390,8 @@
         return
       }
       if (platform.runtimeMode === 'local') {
+        // Native startup owns the normal desktop path. The packaged Runtime is
+        // not re-detected from this secondary control renderer.
         setSurfaceMode('gateway-host')
         bootStatus('Harness Web 为主界面；此控制页仅在需要管理移动设备时打开。', 'ready')
         await refreshVisibleControl()
@@ -437,7 +442,7 @@
 
   $('runtime-stop').addEventListener('click', async () => {
     try {
-      await withOperation('runtime-lifecycle', async () => {
+      await withOperation('runtime-lifecycle', $('runtime-stop'), async () => {
         status(runtimeDetail, '正在停止 Runtime 与关联 Gateway…', false, true)
         await call('gateway_host_stop').catch(() => undefined)
         await call('harness_close').catch(() => undefined)
@@ -455,7 +460,7 @@
 
   $('runtime-clear-quarantine').addEventListener('click', async () => {
     try {
-      await withOperation('runtime-lifecycle', async () => {
+      await withOperation('runtime-lifecycle', $('runtime-clear-quarantine'), async () => {
         status(runtimeDetail, '正在清除插件隔离记录…', false, true)
         await call('runtime_clear_plugin_quarantine')
         status(runtimeDetail, '已清除持久化插件隔离记录。当前运行会话保持不变；下次启动会重新尝试完整插件配置。', false, true)
@@ -470,7 +475,7 @@
     const publicInput = $('gateway-public-url')
     if (!portInput.reportValidity() || !publicInput.reportValidity()) return
     try {
-      await withOperation('gateway-admin', async () => {
+      await withOperation('gateway-admin', $('gateway-host-start'), async () => {
         status(hostDetail, '正在启动受控 Mobile Gateway…', false, true)
         const rawPort = Number(portInput.value)
         const publicUrl = publicInput.value.trim()
@@ -493,7 +498,7 @@
 
   $('gateway-host-stop').addEventListener('click', async () => {
     try {
-      await withOperation('gateway-admin', async () => {
+      await withOperation('gateway-admin', $('gateway-host-stop'), async () => {
         status(hostDetail, '正在停止 Mobile Gateway…', false, true)
         await call('gateway_host_stop')
         $('host-pairing').textContent = ''
@@ -507,7 +512,7 @@
 
   $('gateway-create-pairing').addEventListener('click', async () => {
     try {
-      await withOperation('gateway-admin', async () => {
+      await withOperation('gateway-admin', $('gateway-create-pairing'), async () => {
         status(hostDetail, '正在生成一次性配对码…', false, true)
         const ticket = await call('gateway_host_create_pairing')
         $('host-pairing').textContent = `${ticket.code} · ${new Date(ticket.expiresAt).toLocaleString()}`
@@ -522,7 +527,7 @@
     const button = $('gateway-revoke-all')
     if (!confirmSecondClick(button, '确认撤销全部已配对设备？所有设备都需要重新配对后才能再次连接。', '确认全部撤销')) return
     try {
-      await withOperation('gateway-admin', async () => {
+      await withOperation('gateway-admin', button, async () => {
         status(hostDetail, '正在撤销全部设备会话…', false, true)
         const count = await call('gateway_host_revoke_all')
         status(hostDetail, `已撤销 ${count} 个设备会话。`, false, true)
@@ -534,7 +539,7 @@
 
   $('gateway-check').addEventListener('click', async () => {
     try {
-      await withOperation('remote-gateway', async () => {
+      await withOperation('remote-gateway', $('gateway-check'), async () => {
         status(gatewayDetail, '正在检查 Gateway…', false, true)
         const health = await call('gateway_health', { baseUrl: gatewayUrl.value })
         gatewayState.textContent = health.ok ? 'ready' : 'unhealthy'
@@ -548,7 +553,7 @@
 
   $('gateway-pair').addEventListener('click', async () => {
     try {
-      await withOperation('remote-gateway', async () => {
+      await withOperation('remote-gateway', $('gateway-pair'), async () => {
         status(gatewayDetail, '正在验证一次性配对码…', false, true)
         const paired = await call('pair_gateway', {
           baseUrl: gatewayUrl.value,
