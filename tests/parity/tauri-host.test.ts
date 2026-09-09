@@ -218,7 +218,7 @@ describe('Tauri host contract', () => {
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
 
     expect(candidate).toContain('Verify full runtime before packaging')
-    expect(candidate).toContain('Confirm unsigned beta packaging')
+    expect(candidate).toContain('Confirm unsigned stable packaging')
     expect(candidate).not.toContain('@dsh/desktop')
     expect(release).not.toContain('-thin')
 
