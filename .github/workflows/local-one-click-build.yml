@@ -130,5 +130,15 @@ jobs:
           node_home="$(cat .local-tools/node-home.txt)"
           test -x "$node_home/bin/node"
           test -d .local-cache/node
+          generated_build_outputs=(
+            'apps/tauri/src-tauri/Cargo.toml'
+            'apps/tauri/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml'
+            'apps/tauri/src-tauri/icons/android/values/ic_launcher_background.xml'
+            'apps/tauri/src-tauri/icons/icon.icns'
+            'packages/plugin-embedded-client/lib/index.js'
+            'packages/plugin-harness-shell/lib/index.js'
+          )
+          git restore --source=HEAD -- "${generated_build_outputs[@]}"
           test -z "$(git status --porcelain)"
+
 
