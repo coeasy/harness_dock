@@ -38,7 +38,7 @@ describe('desktop interaction feedback contract', () => {
     expect(supervisor).toContain('正在完成退出…')
   })
 
-  it('makes the shell close button mean supervised exit regardless of tray availability', () => {
+  it('makes every primary close path mean supervised exit regardless of tray availability', () => {
     const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
     const closeCommand = shellHost.slice(
       shellHost.indexOf('pub async fn harness_shell_close'),
@@ -47,6 +47,16 @@ describe('desktop interaction feedback contract', () => {
     expect(closeCommand).toContain('crate::request_exit(&app);')
     expect(closeCommand).not.toContain('tray_available')
     expect(closeCommand).not.toContain('harness_close(app)')
+
+    const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
+    const nativeClose = desktop.slice(
+      desktop.indexOf('event: tauri::WindowEvent::CloseRequested'),
+      desktop.indexOf('event: tauri::WindowEvent::Destroyed'),
+    )
+    expect(nativeClose).toContain('api.prevent_close();')
+    expect(nativeClose).toContain('crate::supervisor::request_exit(app_handle);')
+    expect(nativeClose).not.toContain('tray_available')
+    expect(nativeClose).not.toContain('window.hide()')
   })
 
   it('keeps motion optional and explains a prolonged startup without weakening timeouts', () => {
