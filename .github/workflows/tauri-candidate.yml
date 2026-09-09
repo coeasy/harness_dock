@@ -139,20 +139,23 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
       - name: Install upstream dependencies with pinned pnpm
         working-directory: upstream
-        run: npx --yes pnpm@11.7.0 install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Build official upstream profile
         working-directory: upstream
-        run: npx --yes pnpm@11.7.0 build:official
+        run: pnpm build:official
       - name: Pack and verify official dsh runtime closure
         working-directory: upstream
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
-          npx --yes pnpm@11.7.0 exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
-          npx --yes pnpm@11.7.0 exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
+          pnpm exec tsx scripts/release/pack.ts --family vendor --out dist/vendor
+          pnpm exec tsx scripts/release/pack.ts --family dsh --out dist/dsh
+          pnpm exec tsx scripts/release/verify-packed-install.ts --family dsh --from dist/dsh --from dist/vendor
           test -n "$(find dist/dsh dist/vendor -type f -name '*.tgz' -print -quit)"
       - uses: actions/upload-artifact@v7
         with:
@@ -504,3 +507,4 @@ jobs:
           path: ios-candidate/HarnessDock-ios-arm64-simulator.zip
           if-no-files-found: error
           retention-days: 7
+

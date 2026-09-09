@@ -32,7 +32,6 @@ const cacheRoot = path.join(repoRoot, '.local-cache')
 const upstreamRoot = path.join(cacheRoot, 'deepseek-harness', origin.gitTag)
 const packedRoot = path.join(upstreamRoot, 'dist')
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 const gitCommand = process.platform === 'win32' ? 'git.exe' : 'git'
 const tarCommand = process.platform === 'win32' ? 'tar.exe' : 'tar'
 const RUNTIME_SCHEMA_VERSION = 1
@@ -362,8 +361,8 @@ async function patchPinnedUpstreamWindowsCommandLaunchers() {
 async function buildOfficialPackedRuntime() {
   await ensurePinnedUpstreamCheckout()
   await patchPinnedUpstreamWindowsCommandLaunchers()
-  if (!commandAvailable(npxCommand, ['--version'])) {
-    throw new Error('npx is required for the pinned upstream source fallback')
+  if (!commandAvailable(pnpmCommand, ['--version'])) {
+    throw new Error('pnpm is required for the pinned upstream source fallback')
   }
 
   if (!values.force && (await hasPackedTarballs())) {
@@ -371,13 +370,13 @@ async function buildOfficialPackedRuntime() {
     return
   }
 
-  run(npxCommand, ['--yes', 'pnpm@11.7.0', 'install', '--frozen-lockfile'], { cwd: upstreamRoot })
-  run(npxCommand, ['--yes', 'pnpm@11.7.0', 'build:official'], { cwd: upstreamRoot })
+  run(pnpmCommand, ['install', '--frozen-lockfile'], { cwd: upstreamRoot })
+  run(pnpmCommand, ['build:official'], { cwd: upstreamRoot })
   await rm(packedRoot, { recursive: true, force: true })
-  run(npxCommand, ['--yes', 'pnpm@11.7.0', 'exec', 'tsx', 'scripts/release/pack.ts', '--family', 'vendor', '--out', 'dist/vendor'], { cwd: upstreamRoot })
-  run(npxCommand, ['--yes', 'pnpm@11.7.0', 'exec', 'tsx', 'scripts/release/pack.ts', '--family', 'dsh', '--out', 'dist/dsh'], { cwd: upstreamRoot })
-  run(npxCommand, [
-    '--yes', 'pnpm@11.7.0', 'exec', 'tsx',
+  run(pnpmCommand, ['exec', 'tsx', 'scripts/release/pack.ts', '--family', 'vendor', '--out', 'dist/vendor'], { cwd: upstreamRoot })
+  run(pnpmCommand, ['exec', 'tsx', 'scripts/release/pack.ts', '--family', 'dsh', '--out', 'dist/dsh'], { cwd: upstreamRoot })
+  run(pnpmCommand, [
+    'exec', 'tsx',
     'scripts/release/verify-packed-install.ts',
     '--family', 'dsh', '--from', 'dist/dsh', '--from', 'dist/vendor',
   ], {
