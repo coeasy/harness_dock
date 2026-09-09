@@ -55,10 +55,18 @@ function npmInvocation(args: string[]): { command: string; args: string[] } {
   }
 }
 
+function bundledNpmInvocation(args: string[]): { command: string; args: string[] } {
+  const node = path.join(dest, bundledNodeRel(platform))
+  const npmCli = platform === 'win32'
+    ? path.join(dest, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    : path.join(dest, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  return { command: node, args: [npmCli, ...args] }
+}
+
 // Bump whenever the on-disk runtime composition/selection rules change. This
 // prevents an Actions restore-key or a local cache from bypassing new runtime
 // builder logic merely because the pinned dsh version stayed the same.
-const RUNTIME_LAYOUT_VERSION = 4
+const RUNTIME_LAYOUT_VERSION = 5
 
 const { values } = parseArgs({
   options: {
@@ -134,6 +142,23 @@ async function installTargetNativePackages(): Promise<void> {
     cwd: dest,
     windowsHide: true,
     env: packageManagerEnvironment(),
+  })
+}
+
+async function buildBundledRuntimeNativeAddons(): Promise<void> {
+  const npm = bundledNpmInvocation([
+    'rebuild',
+    'fs-ext',
+    '--build-from-source',
+    '--no-fund',
+    '--no-audit',
+  ])
+  console.log('building fs-ext against the bundled Node ABI')
+  await execFileAsync(npm.command, npm.args, {
+    cwd: dest,
+    windowsHide: true,
+    env: packageManagerEnvironment(),
+    maxBuffer: 16 * 1024 * 1024,
   })
 }
 
@@ -233,6 +258,7 @@ if (
       `cached runtime needs a native-package repair: ${error instanceof Error ? error.message : String(error)}`,
     )
     await installTargetNativePackages()
+    await buildBundledRuntimeNativeAddons()
     await assertBundledRuntimeIntegrity(dest, platform, arch)
   }
   if (repairedAssets.length > 0) {
@@ -382,6 +408,7 @@ if (packedRuntimeDir) {
 }
 
 await installTargetNativePackages()
+await buildBundledRuntimeNativeAddons()
 
 if (!inspectBundledRuntime(dest, platform)) {
   throw new Error(`prepare-runtime finished but layout is incomplete under ${dest}`)
