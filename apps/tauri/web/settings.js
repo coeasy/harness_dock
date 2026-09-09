@@ -5,6 +5,9 @@
   let requestSequence = 0
   let lastSequence = 0
   let unlistenHostEvent = null
+  let snapshotRefreshPromise = null
+  let snapshotRefreshPending = false
+  let eventRefreshTimer = null
 
   function call(command, args) {
     const invoke = window.__TAURI__?.core?.invoke
@@ -69,15 +72,39 @@
     )
   }
 
-  async function refresh() {
+  function queueEventRefresh(delay = 80) {
+    window.clearTimeout(eventRefreshTimer)
+    eventRefreshTimer = window.setTimeout(() => {
+      eventRefreshTimer = null
+      void refresh(false)
+    }, delay)
+  }
+
+  async function refresh(showBusy = true) {
+    if (snapshotRefreshPromise) {
+      snapshotRefreshPending = true
+      return snapshotRefreshPromise
+    }
+
     const button = $('runtime-refresh')
-    setBusy(button, true)
+    if (showBusy) setBusy(button, true)
+    snapshotRefreshPromise = (async () => {
+      try {
+        render(await call('host_snapshot'))
+      } catch (error) {
+        setStatus($('runtime-detail'), message(error), true)
+      }
+    })()
+
     try {
-      render(await call('host_snapshot'))
-    } catch (error) {
-      setStatus($('runtime-detail'), message(error), true)
+      await snapshotRefreshPromise
     } finally {
-      setBusy(button, false)
+      snapshotRefreshPromise = null
+      if (showBusy) setBusy(button, false)
+      if (snapshotRefreshPending) {
+        snapshotRefreshPending = false
+        queueEventRefresh(0)
+      }
     }
   }
 
@@ -110,21 +137,20 @@
   async function subscribe() {
     const listen = window.__TAURI__?.event?.listen
     if (typeof listen !== 'function') return
-    unlistenHostEvent = await listen('harnessdock://host-event', async (event) => {
+    unlistenHostEvent = await listen('harnessdock://host-event', (event) => {
       const payload = event?.payload || {}
       const sequence = Number(payload.sequence || 0)
       if (!Number.isSafeInteger(sequence) || sequence <= lastSequence) return
-      if (lastSequence && sequence > lastSequence + 1) {
-        // A lost event is repaired by a full source-of-truth snapshot.
-        await refresh()
-        return
-      }
-      lastSequence = sequence
-      await refresh()
+      // Host actors can emit several lifecycle events in one operation. Merge
+      // bursts into one source-of-truth snapshot instead of starting an IPC
+      // request and repaint for every event. A detected sequence gap gets an
+      // immediate snapshot, while ordinary bursts settle for one animation
+      // frame-sized delay.
+      queueEventRefresh(lastSequence && sequence > lastSequence + 1 ? 0 : 80)
     })
   }
 
-  $('runtime-refresh').addEventListener('click', refresh)
+  $('runtime-refresh').addEventListener('click', () => { void refresh(true) })
   $('settings-quit').addEventListener('click', quit)
   $('update-install').addEventListener('click', installUpdate)
   $('settings-close').addEventListener('click', async () => {
@@ -141,12 +167,13 @@
   void (async () => {
     try {
       await subscribe()
-      await refresh()
+      await refresh(true)
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
     }
   })()
   window.addEventListener('pagehide', () => {
+    window.clearTimeout(eventRefreshTimer)
     if (typeof unlistenHostEvent === 'function') unlistenHostEvent()
   }, { once: true })
 })()
