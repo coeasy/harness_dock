@@ -154,9 +154,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm run release:pack -- --family vendor --out dist/vendor
-          pnpm run release:pack -- --family dsh --out dist/dsh
-          pnpm run release:verify-packed-install -- --family dsh --from dist/dsh --from dist/vendor
+          pnpm run release:pack --family vendor --out dist/vendor
+          pnpm run release:pack --family dsh --out dist/dsh
+          pnpm run release:verify-packed-install --family dsh --from dist/dsh --from dist/vendor
           test -n "$(find dist/dsh dist/vendor -type f -name '*.tgz' -print -quit)"
       - uses: actions/upload-artifact@v7
         with:
