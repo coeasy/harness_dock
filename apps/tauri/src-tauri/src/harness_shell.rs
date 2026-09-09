@@ -50,42 +50,38 @@ const POLYFILL_SCRIPT: &str = r#"
         return fallback;
       }
     };
-    const abortSignalWithReason = (signal, reason) => {
-      if (signal.aborted) return;
-      let safeReason = reason;
-      try {
-        safeReason = readReason(signal, new DOMException('The operation was aborted.', 'AbortError'));
-      } catch (_) {}
-      try {
-        Object.defineProperty(signal, 'reason', { value: safeReason, configurable: true });
-      } catch (_) {}
-      try {
-        signal.dispatchEvent(new Event('abort'));
-      } catch (_) {}
-    };
     AbortSignal.any = function (signals) {
-      const result = new AbortController().signal;
-      const live = [];
+      const controller = new AbortController();
+      const listeners = [];
       let settled = false;
+      const cleanup = () => {
+        for (const [signal, listener] of listeners) {
+          try { signal.removeEventListener('abort', listener); } catch (_) {}
+        }
+        listeners.length = 0;
+      };
       const settle = (reason) => {
         if (settled) return;
         settled = true;
-        abortSignalWithReason(result, reason);
-        for (const signal of live) abortSignalWithReason(signal, reason);
-        live.length = 0;
+        cleanup();
+        try {
+          controller.abort(reason);
+        } catch (_) {
+          controller.abort();
+        }
       };
       for (const value of signals) {
         if (!isAbortSignal(value)) continue;
-        if (live.some((signal) => signal === value)) continue;
+        if (listeners.some(([signal]) => signal === value)) continue;
         if (value.aborted) {
           settle(readReason(value, undefined));
-          continue;
+          break;
         }
         const onAbort = () => settle(readReason(value, undefined));
-        live.push(value);
+        listeners.push([value, onAbort]);
         value.addEventListener('abort', onAbort, { once: true });
       }
-      return result;
+      return controller.signal;
     };
   }
 })();
