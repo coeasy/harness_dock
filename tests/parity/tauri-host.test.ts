@@ -50,10 +50,10 @@ describe('Tauri host contract', () => {
     const releaseManifest = readJson('release-manifest.json')
     const shellManifest = readJson('packages/plugin-harness-shell/manifest.json')
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
-    expect(root.version).toBe('0.1.2')
+    expect(root.version).toBe('0.1.3')
     expect(tauri.version).toBe(root.version)
     expect(releaseManifest.version).toBe(root.version)
-    expect(releaseManifest.prerelease).toBe('beta.3')
+    expect(releaseManifest.prerelease).toBeUndefined()
     expect(releaseManifest.shell.version).toBe(root.version)
     expect(shellManifest.version).toBe(root.version)
     expect(cargo).toContain(`version = "${root.version}"`)
@@ -209,7 +209,7 @@ describe('Tauri host contract', () => {
     expect(runtime).toContain('platform::configure_child_command')
   })
 
-  it('publishes full unsigned beta assets and only replaces a fully gated test prerelease', () => {
+  it('publishes the full unsigned stable asset set without moving an existing tag', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const releaseManifest = readJson('release-manifest.json')
@@ -223,12 +223,12 @@ describe('Tauri host contract', () => {
     expect(release).not.toContain('-thin')
 
     expect(releaseManifest.schemaVersion).toBe(2)
-    expect(releaseManifest.channel).toBe('beta')
-    expect(releaseManifest.prerelease).toBe('beta.3')
+    expect(releaseManifest.channel).toBe('stable')
+    expect(releaseManifest.prerelease).toBeUndefined()
     expect(releaseManifest.publication).toMatchObject({
       tagTemplate: 'v{version}',
-      githubPrerelease: true,
-      replaceablePrerelease: true,
+      githubPrerelease: false,
+      replaceablePrerelease: false,
       candidateWorkflow: '.github/workflows/tauri-candidate.yml',
     })
     expect(releaseManifest.publication.requiredSameShaWorkflows).toEqual(
