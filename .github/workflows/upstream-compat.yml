@@ -68,6 +68,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 11.7.0
+          package_json_file: upstream/package.json
 
       - name: Install upstream dependencies with pinned pnpm
         working-directory: upstream
