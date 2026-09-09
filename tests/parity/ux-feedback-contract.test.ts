@@ -59,7 +59,7 @@ describe('desktop interaction feedback contract', () => {
     expect(nativeClose).not.toContain('window.hide()')
   })
 
-  it('keeps hide-to-tray an explicit side-effect-free background action', () => {
+  it('keeps hide-to-tray explicit, guarded and lifecycle-neutral', () => {
     const tray = read('apps/tauri/src-tauri/src/tray.rs')
     const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
     const hidePrimary = tray.slice(
@@ -68,6 +68,8 @@ describe('desktop interaction feedback contract', () => {
     )
     expect(tray).toContain('"tray-hide", "隐藏到托盘"')
     expect(desktop).toContain('.text("shell-hide-to-tray", "隐藏到托盘")')
+    expect(hidePrimary).toContain('.tray_available')
+    expect(hidePrimary).toContain('系统托盘不可用，无法隐藏 Harness 主窗口。')
     expect(hidePrimary).toContain('window.hide()')
     expect(hidePrimary).not.toContain('request_exit')
     expect(hidePrimary).not.toContain('runtime::')
