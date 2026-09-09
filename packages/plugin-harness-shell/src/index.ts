@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 export const name = 'harness-shell'
 export const inject: readonly string[] = []
-export const version = '0.1.2' as const
+export const version = '0.1.3' as const
 /**
  * Must match `SHELL_API_VERSION` in `packages/bootstrap/src/shell-contract.ts`
  * and the `apiVersion` published by the desktop bridge in `harness_shell.rs`.
