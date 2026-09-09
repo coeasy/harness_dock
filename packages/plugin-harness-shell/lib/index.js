@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 var name = "harness-shell";
 var inject = [];
-var version = "0.1.2";
+var version = "0.1.3";
 var apiVersion = 2;
 var service = {
   pluginId: name,
@@ -50,3 +50,4 @@ export {
   service,
   version
 };
+
