@@ -1,8 +1,8 @@
-# HarnessDock Tauri v0.1.2
+# HarnessDock Tauri v0.1.3
 
 `apps/tauri` 是 HarnessDock 唯一桌面应用宿主。正常桌面启动由 Rust Native Host 拉起安装包内置的 Full Runtime，Runtime ready 后直接打开官方 Harness Web；本地控制页只在启动恢复、Gateway 或显式诊断时出现。
 
-当前 Runtime 精确锁定 `dsh-v0.1.2-rc.1`，commit `a66e4702047846cdaa10c66c9d3df3951f5ea70d`。HarnessDock 产品版本使用上游 dsh 的基础 SemVer，因此本客户端版本为 `0.1.2`。
+当前 Runtime 精确锁定 `dsh-v0.1.3-alpha.2`，commit `82a5fd61a7cf5c293cec4bdff68f455398d685e9`。HarnessDock 产品版本使用上游 dsh 的基础 SemVer，因此本客户端版本为 `0.1.3`。
 
 ## Runtime 模型
 
@@ -90,9 +90,9 @@ cargo tauri ios build --debug --target aarch64-sim --ci
 
 Windows 使用稳定 identifier `com.harnessdock.client`、current-user 安装、禁止意外降级，并内置 WebView2 bootstrapper。
 
-## v0.1.2 beta 发布状态
+## v0.1.3 发布状态
 
-当前公共 beta 是**测试候选**：
+当前公共版本是**未签名正式构建**：
 
 - Windows：未做 Authenticode；
 - macOS：未签名、未 notarize；
@@ -100,11 +100,11 @@ Windows 使用稳定 identifier `com.harnessdock.client`、current-user 安装�
 - iOS：Simulator only；
 - 当前不生成 Tauri `latest.json/.sig` updater 资产。
 
-因此 v0.1.2 beta 的版本检查最终引导到 GitHub Release 手动下载安装，并使用 `SHA256SUMS` 校验。正式签名自动更新属于后续发布通道，不应在当前 UI/文档中声明为已经启用。
+因此 v0.1.3 的版本检查最终引导到 GitHub Release 手动下载安装，并使用 `SHA256SUMS` 校验。签名自动更新属于后续发布通道，不应在当前 UI/文档中声明为已经启用。
 
 ## 发布门禁
 
-在发布 `v0.1.2-beta.3` 前必须通过：
+在发布 `v0.1.3` 前必须通过：
 
 ```bash
 pnpm check:versions
