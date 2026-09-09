@@ -1,13 +1,12 @@
 {
   "schemaVersion": 2,
   "product": "HarnessDock",
-  "version": "0.1.2",
-  "channel": "beta",
-  "prerelease": "beta.3",
+  "version": "0.1.3",
+  "channel": "stable",
   "publication": {
     "tagTemplate": "v{version}",
-    "githubPrerelease": true,
-    "replaceablePrerelease": true,
+    "githubPrerelease": false,
+    "replaceablePrerelease": false,
     "candidateWorkflow": ".github/workflows/tauri-candidate.yml",
     "requiredSameShaWorkflows": [
       ".github/workflows/ci.yml",
@@ -16,13 +15,13 @@
   },
   "shell": {
     "package": "@dsh/plugin-harness-shell",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "apiVersion": 1
   },
   "runtime": {
-    "version": "0.1.2-rc.1",
-    "gitTag": "dsh-v0.1.2-rc.1",
-    "gitCommit": "a66e4702047846cdaa10c66c9d3df3951f5ea70d"
+    "version": "0.1.3-alpha.2",
+    "gitTag": "dsh-v0.1.3-alpha.2",
+    "gitCommit": "82a5fd61a7cf5c293cec4bdff68f455398d685e9"
   },
   "targets": {
     "windows-x64": {
