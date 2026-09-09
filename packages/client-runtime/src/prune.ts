@@ -79,6 +79,17 @@ export function planKoffiVariantPrune(dirNames: string[], arch: string): string[
 }
 
 /**
+ * The dsh Linux system addon ships glibc and musl implementations below its
+ * `bin` directory. HarnessDock Linux releases target glibc, and linuxdeploy
+ * cannot inspect the musl ELF with the runner's glibc `ldd`, so remove only
+ * the unused musl directory while retaining the glibc implementation and
+ * the root-level landlock helper.
+ */
+export function planSystemAddonVariantPrune(dirNames: string[]): string[] {
+  return dirNames.filter((name) => name === 'musl')
+}
+
+/**
  * File basenames that are pure dev/debug weight in a shipped runtime and are
  * never resolved by Node at runtime: source maps, PDB debug symbols, and
  * TypeScript declaration files. Safe to delete from a bundled node_modules.
@@ -253,13 +264,37 @@ export async function pruneBundledRuntime(
       }
     }
 
-    // 4. Dev/debug files (.map / .pdb / .d.ts).
+    // 4. The Linux system addon includes a musl ELF beside the glibc addon;
+    //    HarnessDock's Linux release is glibc-only, and linuxdeploy's ldd
+    //    cannot inspect that musl binary on the glibc build runner.
+    if (platform === 'linux') {
+      const systemAddonBin = path.join(
+        nodeModules,
+        '@deepseek-ai',
+        `node-addon-system-linux-${arch}`,
+        'bin',
+      )
+      let systemAddonVariants: string[] = []
+      try {
+        const systemAddonEntries = await readdirImpl(systemAddonBin, { withFileTypes: true })
+        systemAddonVariants = systemAddonEntries
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+      } catch {
+        systemAddonVariants = []
+      }
+      for (const variant of planSystemAddonVariantPrune(systemAddonVariants)) {
+        await remove(path.join(systemAddonBin, variant))
+      }
+    }
+
+    // 5. Dev/debug files (.map / .pdb / .d.ts).
     const devFiles = files.filter((file) => planDevFilesToPrune([path.basename(file)]).length > 0)
     for (const file of devFiles) {
       await remove(file)
     }
 
-    // 5. SDK dev/example dirs (test / tests / __tests__ / examples / coverage
+    // 6. SDK dev/example dirs (test / tests / __tests__ / examples / coverage
     //    / .yarn) at package top level — not under @types/* or src.
     const sdkDirs = dirs.filter((dir) => {
       const rel = path.relative(nodeModules, dir)
@@ -269,7 +304,7 @@ export async function pruneBundledRuntime(
       await remove(dir)
     }
 
-    // 6. Doc/declaration files: *.md except license/notice/changelog, plus
+    // 7. Doc/declaration files: *.md except license/notice/changelog, plus
     //    .d.mts / .d.cts declaration modules.
     const docFiles = files.filter(
       (file) => planRuntimeDocFilesToPrune([path.basename(file)]).length > 0,

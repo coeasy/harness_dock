@@ -9,6 +9,7 @@ import {
   planRuntimeDocFilesToPrune,
   planRuntimePrune,
   planSdkDirsToPrune,
+  planSystemAddonVariantPrune,
   pruneBundledRuntime,
 } from '../src/prune.ts'
 
@@ -136,6 +137,12 @@ describe('planKoffiVariantPrune', () => {
       'linux_arm64',
       'musl_arm64',
     ])
+  })
+})
+
+describe('planSystemAddonVariantPrune', () => {
+  it('removes only the musl system addon variant', () => {
+    expect(planSystemAddonVariantPrune(['glibc', 'musl', 'landlock-run'])).toEqual(['musl'])
   })
 })
 
@@ -288,6 +295,20 @@ describe('pruneBundledRuntime', () => {
     await writeFile(path.join(nm, '@koromix', 'koffi-linux-x64', 'linux_x64', 'koffi.node'), 'k'.repeat(12))
     await mkdir(path.join(nm, '@koromix', 'koffi-linux-x64', 'musl_x64'), { recursive: true })
     await writeFile(path.join(nm, '@koromix', 'koffi-linux-x64', 'musl_x64', 'koffi.node'), 'u'.repeat(13))
+    await mkdir(path.join(nm, '@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'glibc'), {
+      recursive: true,
+    })
+    await writeFile(
+      path.join(nm, '@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'glibc', 'system.node'),
+      'g'.repeat(14),
+    )
+    await mkdir(path.join(nm, '@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'musl'), {
+      recursive: true,
+    })
+    await writeFile(
+      path.join(nm, '@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'musl', 'system.node'),
+      'm'.repeat(15),
+    )
 
     await pruneBundledRuntime(root, 'linux', 'x64')
 
@@ -295,6 +316,8 @@ describe('pruneBundledRuntime', () => {
     expect(await pathExists(path.join(nm, '@img', 'sharp-linuxmusl-x64'))).toBe(false)
     expect(await pathExists(path.join(nm, '@koromix', 'koffi-linux-x64', 'linux_x64'))).toBe(true)
     expect(await pathExists(path.join(nm, '@koromix', 'koffi-linux-x64', 'musl_x64'))).toBe(false)
+    expect(await pathExists(path.join(nm, '@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'glibc'))).toBe(true)
+    expect(await pathExists(path.join(nm, '@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'musl'))).toBe(false)
   })
 })
 
