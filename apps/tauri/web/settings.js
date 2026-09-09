@@ -37,6 +37,13 @@
     element.classList.toggle('error', bad)
   }
 
+  function setBusy(button, busy) {
+    if (!button) return
+    button.disabled = busy
+    button.classList.toggle('is-busy', busy)
+    button.setAttribute('aria-busy', String(busy))
+  }
+
   function render(snapshot) {
     if (!snapshot) return
     const sequence = Number(snapshot.eventSequence || 0)
@@ -63,27 +70,32 @@
   }
 
   async function refresh() {
+    const button = $('runtime-refresh')
+    setBusy(button, true)
     try {
       render(await call('host_snapshot'))
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
+    } finally {
+      setBusy(button, false)
     }
   }
 
   async function quit() {
-    $('settings-quit').disabled = true
+    const button = $('settings-quit')
+    setBusy(button, true)
     setStatus($('runtime-detail'), '正在通过 Host Kernel 关闭 Runtime、Gateway 与客户端…')
     try {
       await host('quit')
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
-      $('settings-quit').disabled = false
+      setBusy(button, false)
     }
   }
 
   async function installUpdate() {
     const button = $('update-install')
-    button.disabled = true
+    setBusy(button, true)
     setStatus($('update-detail'), '正在检查稳定 Release，并验证签名后安装可用更新…')
     try {
       await host('install-update')
@@ -91,7 +103,7 @@
     } catch (error) {
       setStatus($('update-detail'), message(error), true)
     } finally {
-      button.disabled = false
+      setBusy(button, false)
     }
   }
 
@@ -116,7 +128,14 @@
   $('settings-quit').addEventListener('click', quit)
   $('update-install').addEventListener('click', installUpdate)
   $('settings-close').addEventListener('click', async () => {
-    try { await call('diagnostics_close') } catch (error) { setStatus($('runtime-detail'), message(error), true) }
+    const button = $('settings-close')
+    setBusy(button, true)
+    try {
+      await call('diagnostics_close')
+    } catch (error) {
+      setStatus($('runtime-detail'), message(error), true)
+      setBusy(button, false)
+    }
   })
 
   void (async () => {
