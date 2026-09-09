@@ -55,7 +55,9 @@ pub fn show_control_surface(
     mode: &str,
     error: Option<&str>,
 ) -> Result<(), String> {
-    hide_splash(app);
+    // Keep the splash visible until the secondary surface is actually painted.
+    // Hiding it before a lazily-created recovery/diagnostics WebView finishes
+    // loading creates a blank gap that feels like the app froze.
     if let Some(window) = app.get_webview_window("control") {
         set_control_surface(&window, mode, error);
         window
@@ -64,6 +66,7 @@ pub fn show_control_surface(
         window
             .set_focus()
             .map_err(|error| format!("无法聚焦 HarnessDock 按需控制面: {error}"))?;
+        hide_splash(app);
         return Ok(());
     }
 
@@ -81,6 +84,7 @@ pub fn show_control_surface(
                 set_control_surface(&window, &mode, recovery.as_deref());
                 let _ = window.show();
                 let _ = window.set_focus();
+                hide_splash(window.app_handle());
             }
         })
         .build()
@@ -102,8 +106,10 @@ pub(crate) fn show_startup_recovery(app: &AppHandle, error: &str) {
         surface.end_operation();
     }
     eprintln!("HarnessDock startup failed: {error}");
+    show_splash(app, "启动失败，正在打开恢复入口…");
     if let Err(surface_error) = show_control_surface(app, "recovery", Some(error)) {
         eprintln!("HarnessDock recovery surface unavailable: {surface_error}");
+        set_splash_status(app, "启动失败，恢复入口暂不可用");
     }
 }
 

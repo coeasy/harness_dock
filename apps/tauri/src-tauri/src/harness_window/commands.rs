@@ -25,7 +25,10 @@ pub(crate) async fn open_for_startup(app: AppHandle, url: String) -> Result<(), 
     }
     #[cfg(not(mobile))]
     {
-        harness_open_impl(app, url, false).await
+        // Normal startup also keeps the lightweight splash visible. It remains
+        // presentation-only and is removed by finish_harness_load once the
+        // authenticated Harness document has actually claimed primary_visible.
+        harness_open_impl(app, url, true).await
     }
 }
 

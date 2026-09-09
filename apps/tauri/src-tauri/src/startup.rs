@@ -2,9 +2,9 @@
 //!
 //! Normal launch has no hidden renderer dependency: resolve the packaged Runtime ->
 //! spawn/probe actor generation -> request Harness surface. The packaged Runtime
-//! is already part of the application image, so normal startup does not expose a
-//! separate Node/Runtime verification screen. Recovery/Gateway control surfaces
-//! are created only when explicitly needed.
+//! is already part of the application image, so startup uses the lightweight local
+//! splash only as progress feedback while Runtime/WebView readiness is established.
+//! Recovery/Gateway control surfaces are created only when explicitly needed.
 
 use crate::{
     harness_window, reconciler,
@@ -124,10 +124,10 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
 
 pub(crate) fn spawn(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // The packaged application owns a sealed Runtime image. Keep the
-        // bootstrap surface hidden and go straight to the Harness Web surface;
-        // failures still open the explicit recovery control surface.
-        harness_window::hide_splash(&app);
+        // Paint feedback immediately. Runtime startup remains entirely native;
+        // the splash is presentation-only and is hidden only after the healthy
+        // Harness surface is actually visible or a recovery surface takes over.
+        harness_window::show_splash(&app, "正在启动 Harness Runtime…");
         let status = match reconciler::ensure_runtime_for_boot(app.clone()).await {
             Ok(status) => status,
             Err(error) => {
@@ -136,6 +136,7 @@ pub(crate) fn spawn(app: AppHandle) {
                 return;
             }
         };
+        harness_window::set_splash_status(&app, "Runtime 已就绪，正在准备 Harness Web…");
         let Some(url) = status.app_url else {
             startup_trace::mark(StartupPhase::Recovery);
             harness_window::show_startup_recovery(
@@ -145,6 +146,7 @@ pub(crate) fn spawn(app: AppHandle) {
             return;
         };
         startup_trace::mark(StartupPhase::WebviewRequested);
+        harness_window::set_splash_status(&app, "正在打开 Harness Web…");
         if let Err(error) = harness_window::open_for_startup(app.clone(), url).await {
             startup_trace::mark(StartupPhase::Recovery);
             harness_window::show_startup_recovery(&app, &error);

@@ -55,8 +55,43 @@ fn show_primary(app: &AppHandle) {
     }
 }
 
+/// Explicit background mode. Unlike a close request this does not mutate the
+/// Runtime/Surface actors, cancel navigation, or drain managed processes. The
+/// current RuntimeLease remains authoritative and `show_primary` revalidates it
+/// through the Host Kernel before the Harness surface is shown again.
+pub(crate) fn hide_primary(app: &AppHandle) -> Result<(), String> {
+    if !app
+        .state::<crate::AppState>()
+        .tray_available
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("系统托盘不可用，无法隐藏 Harness 主窗口。".into());
+    }
+    let primary_ready = app
+        .state::<crate::AppState>()
+        .surface_actor
+        .lock()
+        .map(|surface| surface.primary_visible())
+        .unwrap_or(false);
+    if !primary_ready {
+        return Err("Harness Web 尚未就绪，启动或恢复完成后才能隐藏到托盘。".into());
+    }
+    if let Some(window) = app.get_webview_window("harness") {
+        window
+            .hide()
+            .map_err(|error| format!("无法隐藏 Harness 窗口: {error}"))?;
+    }
+    if let Some(window) = app.get_webview_window("splash") {
+        window
+            .hide()
+            .map_err(|error| format!("无法隐藏 Harness 启动状态窗口: {error}"))?;
+    }
+    Ok(())
+}
+
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "tray-open", "打开 Harness", true, None::<&str>)?;
+    let hide = MenuItem::with_id(app, "tray-hide", "隐藏到托盘", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "tray-settings", "插件诊断", true, None::<&str>)?;
     let gateway = MenuItem::with_id(
         app,
@@ -87,6 +122,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         app,
         &[
             &open,
+            &hide,
             &settings,
             &gateway,
             &refresh,
@@ -106,6 +142,10 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             let intent = match event.id.as_ref() {
                 "tray-open" => {
                     show_primary(app);
+                    None
+                }
+                "tray-hide" => {
+                    let _ = hide_primary(app);
                     None
                 }
                 "tray-settings" => Some(workflow::HostIntent::ShowDiagnostics),

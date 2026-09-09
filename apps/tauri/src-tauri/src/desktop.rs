@@ -37,6 +37,7 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
         .text("shell-gateway", "移动设备 / Gateway")
         .text("shell-settings", "插件诊断")
         .text("shell-update", "自动更新")
+        .text("shell-hide-to-tray", "隐藏到托盘")
         .build()
         .map_err(|error| format!("无法创建 HarnessDock 菜单项: {error}"))?;
     let menu = MenuBuilder::new(app)
@@ -54,6 +55,12 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
             "shell-gateway" => Some(workflow::HostIntent::ShowGateway),
             "shell-settings" => Some(workflow::HostIntent::ShowDiagnostics),
             "shell-update" => Some(workflow::HostIntent::InstallUpdate),
+            "shell-hide-to-tray" => {
+                if let Err(error) = crate::tray::hide_primary(app_handle) {
+                    report_shell_error(app_handle, &error);
+                }
+                None
+            }
             _ => None,
         };
         if let Some(intent) = intent {
@@ -88,9 +95,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             .state::<AppState>()
             .tray_available
             .store(true, Ordering::Release),
-        Err(error) => eprintln!(
-            "HarnessDock tray unavailable; primary-window close will exit cleanly: {error}"
-        ),
+        Err(error) => {
+            eprintln!("HarnessDock tray unavailable; continuing without tray controls: {error}")
+        }
     }
     if let Err(error) = app
         .handle()
@@ -117,20 +124,12 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
             .load(Ordering::SeqCst)
             && label == "harness" =>
         {
+            // The native title-bar close button and Alt+F4 have the same
+            // contract as the independent Harness Shell X: close means a
+            // supervised process exit. Tray visibility is an explicit native
+            // action and never changes the meaning of a close request.
             api.prevent_close();
-            crate::harness_window::cancel_harness_load(app_handle);
-            crate::harness_window::hide_splash(app_handle);
-            let tray_available = app_handle
-                .state::<AppState>()
-                .tray_available
-                .load(Ordering::Acquire);
-            if tray_available {
-                if let Some(window) = app_handle.get_webview_window("harness") {
-                    let _ = window.hide();
-                }
-            } else {
-                crate::supervisor::request_exit(app_handle);
-            }
+            crate::supervisor::request_exit(app_handle);
         }
         tauri::RunEvent::WindowEvent {
             label,

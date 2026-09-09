@@ -83,6 +83,7 @@ jobs:
           if (-not (Test-Path (Join-Path $nodeHome 'node.exe'))) { throw 'portable Node executable is missing' }
           if (-not (Test-Path .local-cache/node)) { throw 'portable Node download cache is missing' }
           $generatedBuildOutputs = @(
+            'apps/tauri/src-tauri/Cargo.lock',
             'apps/tauri/src-tauri/Cargo.toml',
             'apps/tauri/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml',
             'apps/tauri/src-tauri/icons/android/values/ic_launcher_background.xml',
@@ -131,6 +132,7 @@ jobs:
           test -x "$node_home/bin/node"
           test -d .local-cache/node
           generated_build_outputs=(
+            'apps/tauri/src-tauri/Cargo.lock'
             'apps/tauri/src-tauri/Cargo.toml'
             'apps/tauri/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml'
             'apps/tauri/src-tauri/icons/android/values/ic_launcher_background.xml'
@@ -140,5 +142,3 @@ jobs:
           )
           git restore --source=HEAD -- "${generated_build_outputs[@]}"
           test -z "$(git status --porcelain)"
-
-

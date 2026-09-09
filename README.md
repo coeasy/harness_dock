@@ -2,7 +2,7 @@
 
 <img src="apps/tauri/src-tauri/icons/app-icon.png" width="112" alt="HarnessDock icon" />
 
-# HarnessDock
+# HarnessDock v0.1.5
 
 **DeepSeek Harness 的跨平台原生客户端**
 
@@ -148,7 +148,7 @@ Android / iOS **不会在设备内启动 Node / dsh**。移动端只连接可信
 | --- | --- |
 | HarnessDock | `0.1.5` |
 | 发布通道 | `stable` |
-| 当前 tag | `v0.1.5` |
+| 当前发布 tag | `v0.1.5` |
 | DeepSeek Harness Runtime | `dsh-v0.1.5-alpha.1` |
 | Runtime commit | `5dda764ed3aa172535a7967b06ff95d9cbfe536a` |
 | 桌面宿主 | Tauri 2 |

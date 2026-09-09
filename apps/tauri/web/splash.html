@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-state="loading">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,13 +10,22 @@
   <script src="./splash.js" defer></script>
 </head>
 <body>
-  <main class="splash" aria-live="polite">
-    <div class="mark" aria-hidden="true"></div>
-    <h1>HarnessDock</h1>
-    <div class="sub">DeepSeek Harness · CLIENT</div>
-    <div class="spinner" aria-hidden="true"></div>
-    <div id="splash-status" class="status">正在打开 Harness Web…</div>
-    <div class="progress" aria-hidden="true"></div>
+  <main class="splash" aria-live="polite" aria-busy="true">
+    <div class="ambient ambient-a" aria-hidden="true"></div>
+    <div class="ambient ambient-b" aria-hidden="true"></div>
+    <div class="mark-wrap" aria-hidden="true">
+      <div class="orbit orbit-a"></div>
+      <div class="orbit orbit-b"></div>
+      <div class="mark"><span></span></div>
+    </div>
+    <div class="identity">
+      <h1>HarnessDock</h1>
+      <div class="sub">DeepSeek Harness · CLIENT</div>
+    </div>
+    <div class="stage" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div id="splash-status" class="status">正在启动 Harness Runtime…</div>
+    <div class="progress" aria-hidden="true"><span></span></div>
+    <div class="hint">保持窗口打开，Harness Web 就绪后会自动进入</div>
   </main>
 </body>
 </html>

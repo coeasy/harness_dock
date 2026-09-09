@@ -41,7 +41,7 @@ jobs:
       # can also need bounded fs.rm retries while Defender/indexers release
       # package directories. Keep the test harness above those real bounds;
       # this changes only the Vitest failure ceiling, not production timeouts.
-      - run: pnpm test -- --testTimeout=20000 --hookTimeout=20000
+      - run: pnpm test --testTimeout=20000 --hookTimeout=20000
 
   tauri-source:
     needs: test

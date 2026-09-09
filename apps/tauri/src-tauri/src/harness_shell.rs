@@ -4,8 +4,6 @@
 //! plugin. Tauri supplies only minimum window primitives plus Host Protocol v2.
 //! The remote Harness document never receives direct Runtime/update/quit IPC.
 
-use tauri::Manager;
-
 const SHELL_WEB_SCRIPT: &str =
     include_str!("../../../../packages/plugin-harness-shell/src/web/shell.js");
 
@@ -50,42 +48,38 @@ const POLYFILL_SCRIPT: &str = r#"
         return fallback;
       }
     };
-    const abortSignalWithReason = (signal, reason) => {
-      if (signal.aborted) return;
-      let safeReason = reason;
-      try {
-        safeReason = readReason(signal, new DOMException('The operation was aborted.', 'AbortError'));
-      } catch (_) {}
-      try {
-        Object.defineProperty(signal, 'reason', { value: safeReason, configurable: true });
-      } catch (_) {}
-      try {
-        signal.dispatchEvent(new Event('abort'));
-      } catch (_) {}
-    };
     AbortSignal.any = function (signals) {
-      const result = new AbortController().signal;
-      const live = [];
+      const controller = new AbortController();
+      const listeners = [];
       let settled = false;
+      const cleanup = () => {
+        for (const [signal, listener] of listeners) {
+          try { signal.removeEventListener('abort', listener); } catch (_) {}
+        }
+        listeners.length = 0;
+      };
       const settle = (reason) => {
         if (settled) return;
         settled = true;
-        abortSignalWithReason(result, reason);
-        for (const signal of live) abortSignalWithReason(signal, reason);
-        live.length = 0;
+        cleanup();
+        try {
+          controller.abort(reason);
+        } catch (_) {
+          controller.abort();
+        }
       };
       for (const value of signals) {
         if (!isAbortSignal(value)) continue;
-        if (live.some((signal) => signal === value)) continue;
+        if (listeners.some(([signal]) => signal === value)) continue;
         if (value.aborted) {
           settle(readReason(value, undefined));
-          continue;
+          break;
         }
         const onAbort = () => settle(readReason(value, undefined));
-        live.push(value);
+        listeners.push([value, onAbort]);
         value.addEventListener('abort', onAbort, { once: true });
       }
-      return result;
+      return controller.signal;
     };
   }
 })();
@@ -187,18 +181,11 @@ const BRIDGE_SCRIPT: &str = r#"
 })();
 "#;
 
-/// The custom shell close button hides to tray only when a tray actually
-/// exists. On desktops where tray creation failed, it performs supervised exit
-/// so the Runtime/Gateway actors are still drained before process termination.
+/// The shell close button always means exit. Hiding to tray is intentionally a
+/// separate native action so the top-right X never leaves Runtime/Gateway work
+/// alive after the user believes the application has closed.
 #[tauri::command]
 pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
-    let tray_available = app
-        .state::<crate::AppState>()
-        .tray_available
-        .load(std::sync::atomic::Ordering::Acquire);
-    if tray_available {
-        return crate::harness_window::harness_close(app).await;
-    }
     crate::request_exit(&app);
     Ok(())
 }

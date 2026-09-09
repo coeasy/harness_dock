@@ -92,7 +92,7 @@ describe('HarnessDock Native Host frozen core contract', () => {
   it('keeps active documentation aligned with the exact Runtime ACL', () => {
     const readme = read('README.md')
     const implementation = read('docs/plan/v0.2.0-shell-first-implementation.md')
-    expect(readme).toContain('http://127.0.0.1:<port>')
+    expect(readme).toContain('http://127.0.0.1:<managed-port>')
     expect(readme).not.toContain('loopback IPv4、localhost、IPv6 `::1`')
     expect(implementation).toContain('http://127.0.0.1:<port>')
     expect(implementation).toContain('`gateway.manage`')
