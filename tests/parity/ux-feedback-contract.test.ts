@@ -38,7 +38,7 @@ describe('desktop interaction feedback contract', () => {
     expect(supervisor).toContain('正在完成退出…')
   })
 
-  it('keeps motion optional and state-driven on the splash surface', () => {
+  it('keeps motion optional and explains a prolonged startup without weakening timeouts', () => {
     const html = read('apps/tauri/web/splash.html')
     const css = read('apps/tauri/web/splash.css')
     const js = read('apps/tauri/web/splash.js')
@@ -49,6 +49,9 @@ describe('desktop interaction feedback contract', () => {
     expect(css).toContain('html[data-state="exiting"]')
     expect(js).toContain("document.documentElement.dataset.state = state")
     expect(js).toContain("state === 'exiting'")
+    expect(js).toContain('scheduleLongWaitHint(state)')
+    expect(js).toContain('}, 8000)')
+    expect(js).toContain('无需重复点击或重新启动')
   })
 
   it('keeps the independent Harness Shell source and shipped web artifact identical', () => {
@@ -63,12 +66,32 @@ describe('desktop interaction feedback contract', () => {
     expect(source).toContain("menuToggle?.setAttribute('aria-expanded'")
   })
 
-  it('exposes visible busy state in the diagnostics surface', () => {
+  it('does not propagate AbortSignal.any cancellation back into source signals', () => {
+    const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
+    expect(shellHost).toContain('const controller = new AbortController();')
+    expect(shellHost).toContain('controller.abort(reason);')
+    expect(shellHost).toContain("signal.removeEventListener('abort', listener)")
+    expect(shellHost).not.toContain("signal.dispatchEvent(new Event('abort'))")
+    expect(shellHost).not.toContain('for (const signal of live)')
+  })
+
+  it('coalesces diagnostics event bursts instead of repainting for every HostEvent', () => {
     const settings = read('apps/tauri/web/settings.js')
     const styles = read('apps/tauri/web/styles.css')
+    expect(settings).toContain('snapshotRefreshPromise')
+    expect(settings).toContain('snapshotRefreshPending')
+    expect(settings).toContain('queueEventRefresh')
+    expect(settings).toContain('void refresh(false)')
     expect(settings).toContain("button.classList.toggle('is-busy', busy)")
     expect(settings).toContain("button.setAttribute('aria-busy', String(busy))")
     expect(styles).toContain('.settings-page button.is-busy')
     expect(styles).toContain('@media (prefers-reduced-motion:reduce)')
+  })
+
+  it('restores tool-generated Cargo metadata before judging one-click checkout cleanliness', () => {
+    const workflow = read('.github/workflows/local-one-click-build.yml')
+    expect(workflow).toContain("'apps/tauri/src-tauri/Cargo.lock'")
+    expect(workflow).toContain('git restore --source=HEAD -- $generatedBuildOutputs')
+    expect(workflow).toContain('git restore --source=HEAD -- "${generated_build_outputs[@]}"')
   })
 })
