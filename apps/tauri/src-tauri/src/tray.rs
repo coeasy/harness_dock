@@ -67,6 +67,15 @@ pub(crate) fn hide_primary(app: &AppHandle) -> Result<(), String> {
     {
         return Err("系统托盘不可用，无法隐藏 Harness 主窗口。".into());
     }
+    let primary_ready = app
+        .state::<crate::AppState>()
+        .surface_actor
+        .lock()
+        .map(|surface| surface.primary_visible())
+        .unwrap_or(false);
+    if !primary_ready {
+        return Err("Harness Web 尚未就绪，启动或恢复完成后才能隐藏到托盘。".into());
+    }
     if let Some(window) = app.get_webview_window("harness") {
         window
             .hide()
