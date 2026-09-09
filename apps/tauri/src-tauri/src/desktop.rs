@@ -56,7 +56,9 @@ fn install_shell_menu(app: &mut tauri::App) -> Result<(), String> {
             "shell-settings" => Some(workflow::HostIntent::ShowDiagnostics),
             "shell-update" => Some(workflow::HostIntent::InstallUpdate),
             "shell-hide-to-tray" => {
-                crate::tray::hide_primary(app_handle);
+                if let Err(error) = crate::tray::hide_primary(app_handle) {
+                    report_shell_error(app_handle, &error);
+                }
                 None
             }
             _ => None,
