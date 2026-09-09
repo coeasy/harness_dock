@@ -36,7 +36,7 @@ const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 const gitCommand = process.platform === 'win32' ? 'git.exe' : 'git'
 const tarCommand = process.platform === 'win32' ? 'tar.exe' : 'tar'
 const RUNTIME_SCHEMA_VERSION = 1
-const RUNTIME_LAYOUT_VERSION = 4
+const RUNTIME_LAYOUT_VERSION = 5
 const RUNTIME_IMAGE_IDENTITY_ALGORITHM = 'sha256-v1'
 
 const { values } = parseArgs({
