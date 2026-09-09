@@ -328,7 +328,11 @@ jobs:
             chmod +x "$linuxdeploy"
             export LINUXDEPLOY="$linuxdeploy"
           fi
-          cargo tauri build --bundles '${{ matrix.bundles }}'
+          if [ '${{ matrix.targetId }}' = linux-x64 ]; then
+            cargo tauri build --bundles '${{ matrix.bundles }}' || cargo tauri build --bundles '${{ matrix.bundles }}'
+          else
+            cargo tauri build --bundles '${{ matrix.bundles }}'
+          fi
       - name: Verify Windows installer uses HarnessDock icon
         if: runner.os == 'Windows'
         shell: pwsh

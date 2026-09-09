@@ -54,10 +54,11 @@ hdiutil create \
   -fs HFS+ \
   -srcfolder "$staging" \
   -format UDZO \
-  -imagekey zlib-level=9 \
+  -imagekey zlib-level=1 \
   -ov \
   "$output"
 
 test -s "$output"
 hdiutil imageinfo "$output" >/dev/null
 printf 'Created mount-free HarnessDock DMG: %s\n' "$output"
+
