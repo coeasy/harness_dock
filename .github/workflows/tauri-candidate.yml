@@ -326,6 +326,13 @@ jobs:
               -o "$linuxdeploy"
             echo "${LINUXDEPLOY_SHA256}  ${linuxdeploy}" | sha256sum --check --strict
             chmod +x "$linuxdeploy"
+            # Tauri 2.11.4 resolves linuxdeploy from its XDG cache rather than
+            # the LINUXDEPLOY environment variable. Pre-seed that cache with
+            # the pinned upstream build to avoid the stale binary-releases copy.
+            export XDG_CACHE_HOME="$RUNNER_TEMP/tauri-cache"
+            mkdir -p "$XDG_CACHE_HOME/tauri"
+            cp "$linuxdeploy" "$XDG_CACHE_HOME/tauri/linuxdeploy-x86_64.AppImage"
+            chmod +x "$XDG_CACHE_HOME/tauri/linuxdeploy-x86_64.AppImage"
             export LINUXDEPLOY="$linuxdeploy"
           fi
           if [ '${{ matrix.targetId }}' = linux-x64 ]; then
@@ -513,4 +520,3 @@ jobs:
           path: ios-candidate/HarnessDock-ios-arm64-simulator.zip
           if-no-files-found: error
           retention-days: 7
-

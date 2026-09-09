@@ -61,4 +61,3 @@ hdiutil create \
 test -s "$output"
 hdiutil imageinfo "$output" >/dev/null
 printf 'Created mount-free HarnessDock DMG: %s\n' "$output"
-
