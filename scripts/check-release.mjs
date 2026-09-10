@@ -29,7 +29,6 @@ const exactDshMatch =
   typeof dshVersion === 'string'
     ? dshVersion.trim().match(/^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$/)
     : null
-const dshBaseVersion = exactDshMatch?.[1]
 
 if (manifest.version !== clientVersion) {
   errors.push(
@@ -66,11 +65,10 @@ if (!dshVersion || typeof dshVersion !== 'string') {
   errors.push(`origin.json.dshVersion (${dshVersion}) is not an exact supported SemVer`)
 }
 
-if (dshBaseVersion && clientVersion !== dshBaseVersion) {
-  errors.push(
-    `HarnessDock version (${clientVersion}) must track pinned dsh base version (${dshBaseVersion}, from ${dshVersion})`,
-  )
-}
+// HarnessDock is a wrapper client, so its release identity may advance for
+// host/UI fixes without waiting for a new dsh base version. The exact dsh
+// provenance remains enforced above; when that provenance changes, the
+// released-origin guard below still requires a new client release identity.
 
 if (origin.clientVersion !== clientVersion) {
   errors.push(
@@ -144,7 +142,7 @@ if (existsSync(releasedPath)) {
   if (released.dshVersion !== dshVersion && released.clientVersion === clientVersion) {
     errors.push(
       `origin changed (${released.dshVersion} -> ${dshVersion}) but client version was NOT bumped (still ${clientVersion}); ` +
-        `HarnessDock would keep a stale release identity. Align to the new dsh base version before release.`,
+        `HarnessDock would keep a stale release identity. Bump the client release version before release.`,
     )
   }
 }

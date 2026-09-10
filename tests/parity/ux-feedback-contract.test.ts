@@ -178,6 +178,21 @@ describe('desktop interaction feedback contract', () => {
     expect(styles).toContain('@media (prefers-reduced-motion:reduce)')
   })
 
+  it('keeps the diagnostics popup compact and status-first', () => {
+    const html = read('apps/tauri/web/settings.html')
+    const settings = read('apps/tauri/web/settings.js')
+    const commands = read('apps/tauri/src-tauri/src/harness_window/commands.rs')
+
+    expect(html).toContain('诊断中心')
+    expect(html).toContain('class="overview-grid"')
+    expect(html).toContain('class="technical-details"')
+    expect(html).toContain('id="overall-state"')
+    expect(settings).toContain("event.key !== 'Escape'")
+    expect(settings).toContain("$('overall-state').dataset.state")
+    expect(commands).toContain('.inner_size(520.0, 620.0)')
+    expect(commands).toContain('.min_inner_size(420.0, 480.0)')
+  })
+
   it('restores tool-generated Cargo metadata before judging one-click checkout cleanliness', () => {
     const workflow = read('.github/workflows/local-one-click-build.yml')
     expect(workflow).toContain("'apps/tauri/src-tauri/Cargo.lock'")

@@ -29,13 +29,13 @@ dsh-v1.0.0-beta.1  -> HarnessDock 1.0.0
 - 精确 `gitTag`；
 - 精确 `gitCommit`。
 
-当前 v0.1.5：
+当前 v0.1.6：
 
 ```text
-HarnessDock: 0.1.5
-dshVersion:  0.1.5-alpha.1
-gitTag:      dsh-v0.1.5-alpha.1
-gitCommit:   5dda764ed3aa172535a7967b06ff95d9cbfe536a
+HarnessDock: 0.1.6
+dshVersion:  0.1.5-rc.1
+gitTag:      dsh-v0.1.5-rc.1
+gitCommit:   183f08e9c6dde7e36cd2318eaee70b0da08fb35e
 ```
 
 禁止使用 `latest`、`next` 或未固定 commit 的 Runtime 进入发布候选。
@@ -62,7 +62,7 @@ gitCommit:   5dda764ed3aa172535a7967b06ff95d9cbfe536a
 
 `pnpm check:release` 在发布前额外检查：
 
-1. HarnessDock 版本等于 pinned dsh 的基础 SemVer；
+1. HarnessDock 版本是独立的客户端发布身份，可在 Runtime 不变时随宿主/UI 修复递增；
 2. Runtime version/tag/commit 在 manifest 与 origin 中完全一致；
 3. 不允许 floating dsh version；
 4. Runtime 发生跨基础版本变化时，客户端发布身份必须同步变化；
@@ -75,8 +75,8 @@ gitCommit:   5dda764ed3aa172535a7967b06ff95d9cbfe536a
 ```text
 确认上游最新 tag + commit
   -> 更新 origin.json Runtime provenance
-  -> 计算 dsh 基础 SemVer
-  -> 对齐 HarnessDock/root/workspace/Tauri/Rust/Shell 版本
+  -> 记录 dsh 基础 SemVer 与完整 provenance
+  -> 递增 HarnessDock/root/workspace/Tauri/Rust/Shell 客户端版本
   -> 更新 Runtime bundle Release URL
   -> 更新当前文档与 Release Notes
   -> pnpm check:versions
@@ -85,11 +85,11 @@ gitCommit:   5dda764ed3aa172535a7967b06ff95d9cbfe536a
   -> 同 SHA 发布
 ```
 
-如果上游只在同一基础 SemVer 内更新预发布后缀，例如 `0.1.2-rc.1 -> 0.1.2`，HarnessDock 产品版本仍为 `0.1.2`，但必须产生新的、可区分的发布候选标识；不得覆盖已经发布的不可变资产。
+如果上游只在同一基础 SemVer 内更新预发布后缀，例如 `0.1.2-rc.1 -> 0.1.2`，HarnessDock 仍需产生新的、可区分的客户端发布版本；不得覆盖已经发布的不可变资产。
 
 ## 6. 历史 `v0.2.x` 文件名
 
-仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前已经重新校正产品版本到 `v0.1.5`；这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
+仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前已经重新校正产品版本到 `v0.1.6`；这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
 
 活动版本的唯一权威来源是根 `package.json`，发布关系由 `release-manifest.json` 与 `packages/docs-sync/origin.json` 补充描述。
 

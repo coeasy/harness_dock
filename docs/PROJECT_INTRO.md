@@ -14,14 +14,14 @@
 
 ## 当前版本
 
-HarnessDock 当前产品版本为 **v0.1.5**，当前内置 Runtime 精确锁定：
+HarnessDock 当前产品版本为 **v0.1.6**，当前内置 Runtime 精确锁定：
 
 ```text
-dsh-v0.1.5-alpha.1
-5dda764ed3aa172535a7967b06ff95d9cbfe536a
+dsh-v0.1.5-rc.1
+183f08e9c6dde7e36cd2318eaee70b0da08fb35e
 ```
 
-HarnessDock 产品版本跟随 pinned dsh 的基础 SemVer；上游 prerelease 后缀仅作为 Runtime provenance 保存。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
+HarnessDock 产品版本是独立的客户端发布身份；当前版本记录了 `dsh 0.1.5-rc.1` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
 
 ## 项目定位
 
@@ -73,11 +73,11 @@ pnpm tauri:check
 pnpm tauri:dev
 ```
 
-`check:versions` 保证 root/workspace/Tauri/Rust/Shell/origin/manifest/UI 版本一致；`check:release` 继续验证 HarnessDock 与 pinned dsh 基础 SemVer 对齐，以及 Runtime version/tag/commit 一致。
+`check:versions` 保证 root/workspace/Tauri/Rust/Shell/origin/manifest/UI 版本一致；`check:release` 验证客户端发布身份、Runtime version/tag/commit 与完整 provenance 一致。
 
 ## 发布
 
-当前 v0.1.5 使用正式发布通道，目标 tag：`v0.1.5`。
+当前 v0.1.6 使用正式发布通道，目标 tag：`v0.1.6`。
 
 `.github/workflows/tauri-candidate.yml` 构建和验证 Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG 与 app archive、Android APK/AAB、iOS Simulator，以及四个平台 Full Runtime bundle。
 

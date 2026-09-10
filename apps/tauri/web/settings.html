@@ -7,53 +7,71 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" />
   <title>插件诊断 · HarnessDock</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./settings.css" />
 </head>
 <body class="settings-page">
   <main class="shell">
-    <section class="hero">
-      <div class="brand">HarnessDock / DIAGNOSTICS</div>
-      <h1>插件诊断</h1>
-      <p class="muted">仅在需要排查 Runtime、插件隔离或更新状态时打开；正常使用始终停留在 Harness Web。</p>
+    <section class="hero diagnostics-hero">
+      <div class="hero-heading">
+        <div>
+          <div class="brand">HarnessDock / DIAGNOSTICS</div>
+          <h1>诊断中心</h1>
+        </div>
+        <span id="overall-state" class="state-dot" data-state="checking">检查中</span>
+      </div>
+      <p class="muted">快速确认 Runtime 是否健康；详细信息和恢复操作按需展开。</p>
       <div class="hero-actions">
         <button id="settings-close" class="secondary">关闭</button>
-        <button id="settings-quit" class="danger">退出 HarnessDock</button>
+        <button id="settings-quit" class="danger">退出客户端</button>
       </div>
     </section>
-    <section class="card">
-      <div class="card-heading">
-        <div><h2>Web 优先启动</h2><p>桌面端验证安装包内置 sealed Runtime 后直接启动本地 dsh 并打开 Harness Web。插件诊断只在用户主动点击后创建。</p></div>
-        <span class="badge">mandatory</span>
+    <section class="card overview-card" aria-label="当前状态">
+      <div class="overview-grid">
+        <div class="overview-item">
+          <span class="overview-label">Harness Web</span>
+          <strong id="web-state">检查中</strong>
+        </div>
+        <div class="overview-item">
+          <span class="overview-label">Runtime</span>
+          <strong id="runtime-state">checking</strong>
+        </div>
+        <div class="overview-item">
+          <span class="overview-label">dsh 版本</span>
+          <strong id="runtime-version">读取中</strong>
+        </div>
       </div>
       <p id="web-detail" class="status">正在读取启动策略…</p>
     </section>
-    <section class="card">
+    <section class="card action-card">
       <div class="card-heading">
-        <div><h2>Runtime 与插件状态</h2><p>第三方插件失败可进入隔离恢复；正式产品只从安装包资源启动内置 Node+dsh，不使用系统 Node 兜底，也不会在首次启动下载另一份 Runtime。</p></div>
-        <span id="runtime-state" class="badge">checking</span>
+        <div><h2>Runtime 与插件</h2><p>第三方插件异常会进入隔离恢复，不会修改用户配置。</p></div>
+        <span class="badge" id="runtime-badge">checking</span>
       </div>
-      <p id="runtime-detail" class="status"></p>
       <div class="actions">
-        <button id="runtime-refresh" class="secondary">刷新诊断数据</button>
+        <button id="runtime-refresh" class="primary">刷新状态</button>
       </div>
+      <details class="technical-details">
+        <summary>查看技术诊断</summary>
+        <p id="runtime-detail" class="status"></p>
+      </details>
     </section>
-    <section class="card">
+    <section class="card action-card">
       <div class="card-heading">
-        <div><h2>GitHub 版本检查</h2><p>远程 Harness Web 不持有安装权限。v0.1.5 版本以 GitHub Release 与 SHA256SUMS 交付；未配置签名发布材料时，只提供版本检查与手动下载安装，不自动安装未经签名的程序包。</p></div>
+        <div><h2>版本与更新</h2><p>只检查已发布版本；安装包仍由用户从 GitHub Release 手动下载。</p></div>
         <span class="badge">manual</span>
       </div>
-      <p id="update-detail" class="status">检测到新版本时将提供对应 GitHub Release；自动签名更新通道启用前不会静默安装。</p>
       <div class="actions">
         <button id="update-install" class="secondary">检查更新</button>
       </div>
+      <p id="update-detail" class="status">点击后检查可用 Release。</p>
     </section>
-    <section class="card">
+    <section class="card compact-card">
       <div class="card-heading">
-        <div><h2>使用说明</h2><p>正常使用只需要 Harness Web。Recovery、Gateway、Diagnostics 和 Update 都是按需 Surface，不能成为健康 Harness Web 启动的前置依赖。</p></div>
+        <div><h2>使用提示</h2><p>关闭本窗口不会停止 Runtime 或 Harness Web。需要恢复插件时，请从主窗口菜单选择“隔离插件启动”。</p></div>
         <span class="badge">on demand</span>
       </div>
-      <p class="status">关闭诊断窗口不会停止 Runtime，也不会关闭 Harness Web。退出和更新检查通过 Host Protocol v2 进入统一 Reconciler/Actor 生命周期。</p>
     </section>
-    <footer>HarnessDock v0.1.5 · Plugin Diagnostics</footer>
+    <footer>HarnessDock v0.1.6 · Plugin Diagnostics</footer>
   </main>
   <script src="./settings.js" defer></script>
 </body>

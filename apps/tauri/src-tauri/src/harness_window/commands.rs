@@ -267,8 +267,8 @@ pub async fn show_settings_window(app: &AppHandle) -> Result<(), String> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("HarnessDock · 插件诊断")
-        .inner_size(560.0, 520.0)
-        .min_inner_size(480.0, 420.0)
+        .inner_size(520.0, 620.0)
+        .min_inner_size(420.0, 480.0)
         .resizable(true)
         .center()
         .visible(false)

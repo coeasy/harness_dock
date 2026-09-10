@@ -1,0 +1,27 @@
+/* Compact diagnostics surface: status first, technical detail on demand. */
+.settings-page{background:radial-gradient(circle at top,#162b48 0,#08111f 56%,#050b14 100%)}
+.settings-page .shell{width:min(520px,100%);padding:20px 18px 14px}
+.settings-page .hero{padding:0 0 12px}
+.diagnostics-hero .hero-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.diagnostics-hero h1{font-size:30px;margin-top:4px}
+.diagnostics-hero .muted{margin:8px 0 0;font-size:12px;line-height:1.55}
+.state-dot{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid #3a4d69;border-radius:999px;background:#101c2f;color:#b8c5d8;font-size:11px;font-weight:750;white-space:nowrap}
+.state-dot::before{content:"";width:7px;height:7px;border-radius:50%;background:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.12)}
+.state-dot[data-state="ready"]{border-color:#277b70;color:#9af1e4;background:#0d2b2b}
+.state-dot[data-state="ready"]::before{background:#2dd4bf;box-shadow:0 0 0 3px rgba(45,212,191,.12)}
+.state-dot[data-state="attention"]{border-color:#784052;color:#fecdd3;background:#2a151c}
+.state-dot[data-state="attention"]::before{background:#fb7185;box-shadow:0 0 0 3px rgba(251,113,133,.12)}
+.overview-card{margin-top:8px!important;padding:14px!important;border-color:#2e4c62}
+.overview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.overview-item{min-width:0;padding:10px;border-radius:11px;background:#0a1626;border:1px solid #263750}
+.overview-label{display:block;color:#7387a3;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.overview-item strong{display:block;margin-top:5px;overflow:hidden;color:#e9eef7;font-size:13px;text-overflow:ellipsis;white-space:nowrap}
+.overview-item strong.good{color:#78e6d7}.overview-item strong.attention{color:#fda4af}
+.settings-page .card{margin:10px 0;padding:14px;border-radius:14px}
+.settings-page .card-heading{gap:10px}.settings-page .card h2{font-size:15px}.settings-page .card p{font-size:12px;line-height:1.5}
+.settings-page .actions{gap:7px;margin-top:12px}.settings-page button{padding:8px 11px;font-size:12px}
+.technical-details{margin-top:12px;border-top:1px solid #263750;padding-top:10px}
+.technical-details summary{color:#9eb0c7;cursor:pointer;font-size:11px;font-weight:700;list-style-position:inside}
+.technical-details[open] summary{color:#78e6d7}.technical-details .status{margin-top:9px!important;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
+.compact-card{padding:12px 14px!important}.compact-card .card-heading{align-items:center}.settings-page footer{padding-top:8px}
+@media (max-width:420px){.settings-page .shell{padding-inline:12px}.overview-grid{grid-template-columns:1fr 1fr}.overview-item:last-child{grid-column:1/-1}.hero-actions{margin-top:12px}}

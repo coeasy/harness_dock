@@ -147,7 +147,7 @@ mod tests {
             pid: 42,
             origin: "http://127.0.0.1:43123".into(),
             launch_url: "http://127.0.0.1:43123/?token=x".into(),
-            dsh_version: "0.1.5-alpha.1".into(),
+            dsh_version: "0.1.5-rc.1".into(),
         }
     }
 

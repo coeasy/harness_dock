@@ -53,7 +53,16 @@
     if (!Number.isSafeInteger(sequence) || sequence < lastSequence) return
     lastSequence = sequence
     const phase = snapshot.runtimePhase || 'stopped'
+    const harnessVisible = Boolean(snapshot.harnessVisible)
+    const runtimeHealthy = !['error', 'failed'].includes(String(phase).toLowerCase()) && phase !== 'stopped'
     $('runtime-state').textContent = phase
+    $('runtime-badge').textContent = phase
+    $('runtime-version').textContent = snapshot.runtimeDshVersion || 'unknown'
+    $('web-state').textContent = harnessVisible ? '已连接' : '未显示'
+    $('overall-state').textContent = harnessVisible && runtimeHealthy ? '运行正常' : '需要关注'
+    $('overall-state').dataset.state = harnessVisible && runtimeHealthy ? 'ready' : 'attention'
+    $('web-state').className = harnessVisible ? 'good' : 'attention'
+    $('runtime-state').className = runtimeHealthy ? 'good' : 'attention'
     const lines = [
       `状态：${phase}`,
       `版本：${snapshot.runtimeDshVersion || 'unknown'}`,
@@ -66,7 +75,7 @@
     setStatus($('runtime-detail'), lines.join('\n'))
     setStatus(
       $('web-detail'),
-      snapshot.harnessVisible
+      harnessVisible
         ? 'Harness Web 主 Surface 已由 Host Kernel 管理；诊断、Gateway 或更新失败不会替代健康主链。'
         : 'Harness Web 当前不可见；可关闭诊断窗口后从原生菜单重新显示或恢复。',
     )
@@ -172,6 +181,11 @@
       setStatus($('runtime-detail'), message(error), true)
     }
   })()
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    void call('diagnostics_close')
+  })
   window.addEventListener('pagehide', () => {
     window.clearTimeout(eventRefreshTimer)
     if (typeof unlistenHostEvent === 'function') unlistenHostEvent()
