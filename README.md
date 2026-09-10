@@ -2,15 +2,15 @@
 
 <img src="apps/tauri/src-tauri/icons/app-icon.png" width="112" alt="HarnessDock icon" />
 
-# HarnessDock v0.1.6
+# HarnessDock v0.1.5
 
 **DeepSeek Harness 的跨平台原生客户端**
 
 把 DeepSeek Harness 稳定地带到 Windows、macOS、Linux 桌面，并通过 Remote Gateway 延伸到 Android / iOS。
 
-[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.6 发布说明](.github/release-notes/v0.1.6.md)
+[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.5-rc.1 发布说明](.github/release-notes/v0.1.5-rc.1.md)
 
-![Version](https://img.shields.io/badge/version-v0.1.6-blue)
+![Version](https://img.shields.io/badge/version-v0.1.5-blue)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -146,24 +146,24 @@ Android / iOS **不会在设备内启动 Node / dsh**。移动端只连接可信
 
 | 项目 | 当前值 |
 | --- | --- |
-| HarnessDock | `0.1.6` |
-| 发布通道 | `stable` |
-| 当前发布 tag | `v0.1.6` |
+| HarnessDock | `0.1.5` |
+| 发布通道 | `rc` |
+| 当前发布 tag | `v0.1.5-rc.1` |
 | DeepSeek Harness Runtime | `dsh-v0.1.5-rc.1` |
 | Runtime commit | `183f08e9c6dde7e36cd2318eaee70b0da08fb35e` |
 | 桌面宿主 | Tauri 2 |
 | 桌面 Runtime | Full / sealed / 首启零下载 |
 | 移动 Runtime | Remote Gateway only |
 
-HarnessDock 产品版本是独立的客户端发布身份；Runtime 则始终精确锁定到可追踪的 dsh tag/commit：
+HarnessDock 的客户端基础版本与 dsh 基础版本保持一致；预发布阶段通过候选后缀区分发布批次，Runtime 始终精确锁定到可追踪的 dsh tag/commit：
 
 ```text
-dsh-v0.1.5-rc.1 -> HarnessDock 0.1.6（本版本为宿主/UI 优化发布）
+dsh-v0.1.5-rc.1 -> HarnessDock v0.1.5-rc.1（本版本为宿主/UI 优化发布）
 dsh-v0.1.3-beta.2  -> HarnessDock 0.1.3
 dsh-v1.0.0         -> HarnessDock 1.0.0
 ```
 
-上游 `alpha / beta / rc` 后缀会继续保存在 Runtime provenance 中，但不附加到 HarnessDock 产品版本。
+上游 `alpha / beta / rc` 后缀会同时保存在 Runtime provenance 和候选发布标签中；本次不创建 `v0.1.6`。
 
 ---
 
@@ -173,26 +173,26 @@ dsh-v1.0.0         -> HarnessDock 1.0.0
 
 | 平台 | 推荐安装包 | Runtime 模式 | 当前状态 |
 | --- | --- | --- | --- |
-| Windows x64 | `HarnessDock-0.1.6-windows-x64-setup.exe` | Full local | 可安装，未签名 |
+| Windows x64 | `HarnessDock-0.1.5-windows-x64-setup.exe` | Full local | 可安装，未签名 |
 | Linux x64 | `.deb` / `.AppImage` | Full local | 可安装，未签名 |
 | macOS Apple Silicon | `macos-arm64.dmg` | Full local | 可安装，未 notarize |
 | macOS Intel | `macos-x64.dmg` | Full local | 可安装，未 notarize |
 | Android arm64 | `.apk` / `.aab` | Remote Gateway | 非商店签名 |
 | iOS Simulator | `ios-arm64-simulator.zip` | Remote Gateway | 仅 Simulator |
 
-### 直接下载 v0.1.6
+### 直接下载 v0.1.5-rc.1
 
-- **Windows x64**：[`HarnessDock-0.1.6-windows-x64-setup.exe`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-windows-x64-setup.exe)
-- **Linux x64 / DEB**：[`HarnessDock-0.1.6-linux-x64.deb`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-linux-x64.deb)
-- **Linux x64 / AppImage**：[`HarnessDock-0.1.6-linux-x64.AppImage`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-linux-x64.AppImage)
-- **macOS Apple Silicon / DMG**：[`HarnessDock-0.1.6-macos-arm64.dmg`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-macos-arm64.dmg)
-- **macOS Intel / DMG**：[`HarnessDock-0.1.6-macos-x64.dmg`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-macos-x64.dmg)
-- **Android arm64 / APK**：[`HarnessDock-0.1.6-android-arm64-release.apk`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-android-arm64-release.apk)
-- **Android arm64 / AAB**：[`HarnessDock-0.1.6-android-arm64-release.aab`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-android-arm64-release.aab)
-- **iOS Simulator**：[`HarnessDock-0.1.6-ios-arm64-simulator.zip`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/HarnessDock-0.1.6-ios-arm64-simulator.zip)
-- **完整性校验**：[`SHA256SUMS`](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/SHA256SUMS)
+- **Windows x64**：[`HarnessDock-0.1.5-windows-x64-setup.exe`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-windows-x64-setup.exe)
+- **Linux x64 / DEB**：[`HarnessDock-0.1.5-linux-x64.deb`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-linux-x64.deb)
+- **Linux x64 / AppImage**：[`HarnessDock-0.1.5-linux-x64.AppImage`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-linux-x64.AppImage)
+- **macOS Apple Silicon / DMG**：[`HarnessDock-0.1.5-macos-arm64.dmg`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-macos-arm64.dmg)
+- **macOS Intel / DMG**：[`HarnessDock-0.1.5-macos-x64.dmg`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-macos-x64.dmg)
+- **Android arm64 / APK**：[`HarnessDock-0.1.5-android-arm64-release.apk`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-android-arm64-release.apk)
+- **Android arm64 / AAB**：[`HarnessDock-0.1.5-android-arm64-release.aab`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-android-arm64-release.aab)
+- **iOS Simulator**：[`HarnessDock-0.1.5-ios-arm64-simulator.zip`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/HarnessDock-0.1.5-ios-arm64-simulator.zip)
+- **完整性校验**：[`SHA256SUMS`](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/SHA256SUMS)
 
-> 当前 v0.1.6 尚未启用 Windows Authenticode、Apple notarization、正式移动商店签名和 Tauri `latest.json/.sig` 自动更新资产。请优先从本仓库 Release 下载，并使用 `SHA256SUMS` 校验。
+> 当前 v0.1.5-rc.1 尚未启用 Windows Authenticode、Apple notarization、正式移动商店签名和 Tauri `latest.json/.sig` 自动更新资产。请优先从本仓库 Release 下载，并使用 `SHA256SUMS` 校验。
 
 ---
 
@@ -203,11 +203,11 @@ dsh-v1.0.0         -> HarnessDock 1.0.0
 ### 安装
 
 1. 打开 [最新 Release](https://github.com/coeasy/harness_dock/releases/latest)。
-2. 下载 `HarnessDock-0.1.6-windows-x64-setup.exe`。
+2. 下载 `HarnessDock-0.1.5-windows-x64-setup.exe`。
 3. 建议先使用 PowerShell 校验 SHA-256：
 
 ```powershell
-Get-FileHash .\HarnessDock-0.1.6-windows-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\HarnessDock-0.1.5-windows-x64-setup.exe -Algorithm SHA256
 ```
 
 将结果与 Release 中的 `SHA256SUMS` 对照。
@@ -246,8 +246,8 @@ Get-FileHash .\HarnessDock-0.1.6-windows-x64-setup.exe -Algorithm SHA256
 
 ### 选择正确版本
 
-- Apple Silicon（M1 / M2 / M3 / M4 等）：下载 `HarnessDock-0.1.6-macos-arm64.dmg`
-- Intel Mac：下载 `HarnessDock-0.1.6-macos-x64.dmg`
+- Apple Silicon（M1 / M2 / M3 / M4 等）：下载 `HarnessDock-0.1.5-macos-arm64.dmg`
+- Intel Mac：下载 `HarnessDock-0.1.5-macos-x64.dmg`
 
 ### 安装
 
@@ -255,7 +255,7 @@ Get-FileHash .\HarnessDock-0.1.6-windows-x64-setup.exe -Algorithm SHA256
 2. 可先校验 SHA-256：
 
 ```bash
-shasum -a 256 HarnessDock-0.1.6-macos-arm64.dmg
+shasum -a 256 HarnessDock-0.1.5-macos-arm64.dmg
 ```
 
 Intel 版本请替换为对应文件名，并与 `SHA256SUMS` 对照。
@@ -283,13 +283,13 @@ HarnessDock 同时提供 DEB 和 AppImage。
 1. 下载：
 
 ```text
-HarnessDock-0.1.6-linux-x64.deb
+HarnessDock-0.1.5-linux-x64.deb
 ```
 
 2. 安装：
 
 ```bash
-sudo apt install ./HarnessDock-0.1.6-linux-x64.deb
+sudo apt install ./HarnessDock-0.1.5-linux-x64.deb
 ```
 
 3. 安装完成后从桌面应用菜单启动 HarnessDock。
@@ -302,31 +302,31 @@ sudo apt install ./HarnessDock-0.1.6-linux-x64.deb
 1. 下载：
 
 ```text
-HarnessDock-0.1.6-linux-x64.AppImage
+HarnessDock-0.1.5-linux-x64.AppImage
 ```
 
 2. 增加执行权限：
 
 ```bash
-chmod +x HarnessDock-0.1.6-linux-x64.AppImage
+chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 ```
 
 3. 直接运行：
 
 ```bash
-./HarnessDock-0.1.6-linux-x64.AppImage
+./HarnessDock-0.1.5-linux-x64.AppImage
 ```
 
 ### 校验文件
 
 ```bash
-sha256sum HarnessDock-0.1.6-linux-x64.AppImage
+sha256sum HarnessDock-0.1.5-linux-x64.AppImage
 ```
 
 或：
 
 ```bash
-sha256sum HarnessDock-0.1.6-linux-x64.deb
+sha256sum HarnessDock-0.1.5-linux-x64.deb
 ```
 
 将输出与 Release 中的 `SHA256SUMS` 对照。
@@ -339,7 +339,7 @@ Android 版本是 **Remote Gateway 客户端**，不是桌面 Full Runtime 的�
 
 ### 安装 APK
 
-1. 从 [GitHub Release](https://github.com/coeasy/harness_dock/releases/latest) 下载 `HarnessDock-0.1.6-android-arm64-release.apk`。
+1. 从 [GitHub Release](https://github.com/coeasy/harness_dock/releases/latest) 下载 `HarnessDock-0.1.5-android-arm64-release.apk`。
 2. 如果 Android 阻止侧载，请只在确认 APK 来自本仓库 Release 后，为当前下载来源临时允许“安装未知应用”。
 3. 安装并打开 HarnessDock。
 
@@ -365,7 +365,7 @@ Android 设备不会启动 Node / dsh，需要连接一个已经运行的 Harnes
 ### 安装
 
 1. 在 macOS 上安装 Xcode 并启动一个 iOS Simulator。
-2. 下载 `HarnessDock-0.1.6-ios-arm64-simulator.zip`。
+2. 下载 `HarnessDock-0.1.5-ios-arm64-simulator.zip`。
 3. 解压得到 Simulator 应用包。
 4. 可以把 `.app` 拖入已启动的 Simulator，或使用：
 
@@ -399,7 +399,7 @@ Gateway 的设计目标是“把已经受控运行的 Harness 安全地延伸到
 
 ## 更新 HarnessDock
 
-当前 v0.1.6 不启用签名自动更新资产，因此客户端更新流程是：
+当前 v0.1.5-rc.1 不启用签名自动更新资产，因此客户端更新流程是：
 
 1. 检查是否有新版本；
 2. 前往 [GitHub Releases](https://github.com/coeasy/harness_dock/releases/latest)；
@@ -418,22 +418,22 @@ Gateway 的设计目标是“把已经受控运行的 Harness 安全地延伸到
 ### Windows PowerShell
 
 ```powershell
-Get-FileHash .\HarnessDock-0.1.6-windows-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\HarnessDock-0.1.5-windows-x64-setup.exe -Algorithm SHA256
 ```
 
 ### macOS
 
 ```bash
-shasum -a 256 HarnessDock-0.1.6-macos-arm64.dmg
+shasum -a 256 HarnessDock-0.1.5-macos-arm64.dmg
 ```
 
 ### Linux
 
 ```bash
-sha256sum HarnessDock-0.1.6-linux-x64.AppImage
+sha256sum HarnessDock-0.1.5-linux-x64.AppImage
 ```
 
-[v0.1.6 SHA256SUMS](https://github.com/coeasy/harness_dock/releases/download/v0.1.6/SHA256SUMS)
+[v0.1.5-rc.1 SHA256SUMS](https://github.com/coeasy/harness_dock/releases/download/v0.1.5-rc.1/SHA256SUMS)
 
 ---
 
@@ -463,7 +463,7 @@ HarnessDock
   └─ Packaging / release gates
 ```
 
-当前 v0.1.6 精确锁定 `dsh-v0.1.5-rc.1 @ 183f08e9c6dde7e36cd2318eaee70b0da08fb35e`，从而让客户端安装包、Runtime provenance 与发布资产保持可追踪。
+当前 v0.1.5-rc.1 精确锁定 `dsh-v0.1.5-rc.1 @ 183f08e9c6dde7e36cd2318eaee70b0da08fb35e`，从而让客户端安装包、Runtime provenance 与发布资产保持可追踪。
 
 ---
 
@@ -575,7 +575,7 @@ pnpm tauri:dev
 
 ## 发布门禁
 
-v0.1.6 的正式发布必须在同一个 `main` SHA 上满足：
+v0.1.5-rc.1 的候选发布必须在同一个 `main` SHA 上满足：
 
 1. `ci` 全绿；
 2. `tauri-candidate` 全绿；
@@ -595,7 +595,7 @@ v0.1.6 的正式发布必须在同一个 `main` SHA 上满足：
 - [项目介绍](docs/PROJECT_INTRO.md)
 - [Tauri 客户端说明](apps/tauri/README.md)
 - [版本策略](docs/VERSIONING.md)
-- [v0.1.6 发布说明](.github/release-notes/v0.1.6.md)
+- [v0.1.5-rc.1 发布说明](.github/release-notes/v0.1.5-rc.1.md)
 - [DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness)
 
 `docs/` 中部分文件名包含 `v0.2.x`，它们是 Native Host 重构阶段留下的历史架构设计稿，不代表当前产品版本。当前活动版本以根 `package.json`、`release-manifest.json` 与本 README 为准。

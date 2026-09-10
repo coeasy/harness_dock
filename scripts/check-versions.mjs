@@ -15,14 +15,16 @@ const releaseManifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-man
 const mismatches = []
 
 let activeReleaseTag = `v${rootVersion}`
-if (releaseManifest.channel === 'beta') {
-  if (typeof releaseManifest.prerelease !== 'string' || !/^beta\.\d+$/.test(releaseManifest.prerelease)) {
-    mismatches.push(`release-manifest.json prerelease: expected beta.<number>, got ${releaseManifest.prerelease}`)
+if (releaseManifest.channel !== 'stable') {
+  const channel = String(releaseManifest.channel || '')
+  const expectedPrerelease = new RegExp(`^${channel}\\.\\d+$`)
+  if (typeof releaseManifest.prerelease !== 'string' || !expectedPrerelease.test(releaseManifest.prerelease)) {
+    mismatches.push(`release-manifest.json prerelease: expected ${channel}.<number>, got ${releaseManifest.prerelease}`)
   } else {
     activeReleaseTag = `v${rootVersion}-${releaseManifest.prerelease}`
   }
 } else if (releaseManifest.prerelease) {
-  mismatches.push(`release-manifest.json prerelease must be empty outside beta channel: ${releaseManifest.prerelease}`)
+  mismatches.push(`release-manifest.json prerelease must be empty for stable channel: ${releaseManifest.prerelease}`)
 }
 
 const versionedFiles = [

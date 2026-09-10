@@ -97,7 +97,7 @@ describe('platform-aware release module', () => {
     }
   })
 
-  it('derives the current 15-file beta contract instead of hard-coding it in YAML', () => {
+  it('derives the current 15-file rc contract instead of hard-coding it in YAML', () => {
     const clientAssetCount = Object.values(manifest.targets).reduce(
       (total: number, target: any) => total + target.assets.length,
       0,
@@ -187,7 +187,7 @@ describe('platform-aware release module', () => {
       encoding: 'utf8',
     })
     expect(contract.status, contract.stderr).toBe(0)
-    expect(contract.stdout).toContain('release contract OK: v0.1.6, 15 assets')
+    expect(contract.stdout).toContain('release contract OK: v0.1.5-rc.1, 15 assets')
 
     const desktopMatrix = spawnSync(process.execPath, ['scripts/release/candidate-matrix.mjs', 'desktop'], {
       cwd: repoRoot,

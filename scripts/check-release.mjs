@@ -65,10 +65,16 @@ if (!dshVersion || typeof dshVersion !== 'string') {
   errors.push(`origin.json.dshVersion (${dshVersion}) is not an exact supported SemVer`)
 }
 
-// HarnessDock is a wrapper client, so its release identity may advance for
-// host/UI fixes without waiting for a new dsh base version. The exact dsh
-// provenance remains enforced above; when that provenance changes, the
-// released-origin guard below still requires a new client release identity.
+const dshBaseVersion = exactDshMatch?.[1] ?? null
+
+// Keep the client base version aligned with the pinned dsh base version. A
+// prerelease-only transition (for example alpha -> rc) may reuse that base,
+// but it must publish under a distinct candidate tag.
+if (dshBaseVersion && clientVersion !== dshBaseVersion) {
+  errors.push(
+    `HarnessDock version (${clientVersion}) must track pinned dsh base version (${dshBaseVersion}, from ${dshVersion})`,
+  )
+}
 
 if (origin.clientVersion !== clientVersion) {
   errors.push(
@@ -139,10 +145,19 @@ for (const [targetId, target] of Object.entries(manifest.targets ?? {})) {
 
 if (existsSync(releasedPath)) {
   const released = JSON.parse(readFileSync(releasedPath, 'utf8'))
-  if (released.dshVersion !== dshVersion && released.clientVersion === clientVersion) {
+  const releasedExactDshMatch =
+    typeof released.dshVersion === 'string'
+      ? released.dshVersion.trim().match(/^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$/)
+      : null
+  const releasedDshBaseVersion = releasedExactDshMatch?.[1] ?? null
+  if (
+    released.dshVersion !== dshVersion &&
+    released.clientVersion === clientVersion &&
+    releasedDshBaseVersion !== dshBaseVersion
+  ) {
     errors.push(
-      `origin changed (${released.dshVersion} -> ${dshVersion}) but client version was NOT bumped (still ${clientVersion}); ` +
-        `HarnessDock would keep a stale release identity. Bump the client release version before release.`,
+      `dsh base version changed (${released.dshVersion} -> ${dshVersion}) but client version was NOT aligned (still ${clientVersion}); ` +
+        `align the client base version before release.`,
     )
   }
 }

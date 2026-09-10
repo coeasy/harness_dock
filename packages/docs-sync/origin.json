@@ -7,5 +7,5 @@
   "npmTarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.1.tgz",
   "docsHash": "6e65435e65af939c98f89421d3c0907434b7b08be11517a49f4ea4f4b62a34a3",
   "syncedAt": "2026-09-10T07:29:44.932Z",
-  "clientVersion": "0.1.6"
+  "clientVersion": "0.1.5"
 }

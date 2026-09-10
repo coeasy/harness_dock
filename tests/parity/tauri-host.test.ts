@@ -50,10 +50,10 @@ describe('Tauri host contract', () => {
     const releaseManifest = readJson('release-manifest.json')
     const shellManifest = readJson('packages/plugin-harness-shell/manifest.json')
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
-    expect(root.version).toBe('0.1.6')
+    expect(root.version).toBe('0.1.5')
     expect(tauri.version).toBe(root.version)
     expect(releaseManifest.version).toBe(root.version)
-    expect(releaseManifest.prerelease).toBeUndefined()
+    expect(releaseManifest.prerelease).toBe('rc.1')
     expect(releaseManifest.shell.version).toBe(root.version)
     expect(shellManifest.version).toBe(root.version)
     expect(cargo).toContain(`version = "${root.version}"`)
@@ -212,7 +212,7 @@ describe('Tauri host contract', () => {
     expect(runtime).toContain('platform::configure_child_command')
   })
 
-  it('publishes the full unsigned stable asset set without moving an existing tag', () => {
+  it('publishes the full unsigned rc asset set without moving an existing tag', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const releaseManifest = readJson('release-manifest.json')
@@ -221,16 +221,16 @@ describe('Tauri host contract', () => {
     const tauri = readJson('apps/tauri/src-tauri/tauri.conf.json')
 
     expect(candidate).toContain('Verify full runtime before packaging')
-    expect(candidate).toContain('Confirm unsigned stable packaging')
+    expect(candidate).toContain('Confirm unsigned candidate packaging')
     expect(candidate).not.toContain('@dsh/desktop')
     expect(release).not.toContain('-thin')
 
     expect(releaseManifest.schemaVersion).toBe(2)
-    expect(releaseManifest.channel).toBe('stable')
-    expect(releaseManifest.prerelease).toBeUndefined()
+    expect(releaseManifest.channel).toBe('rc')
+    expect(releaseManifest.prerelease).toBe('rc.1')
     expect(releaseManifest.publication).toMatchObject({
-      tagTemplate: 'v{version}',
-      githubPrerelease: false,
+      tagTemplate: 'v{version}-{prerelease}',
+      githubPrerelease: true,
       replaceablePrerelease: false,
       candidateWorkflow: '.github/workflows/tauri-candidate.yml',
     })

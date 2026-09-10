@@ -299,11 +299,11 @@ jobs:
           set -euo pipefail
           tauri_version="$(node -p "require('./scripts/versions.json').tauriCli")"
           cargo install tauri-cli --version "$tauri_version" --locked
-      - name: Confirm unsigned stable packaging
+      - name: Confirm unsigned candidate packaging
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node -p "require('./release-manifest.json').channel")" = stable
+          test "$(node -p "require('./release-manifest.json').channel")" = rc
           test "$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').bundle.createUpdaterArtifacts")" = false
       - name: Prepare canonical HarnessDock icon set
         working-directory: apps/tauri

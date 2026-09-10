@@ -14,14 +14,14 @@
 
 ## 当前版本
 
-HarnessDock 当前产品版本为 **v0.1.6**，当前内置 Runtime 精确锁定：
+HarnessDock 当前产品版本为 **v0.1.5**，当前内置 Runtime 精确锁定：
 
 ```text
 dsh-v0.1.5-rc.1
 183f08e9c6dde7e36cd2318eaee70b0da08fb35e
 ```
 
-HarnessDock 产品版本是独立的客户端发布身份；当前版本记录了 `dsh 0.1.5-rc.1` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
+HarnessDock 客户端基础版本与 dsh 基础版本保持 `0.1.5` 一致，当前候选后缀为 `rc.1`；版本记录了 `dsh 0.1.5-rc.1` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
 
 ## 项目定位
 
@@ -77,11 +77,11 @@ pnpm tauri:dev
 
 ## 发布
 
-当前 v0.1.6 使用正式发布通道，目标 tag：`v0.1.6`。
+当前 v0.1.5-rc.1 使用候选发布通道，目标 tag：`v0.1.5-rc.1`。
 
 `.github/workflows/tauri-candidate.yml` 构建和验证 Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG 与 app archive、Android APK/AAB、iOS Simulator，以及四个平台 Full Runtime bundle。
 
-`.github/workflows/release.yml` 只接受**同一个 main SHA**上的绿色 `ci` 与 `tauri-candidate`，并发布 15 个不可变 beta 资产及 `SHA256SUMS`。当前 beta 不启用操作系统代码签名、Apple notarization 或 Tauri `latest.json/.sig` 自动更新资产；未配置正式签名通道前采用 GitHub Release 手动下载安装。
+`.github/workflows/release.yml` 只接受**同一个 main SHA**上的绿色 `ci` 与 `tauri-candidate`，并发布 15 个不可变 rc 资产及 `SHA256SUMS`。当前 rc 不启用操作系统代码签名、Apple notarization 或 Tauri `latest.json/.sig` 自动更新资产；未配置正式签名通道前采用 GitHub Release 手动下载安装。
 
 ## 独立 Harness Shell
 
