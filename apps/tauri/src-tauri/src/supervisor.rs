@@ -61,10 +61,7 @@ pub(crate) async fn wait_for_managed_processes(app: tauri::AppHandle) {
             );
             feedback_stage = 1;
         } else if feedback_stage == 1 && elapsed >= Duration::from_secs(5) {
-            crate::harness_window::set_primary_lifecycle_status(
-                &app,
-                "正在等待受管进程安全退出…",
-            );
+            crate::harness_window::set_primary_lifecycle_status(&app, "正在等待受管进程安全退出…");
             feedback_stage = 2;
         }
 
