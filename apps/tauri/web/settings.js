@@ -53,7 +53,7 @@
     $('runtime-profile').value = launchSettings.profile || 'web'
     $('runtime-dsh-home').value = launchSettings.dshHome || ''
     $('runtime-startup-policy').value = launchSettings.startupPolicy || 'auto'
-    $('profile-badge').textContent = `${launchSettings.profile || 'web'} / ${launchSettings.startupPolicy || 'auto'}`
+    $('profile-badge').textContent = `${launchSettings.profile || 'web'} / ${launchSettings.startupPolicy || 'auto'} · 已保存`
   }
 
   function render(snapshot) {
@@ -75,9 +75,9 @@
     const lines = [
       `状态：${phase}`,
       `版本：${snapshot.runtimeDshVersion || 'unknown'}`,
-      `Profile：${launchSettings.profile || 'web'}`,
-      `Startup Policy：${launchSettings.startupPolicy || 'auto'}`,
-      `DSH_HOME：${launchSettings.dshHome || 'default'}`,
+      `已保存 Profile（下次启动）：${launchSettings.profile || 'web'}`,
+      `已保存 Startup Policy（下次启动）：${launchSettings.startupPolicy || 'auto'}`,
+      `已保存 DSH_HOME（下次启动）：${launchSettings.dshHome || 'default'}`,
       `Generation：${snapshot.runtimeGeneration ?? 'unknown'}`,
       `Runtime Image：${snapshot.runtimeImageIdentity || 'unknown'}`,
       `Host Protocol：v${snapshot.protocolVersion || 2}（最低兼容 v${snapshot.minCompatibleVersion || 2}）`,
@@ -112,7 +112,7 @@
         },
       })
       renderLaunchSettings(settings)
-      setStatus($('runtime-settings-detail'), '已保存。配置将在下一次 Runtime 启动或重启时生效。')
+      setStatus($('runtime-settings-detail'), '已保存。当前 Runtime generation 不会被热切换；配置将在下一次 Runtime 启动或重启时生效。')
       await refresh(false)
     } catch (error) {
       setStatus($('runtime-settings-detail'), message(error), true)
