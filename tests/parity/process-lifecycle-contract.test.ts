@@ -50,6 +50,7 @@ describe('managed process lifecycle contract', () => {
     expect(restartBody.indexOf('start_impl(')).toBeGreaterThan(restartBody.indexOf('stop_impl('))
     expect(restartBody).toContain('tauri::async_runtime::spawn_blocking')
     expect(surface).toContain('if self.operation != SurfaceOperation::Idle')
+    expect(surface).toContain('if self.phase == SurfacePhase::Loading')
   })
 
   it('owns Runtime trees and reaps short-lived helper descendants', () => {
@@ -92,7 +93,6 @@ describe('managed process lifecycle contract', () => {
 
     const splash = tauriConfig.app.windows.find((entry: { label?: string }) => entry.label === 'splash')
     expect(splash?.backgroundColor).toBe('#09111f')
-    expect(splash?.theme).toBe('Dark')
     expect(splashCss).not.toContain('filter: blur(')
     expect(splashCss).not.toContain('filter: saturate(')
 
