@@ -103,6 +103,39 @@ jobs:
             exit 1
           }
 
+          existing_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" --jq '.object.sha' 2>/dev/null || true)"
+          replaceable="$(node scripts/release/contract.mjs replaceable)"
+          if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$candidate_sha" ] && [ "$replaceable" != true ]; then
+            if [ "$GITHUB_EVENT_NAME" != 'workflow_run' ]; then
+              echo "immutable release tag $release_tag already points to $existing_tag_sha; refusing manual publish for $candidate_sha" >&2
+              exit 1
+            fi
+
+            release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" 2>/dev/null || true)"
+            test -n "$release_json" || {
+              echo "immutable tag $release_tag points to $existing_tag_sha without a managed GitHub release" >&2
+              exit 1
+            }
+            release_draft="$(printf '%s' "$release_json" | jq -r '.draft')"
+            release_prerelease="$(printf '%s' "$release_json" | jq -r '.prerelease')"
+            expected_prerelease="$(node scripts/release/contract.mjs github-prerelease)"
+            test "$release_draft" = false || {
+              echo "existing immutable release $release_tag is unexpectedly a draft" >&2
+              exit 1
+            }
+            test "$release_prerelease" = "$expected_prerelease" || {
+              echo "existing immutable release classification mismatch: prerelease=$release_prerelease expected=$expected_prerelease" >&2
+              exit 1
+            }
+
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+            echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+            echo "candidate_run_id=$CANDIDATE_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping publish for post-release maintenance SHA ${candidate_sha}: immutable ${release_tag} remains at ${existing_tag_sha}"
+            exit 0
+          fi
+
           mapfile -t required_workflows < <(node scripts/release/contract.mjs required-workflows)
           deadline=$((SECONDS + 900))
           for workflow_path in "${required_workflows[@]}"; do
