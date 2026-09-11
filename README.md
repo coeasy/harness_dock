@@ -41,6 +41,8 @@ HarnessDock
 
 桌面安装包内置受版本约束的 Node 与 dsh Runtime。正常启动不会重新探测或下载系统 Node，而是直接启动封装 Runtime，等待当前 generation 的可信 `ready.json`，验证 PID、nonce、imageIdentity 与本地 origin 后进入 Harness Web。
 
+受管桌面 WebView 的 Runtime ACL 始终精确绑定当前 lease 的 `http://127.0.0.1:<managed-port>`，不会扩展为任意 localhost / loopback origin。
+
 Android / iOS 不在设备中启动 Node/dsh，只作为 Remote Gateway 客户端工作。
 
 ## dsh Profile 启动
