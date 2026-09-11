@@ -16,8 +16,8 @@ if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
 
 $tempRoot = [IO.Path]::GetTempPath()
 $traceDir = Join-Path $tempRoot 'harnessdock-logs'
-$installDir = Join-Path $tempRoot 'HarnessDockOneClickSmoke'
-$neutralCwd = Join-Path $tempRoot 'HarnessDockOneClickNeutralCwd'
+$installDir = Join-Path $tempRoot 'HarnessDockInstallerSmoke'
+$neutralCwd = Join-Path $tempRoot 'HarnessDockInstallerSmokeNeutralCwd'
 
 function New-HarnessWebSession {
     Add-Type -AssemblyName System.Net.Http
@@ -60,7 +60,45 @@ function Test-HarnessWebHtml($Client, [string]$Url) {
     }
 }
 
-Get-Process -Name 'harnessdock-tauri' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+function Get-InstalledProcessSnapshot([string]$Root) {
+    $prefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    return @(
+        Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object {
+                $path = [string]$_.ExecutablePath
+                -not [string]::IsNullOrWhiteSpace($path) -and
+                    $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+            } |
+            Select-Object ProcessId, ParentProcessId, Name, ExecutablePath
+    )
+}
+
+function Write-ProcessSnapshot($Processes, [string]$Prefix) {
+    foreach ($process in @($Processes)) {
+        Write-Host "$Prefix pid=$($process.ProcessId) ppid=$($process.ParentProcessId) name=$($process.Name) path=$($process.ExecutablePath)"
+    }
+}
+
+function Wait-InstalledProcessesGone([string]$Root, [int]$TimeoutSeconds = 10) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $remaining = @(Get-InstalledProcessSnapshot $Root)
+        if ($remaining.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+
+    $remaining = @(Get-InstalledProcessSnapshot $Root)
+    Write-ProcessSnapshot $remaining '[smoke] leaked process:'
+    throw "HarnessDock graceful exit left $($remaining.Count) process(es) running from $Root"
+}
+
+# Ensure a previous failed runner attempt cannot contaminate this lifecycle
+# smoke. Kill the whole previous HarnessDock tree, not only its GUI parent.
+Get-Process -Name 'harnessdock-tauri' -ErrorAction SilentlyContinue | ForEach-Object {
+    taskkill /PID $_.Id /T /F | Out-Null
+}
 if (Test-Path $traceDir) {
     Get-ChildItem $traceDir -Filter 'startup-*.log' -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
@@ -96,6 +134,7 @@ try {
     $cleanUrl = $null
     $authenticated = $false
     $healthyCleanProbes = 0
+    $startupPassed = $false
 
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
@@ -161,8 +200,9 @@ try {
             $authenticated -and
             $healthyCleanProbes -ge 2
         ) {
-            Write-Host 'PASS: one-click-built Windows installer reached primary Harness Web with stable cookie-authenticated HTML'
-            exit 0
+            $startupPassed = $true
+            Write-Host 'PASS: installed Windows candidate reached primary Harness Web with stable cookie-authenticated HTML'
+            break
         }
 
         if ($hostProcess.HasExited) {
@@ -170,11 +210,47 @@ try {
         }
     }
 
-    throw "Timed out waiting for healthy primary Harness Web. readyUrl=$readyUrl authenticated=$authenticated healthyCleanProbes=$healthyCleanProbes Last trace:`n$content"
+    if (-not $startupPassed) {
+        throw "Timed out waiting for healthy primary Harness Web. readyUrl=$readyUrl authenticated=$authenticated healthyCleanProbes=$healthyCleanProbes Last trace:`n$content"
+    }
+
+    # Prove this test is observing the packaged Runtime rather than merely the
+    # GUI process. At least one bundled node.exe must be alive under installDir
+    # before the graceful close is requested.
+    $managedBeforeExit = @(Get-InstalledProcessSnapshot $installDir)
+    Write-ProcessSnapshot $managedBeforeExit '[smoke] managed before exit:'
+    $runtimeNodes = @($managedBeforeExit | Where-Object { $_.Name -ieq 'node.exe' })
+    if ($runtimeNodes.Count -eq 0) {
+        throw 'Packaged Harness Web became ready without an observable bundled node.exe Runtime process'
+    }
+
+    # CloseMainWindow sends the normal window-close request. HarnessDock must
+    # route it through supervisor::request_exit, revoke the RuntimeLease, stop
+    # Gateway/starting helpers, terminate the Runtime tree, wait, and only then
+    # let the GUI process exit. No taskkill is allowed on the success path.
+    Close-HarnessWebSession $webSession
+    $webSession = $null
+    $hostProcess.Refresh()
+    if (-not $hostProcess.CloseMainWindow()) {
+        throw 'Unable to send a normal close request to the visible HarnessDock window'
+    }
+    if (-not $hostProcess.WaitForExit(45000)) {
+        throw 'HarnessDock did not exit through its supervised close path within 45 seconds'
+    }
+
+    Wait-InstalledProcessesGone $installDir 10
+    Write-Host 'PASS: graceful HarnessDock exit left zero installed Runtime/Node/Host processes'
 }
 finally {
     Close-HarnessWebSession $webSession
     if ($hostProcess -and -not $hostProcess.HasExited) {
         taskkill /PID $hostProcess.Id /T /F | Out-Null
+    }
+    # Test failures must not contaminate the hosted runner. This cleanup is only
+    # a fallback after the assertions above and cannot turn a failed graceful
+    # shutdown into a passing result.
+    $leftovers = @(Get-InstalledProcessSnapshot $installDir)
+    foreach ($process in $leftovers) {
+        taskkill /PID $process.ProcessId /T /F | Out-Null
     }
 }

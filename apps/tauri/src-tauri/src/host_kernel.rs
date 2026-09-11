@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{mpsc::SyncSender, Arc, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -44,7 +44,7 @@ pub(crate) struct KernelPublicState {
 
 struct KernelRequest {
     envelope: CommandEnvelope,
-    reply: SyncSender<ResponseEnvelope>,
+    reply: tokio::sync::oneshot::Sender<ResponseEnvelope>,
 }
 
 #[derive(Clone)]
@@ -57,7 +57,7 @@ pub(crate) struct HostKernelHandle {
 impl HostKernelHandle {
     pub(crate) async fn execute(&self, envelope: CommandEnvelope) -> ResponseEnvelope {
         let request_id = envelope.request_id.clone();
-        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let target = if is_fast_command(&envelope.command) {
             &self.fast_sender
         } else {
@@ -78,18 +78,12 @@ impl HostKernelHandle {
                 true,
             );
         }
-        match tauri::async_runtime::spawn_blocking(move || reply_rx.recv()).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(_)) => protocol_failure(
+        match reply_rx.await {
+            Ok(response) => response,
+            Err(_) => protocol_failure(
                 request_id,
                 "HOST_KERNEL_REPLY_CLOSED",
                 "Host Kernel closed the command reply channel",
-                true,
-            ),
-            Err(error) => protocol_failure(
-                request_id,
-                "HOST_KERNEL_REPLY_FAILED",
-                format!("Host Kernel reply task failed: {error}"),
                 true,
             ),
         }

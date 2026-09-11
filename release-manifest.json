@@ -6,7 +6,7 @@
   "publication": {
     "tagTemplate": "v{version}-{prerelease}",
     "githubPrerelease": true,
-    "replaceablePrerelease": false,
+    "replaceablePrerelease": true,
     "candidateWorkflow": ".github/workflows/tauri-candidate.yml",
     "requiredSameShaWorkflows": [
       ".github/workflows/ci.yml",

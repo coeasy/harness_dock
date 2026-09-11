@@ -33,6 +33,60 @@ pub(crate) fn show_splash(app: &AppHandle, status: &str) {
     }
 }
 
+/// Runtime operations after the primary Harness surface is visible stay inside
+/// that already-painted WebView. Re-showing the independent splash WebView here
+/// can expose an unpainted WebView2 frame and produces the visible white flash
+/// that this boundary is designed to avoid.
+#[cfg(not(mobile))]
+pub(crate) fn show_primary_lifecycle_overlay(app: &AppHandle, mode: &str, status: &str) -> bool {
+    let Some(window) = app.get_webview_window("harness") else {
+        return false;
+    };
+    if !window.is_visible().unwrap_or(false) {
+        return false;
+    }
+    let (Ok(mode), Ok(status)) = (serde_json::to_string(mode), serde_json::to_string(status))
+    else {
+        return false;
+    };
+    window
+        .eval(format!(
+            "window.__HARNESSDOCK_LIFECYCLE__?.show({status}, {mode})"
+        ))
+        .is_ok()
+}
+
+#[cfg(mobile)]
+pub(crate) fn show_primary_lifecycle_overlay(_app: &AppHandle, _mode: &str, _status: &str) -> bool {
+    false
+}
+
+#[cfg(not(mobile))]
+pub(crate) fn set_primary_lifecycle_status(app: &AppHandle, status: &str) {
+    let Some(window) = app.get_webview_window("harness") else {
+        return;
+    };
+    let Ok(status) = serde_json::to_string(status) else {
+        return;
+    };
+    let _ = window.eval(format!(
+        "window.__HARNESSDOCK_LIFECYCLE__?.update({status})"
+    ));
+}
+
+#[cfg(mobile)]
+pub(crate) fn set_primary_lifecycle_status(_app: &AppHandle, _status: &str) {}
+
+#[cfg(not(mobile))]
+pub(crate) fn hide_primary_lifecycle_overlay(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("harness") {
+        let _ = window.eval("window.__HARNESSDOCK_LIFECYCLE__?.hide()");
+    }
+}
+
+#[cfg(mobile)]
+pub(crate) fn hide_primary_lifecycle_overlay(_app: &AppHandle) {}
+
 #[cfg(not(mobile))]
 pub fn set_control_surface(
     window: &tauri::WebviewWindow<tauri::Wry>,

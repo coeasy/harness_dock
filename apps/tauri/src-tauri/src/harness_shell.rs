@@ -20,9 +20,6 @@ const SHELL_WEB_SCRIPT: &str =
 ///   When it throws, the session controller cannot establish a stream, the
 ///   connection client backs off forever, and the Settings chrome stays on
 ///   "connecting" while the browser console is filled with TypeErrors.
-///
-/// Polyfilling here is the only host-side hook that runs before the document's
-/// scripts, so it fixes Tauri's bridge and dsh's bundle with one injection.
 const POLYFILL_SCRIPT: &str = r#"
 (() => {
   'use strict';
@@ -82,6 +79,87 @@ const POLYFILL_SCRIPT: &str = r#"
       return controller.signal;
     };
   }
+})();
+"#;
+
+/// Dark first-paint + in-place lifecycle feedback.
+///
+/// This runs as an initialization script before Harness's own bundle. Once the
+/// primary WebView has painted, Runtime refresh/restart/quit feedback remains in
+/// that same compositor surface instead of re-showing the independent splash
+/// WebView. The surface animates transform/opacity only; process work can happen
+/// concurrently without expensive blur/filter repaints.
+const LIFECYCLE_SCRIPT: &str = r#"
+(() => {
+  'use strict';
+  const DARK = '#07101d';
+  const installFirstPaint = () => {
+    const root = document.documentElement;
+    if (!root) return;
+    root.style.backgroundColor = DARK;
+    root.style.colorScheme = 'dark';
+  };
+  installFirstPaint();
+
+  let host = null;
+  let surface = null;
+  let status = null;
+  const ensure = () => {
+    installFirstPaint();
+    if (host?.isConnected && surface) return surface;
+    const root = document.documentElement;
+    if (!root) return null;
+
+    host = document.createElement('div');
+    host.id = 'harnessdock-lifecycle-surface';
+    host.setAttribute('aria-live', 'polite');
+    host.setAttribute('aria-busy', 'true');
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const style = document.createElement('style');
+    style.textContent = `
+      :host { all: initial; color-scheme: dark; }
+      .surface { align-items: center; background: rgba(7,16,29,.965); display: flex; inset: 0; justify-content: center; opacity: 0; pointer-events: all; position: fixed; transform: translateZ(0); transition: opacity .14s ease; visibility: hidden; z-index: 2147483646; }
+      .surface.show { opacity: 1; visibility: visible; }
+      .card { align-items: center; background: rgba(17,28,44,.94); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; box-shadow: 0 14px 42px rgba(0,0,0,.28); color: #dce8f6; display: flex; font: 12px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; gap: 11px; max-width: min(420px, calc(100vw - 48px)); padding: 12px 16px; transform: translateY(3px) scale(.99); transition: transform .16s cubic-bezier(.2,.8,.2,1); }
+      .surface.show .card { transform: translateY(0) scale(1); }
+      .spinner { animation: spin .82s linear infinite; border: 2px solid rgba(125,211,252,.2); border-radius: 50%; border-top-color: #5eead4; flex: 0 0 auto; height: 17px; width: 17px; }
+      .surface[data-mode="exit"] .spinner { animation-duration: 1.05s; border-top-color: #7dd3fc; }
+      .text { overflow-wrap: anywhere; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .surface, .card { transition-duration: .01ms; } .spinner { animation: none; border-top-color: #5eead4; } }
+    `;
+    surface = document.createElement('div');
+    surface.className = 'surface';
+    const card = document.createElement('div');
+    card.className = 'card';
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    status = document.createElement('span');
+    status.className = 'text';
+    card.append(spinner, status);
+    surface.appendChild(card);
+    shadow.append(style, surface);
+    root.appendChild(host);
+    return surface;
+  };
+
+  window.__HARNESSDOCK_LIFECYCLE__ = Object.freeze({
+    show(message, mode = 'work') {
+      const node = ensure();
+      if (!node) return false;
+      if (status) status.textContent = String(message || '正在处理…');
+      node.dataset.mode = String(mode || 'work');
+      node.classList.add('show');
+      return true;
+    },
+    update(message) {
+      if (status) status.textContent = String(message || '正在处理…');
+    },
+    hide() {
+      surface?.classList.remove('show');
+    }
+  });
 })();
 "#;
 
@@ -190,9 +268,8 @@ pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Initialisation script order matters: polyfills first so that Tauri's own
-/// `window.__TAURI__` bridge and dsh's client bundle both find the APIs they
-/// call, then the host bridge, then the shell UI.
+/// Initialisation script order matters: polyfills and first-paint lifecycle
+/// styling first, then the host bridge, then the shell UI.
 pub(crate) fn init_script() -> String {
-    format!("{POLYFILL_SCRIPT}\n{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
+    format!("{POLYFILL_SCRIPT}\n{LIFECYCLE_SCRIPT}\n{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
 }

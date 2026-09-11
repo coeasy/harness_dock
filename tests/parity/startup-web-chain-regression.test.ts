@@ -147,9 +147,13 @@ describe('packaged startup Web chain regression', () => {
 
   it('launches the installed binary from a neutral cwd and proves a durable BrowserAuth session', () => {
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
-    const packagedSmoke = read('.github/workflows/windows-packaged-startup.yml')
+    const packagedWorkflow = read('.github/workflows/windows-packaged-startup.yml')
+    const packagedSmoke = read('scripts/smoke-windows-installer.ps1')
 
     expect(cargo).toContain('name = "harnessdock-tauri"')
+    expect(packagedWorkflow).toContain('Checkout exact candidate lifecycle smoke')
+    expect(packagedWorkflow).toContain('ref: ${{ env.CANDIDATE_SHA }}')
+    expect(packagedWorkflow).toContain('./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer')
     expect(packagedSmoke).toContain("-Filter 'harnessdock-tauri.exe'")
     expect(packagedSmoke).not.toContain("-Filter 'HarnessDock.exe'")
     expect(packagedSmoke).toContain('Installed harnessdock-tauri.exe not found')
@@ -161,7 +165,7 @@ describe('packaged startup Web chain regression', () => {
     expect(packagedSmoke).toContain('Test-HarnessWebHtml $webSession.Client $readyUrl')
     expect(packagedSmoke).toContain('Test-HarnessWebHtml $webSession.Client $cleanUrl')
     expect(packagedSmoke).toContain('$healthyCleanProbes -ge 2')
-    expect(packagedSmoke).toContain('served stable cookie-authenticated HTML')
+    expect(packagedSmoke).toContain('stable cookie-authenticated HTML')
   })
 
   it('keeps skipped duplicate startup smokes from masquerading as package failures', () => {

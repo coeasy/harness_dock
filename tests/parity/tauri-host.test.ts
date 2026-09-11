@@ -212,7 +212,7 @@ describe('Tauri host contract', () => {
     expect(runtime).toContain('platform::configure_child_command')
   })
 
-  it('publishes the full unsigned rc asset set without moving an existing tag', () => {
+  it('publishes the full unsigned rc asset set with guarded prerelease replacement', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const releaseManifest = readJson('release-manifest.json')
@@ -231,7 +231,7 @@ describe('Tauri host contract', () => {
     expect(releaseManifest.publication).toMatchObject({
       tagTemplate: 'v{version}-{prerelease}',
       githubPrerelease: true,
-      replaceablePrerelease: false,
+      replaceablePrerelease: true,
       candidateWorkflow: '.github/workflows/tauri-candidate.yml',
     })
     expect(releaseManifest.publication.requiredSameShaWorkflows).toEqual(
@@ -252,6 +252,7 @@ describe('Tauri host contract', () => {
 
     expect(releaseContract).toContain('expectedAssetCount: expectedAssetNames.length')
     expect(releaseContract).toContain('release asset names must be unique')
+    expect(releaseContract).toContain('stable releases cannot move a replaceable prerelease tag')
     expect(release).toContain('node scripts/release/contract.mjs tag')
     expect(release).toContain('node scripts/release/assemble.mjs release-input release-assets')
     expect(release).toContain('node scripts/release/verify-assets.mjs release-assets')
