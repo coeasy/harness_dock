@@ -68,7 +68,7 @@
   function css() {
     return `
       :host { all: initial; color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .bar { -webkit-app-region: drag; align-items: center; backdrop-filter: blur(18px); background: rgba(20, 24, 32, .96); border-bottom: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 18px rgba(0,0,0,.28); box-sizing: border-box; color: #edf2f7; display: flex; gap: 8px; height: 44px; left: 0; padding: 0 10px 0 14px; position: fixed; right: 0; top: 0; user-select: none; z-index: 2147483000; animation: shell-enter .24s cubic-bezier(.2,.8,.2,1) both; transition: background .18s ease, box-shadow .18s ease; }
+      .bar { -webkit-app-region: drag; align-items: center; background: rgba(20, 24, 32, .96); border-bottom: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 18px rgba(0,0,0,.28); box-sizing: border-box; color: #edf2f7; display: flex; gap: 8px; height: 44px; left: 0; padding: 0 10px 0 14px; position: fixed; right: 0; top: 0; user-select: none; z-index: 2147483000; animation: shell-enter .24s cubic-bezier(.2,.8,.2,1) both; transition: background .18s ease, box-shadow .18s ease; }
       .bar.busy { background: rgba(17, 24, 35, .985); box-shadow: 0 6px 24px rgba(0,0,0,.34); }
       .brand { align-items: center; display: flex; flex: 1; gap: 8px; min-width: 0; }
       .mark { background: linear-gradient(135deg,#6ea8fe,#9b8cff); border-radius: 7px; box-shadow: 0 0 16px rgba(110,168,254,.34); height: 18px; width: 18px; animation: mark-idle 3.2s ease-in-out infinite; transition: transform .18s ease, box-shadow .18s ease; }
@@ -96,9 +96,9 @@
       .separator { border-top: 1px solid rgba(255,255,255,.1); margin: 5px 4px; }
       .toast { background: rgba(21, 27, 38, .97); border: 1px solid rgba(255,255,255,.13); border-radius: 9px; bottom: 16px; box-shadow: 0 12px 30px rgba(0,0,0,.28); color: #edf2f7; font-size: 12px; left: 50%; max-width: min(480px, calc(100vw - 40px)); opacity: 0; padding: 9px 12px; pointer-events: none; position: fixed; transform: translate(-50%, 9px) scale(.98); transition: opacity .16s ease, transform .2s cubic-bezier(.2,.8,.2,1); visibility: hidden; z-index: 2147483005; }
       .toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); visibility: visible; }
-      .transition-mask { align-items: center; backdrop-filter: blur(2px); background: rgba(5,11,20,.34); color: #dbe7f7; display: flex; font-size: 12px; inset: 44px 0 0; justify-content: center; opacity: 0; pointer-events: none; position: fixed; transform: translateY(3px); transition: opacity .16s ease, transform .18s ease; visibility: hidden; z-index: 2147482999; }
+      .transition-mask { align-items: center; background: rgba(5,11,20,.72); color: #dbe7f7; display: flex; font-size: 12px; inset: 44px 0 0; justify-content: center; opacity: 0; pointer-events: none; position: fixed; transform: translateY(3px); transition: opacity .16s ease, transform .18s ease; visibility: hidden; z-index: 2147482999; }
       .transition-mask.show { opacity: 1; transform: translateY(0); visibility: visible; }
-      .transition-mask span { background: rgba(20,27,39,.9); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; box-shadow: 0 10px 28px rgba(0,0,0,.22); padding: 8px 12px; }
+      .transition-mask span { background: rgba(20,27,39,.94); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; box-shadow: 0 10px 28px rgba(0,0,0,.22); padding: 8px 12px; }
       @keyframes shell-enter { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes mark-idle { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
       @keyframes mark-busy { 0%,100% { transform: scale(.94); } 50% { transform: scale(1.1); } }
