@@ -90,6 +90,12 @@ fn has_primary_surface(app: &tauri::AppHandle) -> bool {
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     crate::host_kernel::install(app.handle().clone()).map_err(std::io::Error::other)?;
 
+    // Harness Web is the product critical path. As soon as the Host Kernel is
+    // ready, start Runtime preparation on the async runtime while this setup
+    // thread installs optional desktop chrome. Tray/menu/updater failures must
+    // never add serial latency to the primary Harness startup path.
+    crate::startup::spawn(app.handle().clone());
+
     match crate::tray::create_tray(&app.handle()) {
         Ok(()) => app
             .state::<AppState>()
@@ -108,7 +114,6 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     if let Err(error) = install_shell_menu(app) {
         eprintln!("HarnessDock native menu unavailable; continuing with Harness Web: {error}");
     }
-    crate::startup::spawn(app.handle().clone());
     Ok(())
 }
 
