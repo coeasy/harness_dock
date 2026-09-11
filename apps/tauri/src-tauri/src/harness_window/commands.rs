@@ -25,9 +25,9 @@ pub(crate) async fn open_for_startup(app: AppHandle, url: String) -> Result<(), 
     }
     #[cfg(not(mobile))]
     {
-        // Normal startup also keeps the lightweight splash visible. It remains
-        // presentation-only and is removed by finish_harness_load once the
-        // authenticated Harness document has actually claimed primary_visible.
+        // Normal startup keeps the lightweight splash visible. Runtime
+        // operations after this first paint use the primary WebView lifecycle
+        // surface instead and never reactivate the splash.
         harness_open_impl(app, url, true).await
     }
 }
@@ -77,7 +77,14 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
             return Err(error);
         }
         let navigation_id = begin_harness_load(&app, lease.generation.id)?;
-        show_splash(&app, "正在刷新 Harness Web…");
+        let overlay_visible =
+            show_primary_lifecycle_overlay(&app, "refresh", "正在刷新 Harness Web…");
+        if overlay_visible {
+            // Let the compositor publish a couple of dark overlay frames before
+            // reload tears down the current document. This removes the visual
+            // hitch without delaying Runtime work or creating another WebView.
+            tokio::time::sleep(std::time::Duration::from_millis(48)).await;
+        }
         let result = if current.as_ref().is_some_and(|value| {
             value.origin().ascii_serialization() == lease.origin && !has_launch_token(value)
         }) {
@@ -89,7 +96,7 @@ pub async fn harness_reload_web(app: AppHandle) -> Result<(), String> {
             if let Ok(mut actor) = app.state::<crate::AppState>().surface_actor.lock() {
                 let _ = actor.fail_navigation(navigation_id, lease.generation.id);
             }
-            hide_splash(&app);
+            hide_primary_lifecycle_overlay(&app);
             show_startup_recovery(&app, &format!("无法刷新 Harness Web: {error}"));
             return Err(format!("无法刷新 Harness Web: {error}"));
         }
