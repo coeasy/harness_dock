@@ -17,10 +17,22 @@ pub(crate) struct StartingProcessGuard {
 }
 
 impl StartingProcessGuard {
-    pub(crate) fn complete(&self) {
-        if let Ok(mut pids) = self.registry.lock() {
-            pids.remove(&self.pid);
+    fn remove_from_registry(&self) {
+        match self.registry.lock() {
+            Ok(mut pids) => {
+                pids.remove(&self.pid);
+            }
+            Err(poisoned) => {
+                // Shutdown is a fail-closed resource boundary. A poisoned
+                // registry must not make us forget a PID or wait forever for a
+                // PID that its owner can no longer remove.
+                poisoned.into_inner().remove(&self.pid);
+            }
         }
+    }
+
+    pub(crate) fn complete(&self) {
+        self.remove_from_registry();
     }
 
     pub(crate) fn terminate_tree(&self) {
@@ -31,13 +43,24 @@ impl StartingProcessGuard {
         }
         stop_process_tree(self.pid);
     }
+
+    /// The direct helper process has already exited and been reaped. Kill any
+    /// descendants that outlived it without falling back to the now-free parent
+    /// PID, which could theoretically have been reused by an unrelated process.
+    pub(crate) fn terminate_descendants_after_parent_exit(&self) {
+        #[cfg(windows)]
+        if let Some(job) = self.job.as_ref() {
+            job.terminate();
+        }
+
+        #[cfg(unix)]
+        stop_process_group_after_parent_exit(self.pid);
+    }
 }
 
 impl Drop for StartingProcessGuard {
     fn drop(&mut self) {
-        if let Ok(mut pids) = self.registry.lock() {
-            pids.remove(&self.pid);
-        }
+        self.remove_from_registry();
         // On Windows the Job Object is configured with KILL_ON_JOB_CLOSE. Its
         // handle is intentionally held by the resource owner for the full
         // lifetime of the child, so dropping the owner is the final no-orphan
@@ -111,17 +134,20 @@ pub(crate) fn spawn_registered(
 }
 
 pub(crate) fn stop_starting_processes(registry: &StartingProcessRegistry) {
-    let pids = registry
-        .lock()
-        .map(|pids| pids.iter().copied().collect::<Vec<_>>())
-        .unwrap_or_default();
+    let pids = match registry.lock() {
+        Ok(pids) => pids.iter().copied().collect::<Vec<_>>(),
+        Err(poisoned) => poisoned.into_inner().iter().copied().collect::<Vec<_>>(),
+    };
     for pid in pids {
         stop_process_tree(pid);
     }
 }
 
 pub(crate) fn starting_processes_empty(registry: &StartingProcessRegistry) -> bool {
-    registry.lock().map(|pids| pids.is_empty()).unwrap_or(true)
+    match registry.lock() {
+        Ok(pids) => pids.is_empty(),
+        Err(poisoned) => poisoned.into_inner().is_empty(),
+    }
 }
 
 pub(crate) fn stop_child_tree(child: &mut Child) {
@@ -166,6 +192,18 @@ pub(crate) fn stop_process_tree(pid: u32) {
                 .status();
         }
     }
+}
+
+#[cfg(unix)]
+fn stop_process_group_after_parent_exit(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    // The helper parent is already reaped, so its PID must never be targeted as
+    // a fallback. Any descendants created by configure_child_command remain in
+    // the helper's dedicated process group and can be killed by PGID safely.
+    let group = format!("-{pid}");
+    let _ = Command::new("kill").args(["-KILL", &group]).status();
 }
 
 #[cfg(windows)]
