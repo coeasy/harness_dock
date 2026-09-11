@@ -14,6 +14,19 @@ const rootVersion = rootPkg.version
 const releaseManifest = JSON.parse(readFileSync(path.join(repoRoot, 'release-manifest.json'), 'utf8'))
 const mismatches = []
 
+const toolVersionsPath = path.join(repoRoot, 'scripts', 'versions.json')
+const toolVersions = existsSync(toolVersionsPath) ? JSON.parse(readFileSync(toolVersionsPath, 'utf8')) : {}
+const rustVersion = String(toolVersions.rust ?? '')
+const tauriCliVersion = String(toolVersions.tauriCli ?? '')
+for (const [name, version] of [
+  ['rust', rustVersion],
+  ['tauriCli', tauriCliVersion],
+]) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    mismatches.push(`scripts/versions.json ${name}: expected exact SemVer, got ${version || '<missing>'}`)
+  }
+}
+
 let activeReleaseTag = `v${rootVersion}`
 if (releaseManifest.channel !== 'stable') {
   const channel = String(releaseManifest.channel || '')
@@ -74,7 +87,74 @@ if (!existsSync(rustToolchainPath)) {
   mismatches.push('rust-toolchain.toml: file is missing; release Rust toolchain must be frozen')
 } else {
   const rustToolchain = readFileSync(rustToolchainPath, 'utf8')
-  if (!rustToolchain.includes('channel = "1.98.0"')) mismatches.push('rust-toolchain.toml: expected Rust 1.98.0')
+  if (rustVersion && !rustToolchain.includes(`channel = "${rustVersion}"`)) {
+    mismatches.push(`rust-toolchain.toml: expected Rust ${rustVersion} from scripts/versions.json`)
+  }
+}
+
+const tauriCliActionPath = path.join(repoRoot, '.github', 'actions', 'setup-tauri-cli', 'action.yml')
+if (!existsSync(tauriCliActionPath)) {
+  mismatches.push('.github/actions/setup-tauri-cli/action.yml: exact Tauri CLI setup action is missing')
+} else {
+  const action = readFileSync(tauriCliActionPath, 'utf8')
+  const requiredFragments = [
+    "require('./scripts/versions.json').tauriCli",
+    'uses: actions/cache@v6',
+    'cargo install tauri-cli',
+    '--locked',
+    '--root',
+    'cache-hit',
+  ]
+  for (const fragment of requiredFragments) {
+    if (!action.includes(fragment)) {
+      mismatches.push(`.github/actions/setup-tauri-cli/action.yml: missing provenance guard ${fragment}`)
+    }
+  }
+}
+
+const tauriCliWorkflowFiles = ['.github/workflows/tauri-ci.yml', '.github/workflows/tauri-candidate.yml']
+for (const relativePath of tauriCliWorkflowFiles) {
+  const workflowPath = path.join(repoRoot, relativePath)
+  if (!existsSync(workflowPath)) {
+    mismatches.push(`${relativePath}: file is missing`)
+    continue
+  }
+  const workflow = readFileSync(workflowPath, 'utf8')
+  if (!workflow.includes('uses: ./.github/actions/setup-tauri-cli')) {
+    mismatches.push(`${relativePath}: must use the exact cached Tauri CLI setup action`)
+  }
+  if (/cargo\s+install\s+tauri-cli\b/.test(workflow)) {
+    mismatches.push(`${relativePath}: raw cargo install tauri-cli bypasses the shared tool provenance action`)
+  }
+  if (!workflow.includes("'scripts/versions.json'")) {
+    mismatches.push(`${relativePath}: scripts/versions.json must trigger the workflow`)
+  }
+  if (!workflow.includes("'.github/actions/setup-tauri-cli/**'")) {
+    mismatches.push(`${relativePath}: setup-tauri-cli action changes must trigger the workflow`)
+  }
+}
+
+for (const relativePath of ['.github/workflows/ci.yml', ...tauriCliWorkflowFiles]) {
+  const workflowPath = path.join(repoRoot, relativePath)
+  if (!existsSync(workflowPath)) continue
+  const workflow = readFileSync(workflowPath, 'utf8')
+  const pins = [...workflow.matchAll(/^\s+(?:toolchain|rust-toolchain):\s*['"]?(\d+\.\d+\.\d+)['"]?\s*$/gm)].map((match) => match[1])
+  for (const pin of pins) {
+    if (rustVersion && pin !== rustVersion) {
+      mismatches.push(`${relativePath}: Rust toolchain ${pin} differs from scripts/versions.json ${rustVersion}`)
+    }
+  }
+}
+
+const releaseWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'release.yml')
+if (existsSync(releaseWorkflowPath)) {
+  const releaseWorkflow = readFileSync(releaseWorkflowPath, 'utf8')
+  if (!releaseWorkflow.includes('node scripts/release/contract.mjs replaceable')) {
+    mismatches.push('.github/workflows/release.yml: immutable prerelease maintenance gate is missing')
+  }
+  if (!releaseWorkflow.includes('Skipping publish for post-release maintenance SHA')) {
+    mismatches.push('.github/workflows/release.yml: post-release maintenance skip must remain explicit')
+  }
 }
 
 const cargoLockPath = path.join(repoRoot, 'apps', 'tauri', 'src-tauri', 'Cargo.lock')
