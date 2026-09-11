@@ -49,6 +49,11 @@ description = "Allows trusted local control surfaces to clear persisted plugin q
 commands.allow = ["runtime_clear_plugin_quarantine"]
 
 [[permission]]
+identifier = "runtime-launch-settings"
+description = "Allows only the local Diagnostics surface to read and persist validated dsh profile/DSH_HOME launch preferences."
+commands.allow = ["runtime_launch_settings_get", "runtime_launch_settings_set"]
+
+[[permission]]
 identifier = "update-check"
 description = "Allows a trusted local window to check the official project release feed."
 commands.allow = ["update_check"]
