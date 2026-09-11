@@ -48,6 +48,7 @@ describe('managed process lifecycle contract', () => {
     const restartBody = control.slice(restart)
     expect(restartBody.indexOf('stop_impl(')).toBeGreaterThanOrEqual(0)
     expect(restartBody.indexOf('start_impl(')).toBeGreaterThan(restartBody.indexOf('stop_impl('))
+    expect(restartBody).toContain('tauri::async_runtime::spawn_blocking')
     expect(surface).toContain('if self.operation != SurfaceOperation::Idle')
   })
 
@@ -79,6 +80,50 @@ describe('managed process lifecycle contract', () => {
     expect(kernel).toContain('reply_rx.await')
     expect(kernel).not.toContain('spawn_blocking(move || reply_rx.recv())')
     expect(cargo).toContain('features = ["sync", "time"]')
+  })
+
+  it('keeps startup, refresh, restart and exit on dark compositor-safe surfaces', () => {
+    const tauriConfig = JSON.parse(read('apps/tauri/src-tauri/tauri.conf.json'))
+    const splashCss = read('apps/tauri/web/splash.css')
+    const shell = read('apps/tauri/src-tauri/src/harness_shell.rs')
+    const commands = read('apps/tauri/src-tauri/src/harness_window/commands.rs')
+    const window = read('apps/tauri/src-tauri/src/harness_window/window.rs')
+    const supervisor = read('apps/tauri/src-tauri/src/supervisor.rs')
+
+    const splash = tauriConfig.app.windows.find((entry: { label?: string }) => entry.label === 'splash')
+    expect(splash?.backgroundColor).toBe('#09111f')
+    expect(splash?.theme).toBe('Dark')
+    expect(splashCss).not.toContain('filter: blur(')
+    expect(splashCss).not.toContain('filter: saturate(')
+
+    expect(shell).toContain("const DARK = '#07101d';")
+    expect(shell).toContain('window.__HARNESSDOCK_LIFECYCLE__ = Object.freeze')
+    expect(shell).not.toContain('backdrop-filter')
+    expect(window).toContain('.background_color(tauri::webview::Color(7, 16, 29, 255))')
+
+    const refreshStart = commands.indexOf('pub async fn harness_reload_web')
+    const restartCommandStart = commands.indexOf('pub async fn harness_restart_web')
+    const refreshBody = commands.slice(refreshStart, restartCommandStart)
+    expect(refreshBody).toContain('show_primary_lifecycle_overlay')
+    expect(refreshBody).toContain('Duration::from_millis(48)')
+    expect(refreshBody).not.toContain('show_splash(')
+
+    const restartStart = window.indexOf('pub async fn restart_harness_web_impl')
+    const restartBody = window.slice(restartStart)
+    expect(restartBody).toContain('show_primary_lifecycle_overlay')
+    expect(restartBody).toContain('harness_open_impl(app.clone(), url, false)')
+    expect(restartBody).not.toContain('show_splash(')
+    expect(restartBody).not.toContain('window.hide()')
+
+    const exitStart = supervisor.indexOf('pub(crate) fn request_exit')
+    const exitBody = supervisor.slice(exitStart)
+    expect(exitBody).toContain('show_primary_lifecycle_overlay')
+    expect(exitBody).toContain('Duration::from_millis(48)')
+    expect(exitBody).not.toContain('show_splash(')
+
+    expect(supervisor).toContain('async fn stop_managed_processes_blocking')
+    expect(supervisor.match(/stop_managed_processes_blocking\(app\.clone\(\)\)\.await;/g)).toHaveLength(2)
+    expect(supervisor.match(/stop_managed_processes\(&app\);/g)).toHaveLength(1)
   })
 
   it('proves the installed Windows client exits without bundled Node leftovers', () => {
