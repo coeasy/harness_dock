@@ -9,7 +9,10 @@ pub struct WorkDirGuard {
 
 impl WorkDirGuard {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, retained: false }
+        Self {
+            path,
+            retained: false,
+        }
     }
 
     pub fn retain(&mut self) {
@@ -50,7 +53,9 @@ pub fn validated_ready(
         || ready.nonce != expected_generation.nonce
         || ready.image_identity != expected_generation.image_identity
     {
-        return Err("Runtime ready.json generation/nonce/imageIdentity 未通过当前启动代际校验。".into());
+        return Err(
+            "Runtime ready.json generation/nonce/imageIdentity 未通过当前启动代际校验。".into(),
+        );
     }
     if ready.host != "127.0.0.1" || ready.port == 0 || ready.pid != expected_pid || ready.pid == 0 {
         return Err("Runtime ready.json host/port/PID 未通过受管进程校验。".into());
@@ -125,7 +130,15 @@ pub fn spawn_runtime(
     token: &CancellationToken,
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &std::sync::atomic::AtomicBool,
-) -> Result<(Child, PathBuf, PathBuf, process_control::StartingProcessGuard), String> {
+) -> Result<
+    (
+        Child,
+        PathBuf,
+        PathBuf,
+        process_control::StartingProcessGuard,
+    ),
+    String,
+> {
     if cancelled(token, quitting) {
         return Err("Runtime generation was cancelled before spawn".into());
     }
@@ -145,11 +158,17 @@ pub fn spawn_runtime(
     }
     command
         .args(["--host", "127.0.0.1", "--port", "0", "--no-open"])
-        .env("DSH_EMBEDDED_READY_FILE", platform::node_cli_path(ready_file))
+        .env(
+            "DSH_EMBEDDED_READY_FILE",
+            platform::node_cli_path(ready_file),
+        )
         .env("DSH_EMBEDDED_VERSION", &image.origin.dsh_version)
         .env("HARNESSDOCK_RUNTIME_GENERATION", generation.id.to_string())
         .env("HARNESSDOCK_RUNTIME_NONCE", &generation.nonce)
-        .env("HARNESSDOCK_RUNTIME_IMAGE_IDENTITY", &generation.image_identity)
+        .env(
+            "HARNESSDOCK_RUNTIME_IMAGE_IDENTITY",
+            &generation.image_identity,
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -295,7 +314,10 @@ pub fn dump_config(
                 };
                 registration.complete();
                 if !output.status.success() {
-                    return Err(String::from_utf8_lossy(&output.stderr).chars().take(2_000).collect());
+                    return Err(String::from_utf8_lossy(&output.stderr)
+                        .chars()
+                        .take(2_000)
+                        .collect());
                 }
                 return String::from_utf8(output.stdout)
                     .map_err(|error| format!("dsh config dump 输出不是 UTF-8: {error}"));
