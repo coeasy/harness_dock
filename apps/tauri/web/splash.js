@@ -1,7 +1,8 @@
 (() => {
   'use strict'
 
-  let transitionTimer
+  let transitionFrame
+  let settleFrame
   let longWaitTimer
 
   function stateFor(value) {
@@ -43,12 +44,15 @@
     if (hint) hint.textContent = hintFor(state)
     scheduleLongWaitHint(state)
 
-    window.clearTimeout(transitionTimer)
+    window.cancelAnimationFrame(transitionFrame)
+    window.cancelAnimationFrame(settleFrame)
     element.classList.add('changing')
-    transitionTimer = window.setTimeout(() => {
+    transitionFrame = window.requestAnimationFrame(() => {
       element.textContent = text
-      element.classList.remove('changing')
-    }, 90)
+      settleFrame = window.requestAnimationFrame(() => {
+        element.classList.remove('changing')
+      })
+    })
   }
 
   scheduleLongWaitHint('loading')
