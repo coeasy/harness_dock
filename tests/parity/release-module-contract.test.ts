@@ -134,7 +134,7 @@ describe('platform-aware release module', () => {
     }
     const contract = spawnSync(process.execPath, ['scripts/release/contract.mjs', 'validate'], { cwd: repoRoot, encoding: 'utf8' })
     expect(contract.status, contract.stderr).toBe(0)
-    expect(contract.stdout).toContain('release contract OK: v0.1.5-rc.2, 15 assets')
+    expect(contract.stdout).toContain('release contract OK: v0.1.5-rc.3, 15 assets')
     const desktopMatrix = spawnSync(process.execPath, ['scripts/release/candidate-matrix.mjs', 'desktop'], { cwd: repoRoot, encoding: 'utf8' })
     expect(desktopMatrix.status, desktopMatrix.stderr).toBe(0)
     const matrix = JSON.parse(desktopMatrix.stdout)

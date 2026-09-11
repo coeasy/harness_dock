@@ -53,7 +53,7 @@ describe('Tauri host contract', () => {
     expect(root.version).toBe('0.1.5')
     expect(tauri.version).toBe(root.version)
     expect(releaseManifest.version).toBe(root.version)
-    expect(releaseManifest.prerelease).toBe('rc.2')
+    expect(releaseManifest.prerelease).toBe('rc.3')
     expect(releaseManifest.shell.version).toBe(root.version)
     expect(shellManifest.version).toBe(root.version)
     expect(cargo).toContain(`version = "${root.version}"`)
@@ -227,7 +227,7 @@ describe('Tauri host contract', () => {
 
     expect(releaseManifest.schemaVersion).toBe(2)
     expect(releaseManifest.channel).toBe('rc')
-    expect(releaseManifest.prerelease).toBe('rc.2')
+    expect(releaseManifest.prerelease).toBe('rc.3')
     expect(releaseManifest.publication).toMatchObject({
       tagTemplate: 'v{version}-{prerelease}',
       githubPrerelease: true,
