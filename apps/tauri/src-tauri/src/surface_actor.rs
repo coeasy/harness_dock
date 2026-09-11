@@ -74,6 +74,13 @@ impl SurfaceActorState {
         if self.operation != SurfaceOperation::Idle {
             return Err("Harness surface 正在处理另一个操作，请稍候。".into());
         }
+        // The operation guard is released once a command has scheduled its
+        // navigation, while PageLoad::Finished arrives asynchronously later.
+        // Treat Loading as occupied too so native menu/tray actions cannot pile
+        // another refresh/restart on top of an unfinished WebView transition.
+        if self.phase == SurfacePhase::Loading {
+            return Err("Harness surface 正在加载当前页面，请等待加载完成后再操作。".into());
+        }
         self.operation = operation;
         Ok(())
     }
@@ -149,5 +156,15 @@ mod tests {
         let navigation = state.begin_navigation(9);
         assert!(!state.finish_navigation(navigation, 8));
         assert_eq!(state.phase(), SurfacePhase::Loading);
+    }
+
+    #[test]
+    fn loading_surface_rejects_a_second_lifecycle_operation() {
+        let mut state = SurfaceActorState::default();
+        let navigation = state.begin_navigation(3);
+        state.end_operation();
+        assert!(state.begin_operation(SurfaceOperation::Restart).is_err());
+        assert!(state.finish_navigation(navigation, 3));
+        assert!(state.begin_operation(SurfaceOperation::Restart).is_ok());
     }
 }
