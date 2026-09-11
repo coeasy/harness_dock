@@ -5,6 +5,18 @@
 use super::*;
 
 #[cfg(not(mobile))]
+fn show_runtime_transition_error(app: &AppHandle, error: &str) {
+    hide_primary_lifecycle_overlay(app);
+    if let Some(window) = app.get_webview_window("harness") {
+        // The old document may now point at a Runtime generation that no longer
+        // exists. Hide only on actual failure; successful restart deliberately
+        // keeps this painted frame visible until replacement navigation begins.
+        let _ = window.hide();
+    }
+    show_startup_recovery(app, error);
+}
+
+#[cfg(not(mobile))]
 pub async fn harness_open_impl(
     app: AppHandle,
     url: String,
@@ -112,6 +124,7 @@ pub async fn harness_open_impl(
         .resizable(true)
         .decorations(false)
         .visible(false)
+        .background_color(tauri::webview::Color(7, 16, 29, 255))
         .build()
         .map_err(|error| {
             if let Ok(mut actor) = app.state::<crate::AppState>().surface_actor.lock() {
@@ -130,16 +143,21 @@ pub async fn restart_harness_web_impl(
     clear_quarantine: bool,
     safe_mode: bool,
 ) -> Result<crate::runtime::RuntimeStatus, String> {
-    show_splash(
-        &app,
-        if safe_mode {
-            "正在以隔离插件模式重启…"
-        } else if clear_quarantine {
-            "正在清除插件隔离并重启…"
-        } else {
-            "正在重启 Runtime…"
-        },
-    );
+    let (mode, status_text) = if safe_mode {
+        ("safe-mode", "正在以隔离插件模式重启…")
+    } else if clear_quarantine {
+        ("restart", "正在清除插件隔离并重启…")
+    } else {
+        ("restart", "正在重启 Runtime…")
+    };
+    let overlay_visible = show_primary_lifecycle_overlay(&app, mode, status_text);
+    if overlay_visible {
+        // Paint the transition before the old Runtime is stopped. Keeping the
+        // old document alive underneath this layer avoids a compositor gap even
+        // while Node is being replaced.
+        tokio::time::sleep(std::time::Duration::from_millis(48)).await;
+    }
+
     cancel_harness_load(&app);
     let reopen_epoch = app
         .state::<crate::AppState>()
@@ -147,12 +165,9 @@ pub async fn restart_harness_web_impl(
         .lock()
         .map(|actor| actor.current_navigation().0)
         .unwrap_or_default();
-    if let Some(window) = app.get_webview_window("harness") {
-        let _ = window.hide();
-    }
     if clear_quarantine {
         crate::runtime::runtime_clear_plugin_quarantine(app.clone()).map_err(|error| {
-            show_startup_recovery(&app, &error);
+            show_runtime_transition_error(&app, &error);
             error
         })?;
     }
@@ -162,7 +177,7 @@ pub async fn restart_harness_web_impl(
         crate::runtime::restart_managed(app.clone()).await
     }
     .map_err(|error| {
-        show_startup_recovery(&app, &error);
+        show_runtime_transition_error(&app, &error);
         error
     })?;
     let current_epoch = app
@@ -172,17 +187,21 @@ pub async fn restart_harness_web_impl(
         .map(|actor| actor.current_navigation().0)
         .unwrap_or_default();
     if current_epoch != reopen_epoch {
+        hide_primary_lifecycle_overlay(&app);
         hide_splash(&app);
         return Ok(status);
     }
     let Some(url) = status.app_url.clone() else {
         let error = "Runtime 重启后没有返回 Harness Web 地址。".to_string();
-        show_startup_recovery(&app, &error);
+        show_runtime_transition_error(&app, &error);
         return Err(error);
     };
-    harness_open(app.clone(), url).await.map_err(|error| {
-        show_startup_recovery(&app, &error);
-        error
-    })?;
+    set_primary_lifecycle_status(&app, "Runtime 已就绪，正在恢复 Harness Web…");
+    harness_open_impl(app.clone(), url, false)
+        .await
+        .map_err(|error| {
+            show_runtime_transition_error(&app, &error);
+            error
+        })?;
     Ok(status)
 }
