@@ -8,6 +8,7 @@
   let snapshotRefreshPromise = null
   let snapshotRefreshPending = false
   let eventRefreshTimer = null
+  let launchSettings = { profile: 'web', dshHome: null, startupPolicy: 'auto' }
 
   function call(command, args) {
     const invoke = window.__TAURI__?.core?.invoke
@@ -47,6 +48,14 @@
     button.setAttribute('aria-busy', String(busy))
   }
 
+  function renderLaunchSettings(settings) {
+    launchSettings = settings || launchSettings
+    $('runtime-profile').value = launchSettings.profile || 'web'
+    $('runtime-dsh-home').value = launchSettings.dshHome || ''
+    $('runtime-startup-policy').value = launchSettings.startupPolicy || 'auto'
+    $('profile-badge').textContent = `${launchSettings.profile || 'web'} / ${launchSettings.startupPolicy || 'auto'}`
+  }
+
   function render(snapshot) {
     if (!snapshot) return
     const sequence = Number(snapshot.eventSequence || 0)
@@ -66,6 +75,9 @@
     const lines = [
       `状态：${phase}`,
       `版本：${snapshot.runtimeDshVersion || 'unknown'}`,
+      `Profile：${launchSettings.profile || 'web'}`,
+      `Startup Policy：${launchSettings.startupPolicy || 'auto'}`,
+      `DSH_HOME：${launchSettings.dshHome || 'default'}`,
       `Generation：${snapshot.runtimeGeneration ?? 'unknown'}`,
       `Runtime Image：${snapshot.runtimeImageIdentity || 'unknown'}`,
       `Host Protocol：v${snapshot.protocolVersion || 2}（最低兼容 v${snapshot.minCompatibleVersion || 2}）`,
@@ -81,6 +93,34 @@
     )
   }
 
+  async function loadLaunchSettings() {
+    const settings = await call('runtime_launch_settings_get')
+    renderLaunchSettings(settings)
+    return settings
+  }
+
+  async function saveLaunchSettings() {
+    const button = $('runtime-settings-save')
+    setBusy(button, true)
+    setStatus($('runtime-settings-detail'), '正在验证并保存启动配置…')
+    try {
+      const settings = await call('runtime_launch_settings_set', {
+        settings: {
+          profile: $('runtime-profile').value.trim(),
+          dshHome: $('runtime-dsh-home').value.trim() || null,
+          startupPolicy: $('runtime-startup-policy').value,
+        },
+      })
+      renderLaunchSettings(settings)
+      setStatus($('runtime-settings-detail'), '已保存。配置将在下一次 Runtime 启动或重启时生效。')
+      await refresh(false)
+    } catch (error) {
+      setStatus($('runtime-settings-detail'), message(error), true)
+    } finally {
+      setBusy(button, false)
+    }
+  }
+
   function queueEventRefresh(delay = 80) {
     window.clearTimeout(eventRefreshTimer)
     eventRefreshTimer = window.setTimeout(() => {
@@ -94,7 +134,6 @@
       snapshotRefreshPending = true
       return snapshotRefreshPromise
     }
-
     const button = $('runtime-refresh')
     if (showBusy) setBusy(button, true)
     snapshotRefreshPromise = (async () => {
@@ -104,7 +143,6 @@
         setStatus($('runtime-detail'), message(error), true)
       }
     })()
-
     try {
       await snapshotRefreshPromise
     } finally {
@@ -150,16 +188,12 @@
       const payload = event?.payload || {}
       const sequence = Number(payload.sequence || 0)
       if (!Number.isSafeInteger(sequence) || sequence <= lastSequence) return
-      // Host actors can emit several lifecycle events in one operation. Merge
-      // bursts into one source-of-truth snapshot instead of starting an IPC
-      // request and repaint for every event. A detected sequence gap gets an
-      // immediate snapshot, while ordinary bursts settle for one animation
-      // frame-sized delay.
       queueEventRefresh(lastSequence && sequence > lastSequence + 1 ? 0 : 80)
     })
   }
 
   $('runtime-refresh').addEventListener('click', () => { void refresh(true) })
+  $('runtime-settings-save').addEventListener('click', () => { void saveLaunchSettings() })
   $('settings-quit').addEventListener('click', quit)
   $('update-install').addEventListener('click', installUpdate)
   $('settings-close').addEventListener('click', async () => {
@@ -176,11 +210,13 @@
   void (async () => {
     try {
       await subscribe()
+      await loadLaunchSettings()
       await refresh(true)
     } catch (error) {
       setStatus($('runtime-detail'), message(error), true)
     }
   })()
+
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return
     event.preventDefault()
