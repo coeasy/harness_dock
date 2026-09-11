@@ -6,7 +6,7 @@
 
 **DeepSeek Harness 的跨平台原生客户端**
 
-[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.5-rc.2 发布说明](.github/release-notes/v0.1.5-rc.2.md)
+[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.5-rc.3 发布说明](.github/release-notes/v0.1.5-rc.3.md)
 
 </div>
 
@@ -18,7 +18,7 @@
 | --- | --- |
 | HarnessDock | `0.1.5` |
 | 发布通道 | `rc` |
-| 当前发布 tag | `v0.1.5-rc.2` |
+| 当前发布 tag | `v0.1.5-rc.3` |
 | DeepSeek Harness Runtime | `dsh-v0.1.5-rc.2` |
 | Runtime commit | `fb2c4b9e698e30edb738bca4cf0618587db7d203` |
 | 桌面宿主 | Tauri 2 |
@@ -161,7 +161,7 @@ chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 
 ## Release 规则
 
-`v0.1.5-rc.2` 仍执行完整发布门禁，不因为是候选版本降低标准：
+`v0.1.5-rc.3` 仍执行完整发布门禁，不因为是候选版本降低标准：
 
 1. 从 `release-manifest.json` 的精确上游 tag/commit 构建 official dsh source closure；
 2. 为 Windows / Linux / macOS 分别生成 sealed Runtime；
