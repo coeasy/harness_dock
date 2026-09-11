@@ -271,7 +271,5 @@ pub async fn harness_shell_close(app: tauri::AppHandle) -> Result<(), String> {
 /// Initialisation script order matters: polyfills and first-paint lifecycle
 /// styling first, then the host bridge, then the shell UI.
 pub(crate) fn init_script() -> String {
-    format!(
-        "{POLYFILL_SCRIPT}\n{LIFECYCLE_SCRIPT}\n{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}"
-    )
+    format!("{POLYFILL_SCRIPT}\n{LIFECYCLE_SCRIPT}\n{BRIDGE_SCRIPT}\n{SHELL_WEB_SCRIPT}")
 }
