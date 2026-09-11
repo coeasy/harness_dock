@@ -86,7 +86,9 @@ fn validate_profile_name(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_settings(mut settings: RuntimeLaunchSettings) -> Result<RuntimeLaunchSettings, String> {
+fn normalize_settings(
+    mut settings: RuntimeLaunchSettings,
+) -> Result<RuntimeLaunchSettings, String> {
     settings.profile = settings.profile.trim().to_string();
     validate_profile_name(&settings.profile)?;
 
@@ -141,11 +143,13 @@ fn save_runtime_launch_settings(
 ) -> Result<(), String> {
     let path = settings_path(app)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("无法创建 Runtime 启动配置目录: {error}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("无法创建 Runtime 启动配置目录: {error}"))?;
     }
     let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
     let bytes = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
-    fs::write(&tmp, bytes).map_err(|error| format!("无法写入 Runtime 启动配置临时文件: {error}"))?;
+    fs::write(&tmp, bytes)
+        .map_err(|error| format!("无法写入 Runtime 启动配置临时文件: {error}"))?;
     commit_replace(&tmp, &path)
 }
 
