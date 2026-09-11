@@ -33,23 +33,34 @@ body {
   gap: 9px;
   padding: 22px 28px 18px;
   isolation: isolate;
-  animation: surface-in .34s cubic-bezier(.2,.8,.2,1) both;
+  animation: surface-in .28s cubic-bezier(.2,.8,.2,1) both;
+  will-change: opacity, transform;
 }
 
 .ambient {
   position: absolute;
   z-index: -1;
-  width: 170px;
-  height: 170px;
+  width: 190px;
+  height: 190px;
   border-radius: 50%;
-  filter: blur(36px);
-  opacity: .22;
+  opacity: .24;
   pointer-events: none;
-  animation: ambient-drift 5.2s ease-in-out infinite alternate;
+  animation: ambient-drift 6.4s ease-in-out infinite alternate;
+  will-change: transform, opacity;
 }
 
-.ambient-a { top: -72px; left: -34px; background: #3b82f6; }
-.ambient-b { right: -58px; bottom: -88px; background: #14b8a6; animation-delay: -2.2s; }
+.ambient-a {
+  top: -82px;
+  left: -44px;
+  background: radial-gradient(circle, rgba(59, 130, 246, .62) 0%, rgba(59, 130, 246, .18) 45%, transparent 72%);
+}
+
+.ambient-b {
+  right: -70px;
+  bottom: -96px;
+  background: radial-gradient(circle, rgba(20, 184, 166, .58) 0%, rgba(20, 184, 166, .16) 45%, transparent 72%);
+  animation-delay: -2.8s;
+}
 
 .mark-wrap {
   position: relative;
@@ -71,9 +82,10 @@ body {
   background: linear-gradient(145deg, rgba(116, 224, 255, .98), rgba(45, 212, 191, .96) 48%, rgba(20, 132, 255, .92));
   box-shadow:
     0 14px 32px rgba(0, 0, 0, .38),
-    0 0 34px rgba(45, 212, 191, .2),
+    0 0 26px rgba(45, 212, 191, .18),
     inset 0 0 0 1px rgba(255, 255, 255, .28);
-  animation: mark-float 2.4s ease-in-out infinite;
+  animation: mark-float 2.8s ease-in-out infinite;
+  will-change: transform;
 }
 
 .mark::before {
@@ -91,26 +103,27 @@ body {
   height: 13px;
   border-radius: 50%;
   background: #dffcff;
-  box-shadow: 0 0 0 5px rgba(104, 229, 223, .11), 0 0 18px rgba(129, 247, 238, .72);
+  box-shadow: 0 0 0 5px rgba(104, 229, 223, .11), 0 0 14px rgba(129, 247, 238, .62);
 }
 
 .orbit {
   position: absolute;
   border-radius: 50%;
   border: 1px solid rgba(111, 218, 255, .2);
+  will-change: transform;
 }
 
 .orbit-a {
   inset: 4px;
   border-top-color: rgba(112, 240, 224, .78);
   border-right-color: rgba(112, 240, 224, .44);
-  animation: spin 3.2s linear infinite;
+  animation: spin 3.6s linear infinite;
 }
 
 .orbit-b {
   inset: 11px;
   border-bottom-color: rgba(99, 164, 255, .62);
-  animation: spin-reverse 2.4s linear infinite;
+  animation: spin-reverse 2.8s linear infinite;
 }
 
 .identity { text-align: center; }
@@ -144,7 +157,8 @@ h1 {
   border-radius: 50%;
   background: #5eead4;
   opacity: .32;
-  animation: stage-dot 1.15s ease-in-out infinite;
+  animation: stage-dot 1.2s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 .stage span:nth-child(2) { animation-delay: .14s; }
 .stage span:nth-child(3) { animation-delay: .28s; }
@@ -156,12 +170,12 @@ h1 {
   font-size: 12px;
   line-height: 1.55;
   text-align: center;
-  transition: opacity .14s ease, transform .14s ease, color .2s ease;
+  transition: opacity .12s ease, transform .12s ease, color .16s ease;
 }
 
 .status.changing {
-  opacity: .18;
-  transform: translateY(3px);
+  opacity: .22;
+  transform: translateY(2px);
 }
 
 .progress {
@@ -180,7 +194,8 @@ h1 {
   width: 38%;
   border-radius: inherit;
   background: linear-gradient(90deg, transparent, #2dd4bf 24%, #7dd3fc 72%, transparent);
-  animation: progress 1.45s cubic-bezier(.42,0,.58,1) infinite;
+  animation: progress 1.5s cubic-bezier(.42,0,.58,1) infinite;
+  will-change: transform, opacity;
 }
 
 .hint {
@@ -188,15 +203,15 @@ h1 {
   color: #63758e;
   font-size: 10px;
   text-align: center;
-  transition: color .2s ease;
+  transition: color .16s ease;
 }
 
 html[data-state="exiting"] .mark {
-  animation: exit-breathe 1.35s ease-in-out infinite;
+  animation: exit-breathe 1.45s ease-in-out infinite;
 }
 
-html[data-state="exiting"] .orbit-a { animation-duration: 1.7s; }
-html[data-state="exiting"] .orbit-b { animation-duration: 1.3s; }
+html[data-state="exiting"] .orbit-a { animation-duration: 1.9s; }
+html[data-state="exiting"] .orbit-b { animation-duration: 1.5s; }
 html[data-state="exiting"] .hint { color: #7d8da4; }
 
 html[data-state="ready"] .stage span {
@@ -216,26 +231,26 @@ html[data-state="error"] .stage span { background: #fb7185; animation-duration: 
 html[data-state="error"] .progress span { background: linear-gradient(90deg, transparent, #fb7185, transparent); }
 
 @keyframes surface-in {
-  from { opacity: 0; transform: scale(.985) translateY(4px); }
+  from { opacity: 0; transform: scale(.988) translateY(3px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 @keyframes mark-float {
   0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.015); }
+  50% { transform: translateY(-3px) scale(1.012); }
 }
 
 @keyframes ambient-drift {
-  from { transform: translate3d(-8px, -4px, 0) scale(.92); }
-  to { transform: translate3d(10px, 8px, 0) scale(1.08); }
+  from { transform: translate3d(-6px, -3px, 0) scale(.96); opacity: .2; }
+  to { transform: translate3d(8px, 6px, 0) scale(1.04); opacity: .27; }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes spin-reverse { to { transform: rotate(-360deg); } }
 
 @keyframes stage-dot {
-  0%, 70%, 100% { transform: translateY(0) scale(.9); opacity: .3; }
-  35% { transform: translateY(-2px) scale(1.12); opacity: 1; }
+  0%, 70%, 100% { transform: translateY(0) scale(.92); opacity: .3; }
+  35% { transform: translateY(-2px) scale(1.1); opacity: 1; }
 }
 
 @keyframes progress {
@@ -245,8 +260,8 @@ html[data-state="error"] .progress span { background: linear-gradient(90deg, tra
 }
 
 @keyframes exit-breathe {
-  0%, 100% { transform: scale(.98); filter: saturate(.88); }
-  50% { transform: scale(1.035); filter: saturate(1.14); }
+  0%, 100% { transform: scale(.985); opacity: .9; }
+  50% { transform: scale(1.025); opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
