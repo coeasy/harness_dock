@@ -17,7 +17,7 @@
 | 项目 | 当前值 |
 | --- | --- |
 | HarnessDock | `0.1.5` |
-| 发布通道 | `rc` |
+| 发布通道 | `stable`（正式发布） |
 | 当前发布 tag | `v0.1.5-rc.2` |
 | DeepSeek Harness Runtime | `dsh-v0.1.5-rc.2` |
 | Runtime commit | `fb2c4b9e698e30edb738bca4cf0618587db7d203` |
@@ -138,7 +138,7 @@ Get-FileHash .\HarnessDock-0.1.5-windows-x64-setup.exe -Algorithm SHA256
 
 ### macOS
 
-Apple Silicon 选择 `HarnessDock-0.1.5-macos-arm64.dmg`，Intel 选择 `HarnessDock-0.1.5-macos-x64.dmg`。当前候选版本未 notarize，请只从本仓库 Release 下载并与 `SHA256SUMS` 对照。
+Apple Silicon 选择 `HarnessDock-0.1.5-macos-arm64.dmg`，Intel 选择 `HarnessDock-0.1.5-macos-x64.dmg`。当前正式发布未 notarize，请只从本仓库 Release 下载并与 `SHA256SUMS` 对照。
 
 ### Linux
 
@@ -161,7 +161,7 @@ chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 
 ## Release 规则
 
-`v0.1.5-rc.2` 仍执行完整发布门禁，不因为是候选版本降低标准：
+`v0.1.5-rc.2` 作为正式发布仍执行完整发布门禁，不因为 tag 保留 `rc.2` 后缀而降低标准：
 
 1. 从 `release-manifest.json` 的精确上游 tag/commit 构建 official dsh source closure；
 2. 为 Windows / Linux / macOS 分别生成 sealed Runtime；
@@ -170,7 +170,7 @@ chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 5. `tauri-candidate` 构建所有目标资产；
 6. 只有同一 main SHA 上所有 required workflows 绿色，`release` 才允许组装、校验 SHA-256 并发布 GitHub Release。
 
-当前上游 GitHub Release 已存在 `dsh-v0.1.5-rc.2`。准备本候选时，npm 上 `@deepseek-ai/dsh` 仍显示 `0.1.5-rc.1`；HarnessDock 因此从上游 Git tag/commit 构建 rc.2 Runtime，而不会伪造不存在的 npm rc.2 tarball/integrity。
+当前上游 GitHub Release 已存在 `dsh-v0.1.5-rc.2`。准备本发布时，npm 上 `@deepseek-ai/dsh` 仍显示 `0.1.5-rc.1`；HarnessDock 因此从上游 Git tag/commit 构建 rc.2 Runtime，而不会伪造不存在的 npm rc.2 tarball/integrity。
 
 ## 开发
 
