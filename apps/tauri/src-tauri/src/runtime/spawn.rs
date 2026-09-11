@@ -308,10 +308,16 @@ pub fn dump_config(
                 let output = match child.wait_with_output() {
                     Ok(output) => output,
                     Err(error) => {
+                        registration.terminate_tree();
                         registration.complete();
                         return Err(error.to_string());
                     }
                 };
+                // dump-config is a short-lived helper. Its direct parent has
+                // completed, so any process that remains in the managed Job /
+                // process group is an orphan and must not survive into the
+                // Runtime start or application shutdown path.
+                registration.terminate_descendants_after_parent_exit();
                 registration.complete();
                 if !output.status.success() {
                     return Err(String::from_utf8_lossy(&output.stderr)
