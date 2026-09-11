@@ -21,20 +21,12 @@ pub async fn host_execute(
 ) -> ResponseEnvelope {
     let request_id = envelope.request_id.clone();
     if let Err(error) = envelope.validate() {
-        return ResponseEnvelope {
-            protocol_version: HOST_PROTOCOL_VERSION,
-            request_id,
-            result: Err(error),
-        };
+        return ResponseEnvelope { protocol_version: HOST_PROTOCOL_VERSION, request_id, result: Err(error) };
     }
     let subject = match trusted_subject(&app, &window, envelope.subject) {
         Ok(subject) => subject,
         Err(error) => {
-            return ResponseEnvelope {
-                protocol_version: HOST_PROTOCOL_VERSION,
-                request_id,
-                result: Err(error),
-            }
+            return ResponseEnvelope { protocol_version: HOST_PROTOCOL_VERSION, request_id, result: Err(error) };
         }
     };
     envelope.subject = subject;
@@ -51,31 +43,21 @@ fn trusted_subject(
         "harness" => {
             if claimed != SubjectKind::HarnessWeb {
                 return Err(HostError::new(
-                    "SUBJECT_MISMATCH",
-                    ErrorScope::Protocol,
-                    "Harness WebView must use the harness-web subject",
-                    false,
+                    "SUBJECT_MISMATCH", ErrorScope::Protocol,
+                    "Harness WebView must use the harness-web subject", false,
                 ));
             }
-            let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
-                    HostError::new(
-                        "RUNTIME_LEASE_REQUIRED",
-                        ErrorScope::Runtime,
-                        "Harness subject has no current RuntimeLease",
-                        true,
-                    )
-                })?;
-            let actual = window
-                .url()
-                .ok()
-                .map(|url| url.origin().ascii_serialization());
+            let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                HostError::new(
+                    "RUNTIME_LEASE_REQUIRED", ErrorScope::Runtime,
+                    "Harness subject has no current RuntimeLease", true,
+                )
+            })?;
+            let actual = window.url().ok().map(|url| url.origin().ascii_serialization());
             if actual.as_deref() != Some(lease.origin.as_str()) {
                 return Err(HostError::new(
-                    "ORIGIN_MISMATCH",
-                    ErrorScope::Protocol,
-                    "Harness WebView origin does not match the current RuntimeLease",
-                    false,
+                    "ORIGIN_MISMATCH", ErrorScope::Protocol,
+                    "Harness WebView origin does not match the current RuntimeLease", false,
                 ));
             }
             Ok(SubjectKind::HarnessWeb)
@@ -83,24 +65,17 @@ fn trusted_subject(
         "settings" => {
             if claimed != SubjectKind::Diagnostics {
                 return Err(HostError::new(
-                    "SUBJECT_MISMATCH",
-                    ErrorScope::Protocol,
-                    "Diagnostics window must use the diagnostics subject",
-                    false,
+                    "SUBJECT_MISMATCH", ErrorScope::Protocol,
+                    "Diagnostics window must use the diagnostics subject", false,
                 ));
             }
             Ok(SubjectKind::Diagnostics)
         }
         "control" => {
-            if !matches!(
-                claimed,
-                SubjectKind::DesktopShell | SubjectKind::Diagnostics
-            ) {
+            if !matches!(claimed, SubjectKind::DesktopShell | SubjectKind::Diagnostics) {
                 return Err(HostError::new(
-                    "SUBJECT_MISMATCH",
-                    ErrorScope::Protocol,
-                    "On-demand local control surface cannot impersonate native/menu/tray subjects",
-                    false,
+                    "SUBJECT_MISMATCH", ErrorScope::Protocol,
+                    "On-demand local control surface cannot impersonate native/menu/tray subjects", false,
                 ));
             }
             Ok(claimed)
@@ -108,19 +83,15 @@ fn trusted_subject(
         _ if cfg!(mobile) => {
             if claimed != SubjectKind::Mobile {
                 return Err(HostError::new(
-                    "SUBJECT_MISMATCH",
-                    ErrorScope::Protocol,
-                    "Mobile WebView must use the mobile subject",
-                    false,
+                    "SUBJECT_MISMATCH", ErrorScope::Protocol,
+                    "Mobile WebView must use the mobile subject", false,
                 ));
             }
             Ok(SubjectKind::Mobile)
         }
         _ => Err(HostError::new(
-            "UNTRUSTED_SURFACE",
-            ErrorScope::Protocol,
-            "This window is not a Host Protocol surface",
-            false,
+            "UNTRUSTED_SURFACE", ErrorScope::Protocol,
+            "This window is not a Host Protocol surface", false,
         )),
     }
 }
@@ -133,44 +104,21 @@ fn snapshot_subject(
     match window.label() {
         "harness" => {
             let subject = trusted_subject(app, window, SubjectKind::HarnessWeb)?;
-            let lease =
-                crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
-                    HostError::new(
-                        "RUNTIME_LEASE_REQUIRED",
-                        ErrorScope::Runtime,
-                        "Harness snapshot has no current RuntimeLease",
-                        true,
-                    )
-                })?;
-            let origin = window
-                .url()
-                .ok()
-                .map(|url| url.origin().ascii_serialization());
-            Ok((
-                subject,
-                SurfaceKind::Harness,
-                origin,
-                Some(lease.generation.id),
-            ))
+            let lease = crate::runtime::live_lease(&*app.state::<crate::AppState>()).ok_or_else(|| {
+                HostError::new(
+                    "RUNTIME_LEASE_REQUIRED", ErrorScope::Runtime,
+                    "Harness snapshot has no current RuntimeLease", true,
+                )
+            })?;
+            let origin = window.url().ok().map(|url| url.origin().ascii_serialization());
+            Ok((subject, SurfaceKind::Harness, origin, Some(lease.generation.id)))
         }
-        "settings" => Ok((
-            SubjectKind::Diagnostics,
-            SurfaceKind::Diagnostics,
-            None,
-            None,
-        )),
-        "control" => Ok((
-            SubjectKind::DesktopShell,
-            SurfaceKind::Diagnostics,
-            None,
-            None,
-        )),
+        "settings" => Ok((SubjectKind::Diagnostics, SurfaceKind::Diagnostics, None, None)),
+        "control" => Ok((SubjectKind::DesktopShell, SurfaceKind::Diagnostics, None, None)),
         _ if cfg!(mobile) => Ok((SubjectKind::Mobile, SurfaceKind::Gateway, None, None)),
         _ => Err(HostError::new(
-            "UNTRUSTED_SURFACE",
-            ErrorScope::Protocol,
-            "This window cannot request a Host capability snapshot",
-            false,
+            "UNTRUSTED_SURFACE", ErrorScope::Protocol,
+            "This window cannot request a Host capability snapshot", false,
         )),
     }
 }
@@ -182,51 +130,32 @@ pub fn host_snapshot(
 ) -> Result<HostSnapshot, HostError> {
     let (subject, surface, origin, runtime_generation) = snapshot_subject(&app, &window)?;
     let state = app.state::<crate::AppState>();
-    // Read through the single read-only snapshot layer (service::snapshot).
-    // This fixes one canonical lock order for status readers (runtime ->
-    // surface -> gateway) instead of letting each bridge command lock actors
-    // ad hoc.
     let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&*state);
     let runtime_phase = snapshot.runtime_phase;
     let lease = crate::runtime::live_lease(&*state);
     let capabilities = crate::capability_broker::allowed_capabilities(
-        subject,
-        surface,
-        origin.as_deref(),
-        runtime_generation,
-        lease.as_ref(),
+        subject, surface, origin.as_deref(), runtime_generation, lease.as_ref(),
     );
     let kernel = crate::host_kernel::public_state(&app);
     Ok(HostSnapshot {
         protocol_version: HOST_PROTOCOL_VERSION,
         min_compatible_version: HOST_PROTOCOL_MIN_COMPATIBLE_VERSION,
         schema_hash: HOST_PROTOCOL_SCHEMA_HASH.into(),
-        feature_flags: HOST_PROTOCOL_FEATURE_FLAGS
-            .iter()
-            .map(|value| (*value).into())
-            .collect(),
+        feature_flags: HOST_PROTOCOL_FEATURE_FLAGS.iter().map(|value| (*value).into()).collect(),
         revision: kernel.revision,
         event_sequence: kernel.event_sequence,
         runtime_phase,
         runtime_generation: snapshot.runtime_generation,
         runtime_dsh_version: lease.as_ref().map(|value| value.dsh_version.clone()),
-        runtime_image_identity: lease
-            .as_ref()
-            .map(|value| value.generation.image_identity.clone()),
+        runtime_image_identity: lease.as_ref().map(|value| value.generation.image_identity.clone()),
         harness_visible: snapshot.harness_visible,
         gateway_enabled: snapshot.gateway_enabled,
         capabilities,
     })
 }
 
-/// Transitional public diagnostics status. This function deliberately has a
-/// distinct Rust command name so it cannot collide with the legacy runtime
-/// module macro. It never returns the private launch credential URL.
 #[tauri::command]
 pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
-    // Read-only snapshot: this command only reports state. It must never
-    // reap a dead process or stop the gateway as a side effect of a status
-    // query issued from the diagnostics Surface.
     let mut status = crate::runtime::status_snapshot_readonly(&*app.state::<crate::AppState>());
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
@@ -240,14 +169,10 @@ pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
     status
 }
 
-/// Diagnostics is on-demand. Closing destroys the WebView instead of keeping a
-/// hidden renderer alive for the lifetime of the desktop process.
 #[tauri::command]
 pub fn diagnostics_close(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
-        window
-            .close()
-            .map_err(|error| format!("无法关闭插件诊断窗口: {error}"))?;
+        window.close().map_err(|error| format!("无法关闭插件诊断窗口: {error}"))?;
     }
     Ok(())
 }
@@ -260,6 +185,8 @@ macro_rules! handler {
             $crate::bridge::public_runtime_status,
             $crate::bridge::diagnostics_close,
             $crate::runtime::runtime_status,
+            $crate::runtime::runtime_launch_settings_get,
+            $crate::runtime::runtime_launch_settings_set,
             $crate::platform::platform_info,
             $crate::gateway::gateway_health,
             $crate::gateway::pair_gateway,
