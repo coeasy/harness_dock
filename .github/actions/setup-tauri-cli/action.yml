@@ -79,7 +79,8 @@ runs:
 
         verify_cli() {
           local output_file
-          output_file="${RUNNER_TEMP:-.}/harnessdock-tauri-cli-version.txt"
+          output_file="$TAURI_CLI_ROOT/.version-check.txt"
+          mkdir -p "$TAURI_CLI_ROOT"
           : > "$output_file"
 
           if [ ! -f "$binary" ]; then
