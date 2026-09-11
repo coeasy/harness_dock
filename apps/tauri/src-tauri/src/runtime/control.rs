@@ -261,7 +261,19 @@ async fn restart_managed_mode(app: AppHandle, mode: RuntimeMode) -> Result<Runti
     if state.quitting.load(Ordering::Acquire) {
         return Err("HarnessDock 正在退出，已拒绝 Runtime 重启。".into());
     }
-    stop_impl(&*state)?;
+
+    // Process-tree teardown can include taskkill/Job Object work on Windows and
+    // a TERM -> KILL grace period on Unix. Preserve strict stop-before-start
+    // ordering while keeping that synchronous OS work off async runtime workers.
+    let stop_app = app.clone();
+    let stop_result = tauri::async_runtime::spawn_blocking(move || {
+        let state = stop_app.state::<AppState>();
+        stop_impl(&*state)
+    })
+    .await
+    .map_err(|error| format!("Runtime 停止任务失败: {error}"))?;
+    stop_result?;
+
     let state = app.state::<AppState>();
     start_impl(app.clone(), state, mode).await
 }
