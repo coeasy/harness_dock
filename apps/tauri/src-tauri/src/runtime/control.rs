@@ -12,7 +12,11 @@ pub(crate) fn live_lease(state: &AppState) -> Option<RuntimeLease> {
 }
 
 pub fn mark_start_failed(state: &AppState, generation: u64, error: String) -> String {
-    state.runtime_actor.lock().recover("RuntimeActor").mark_failed(generation, error.clone());
+    state
+        .runtime_actor
+        .lock()
+        .recover("RuntimeActor")
+        .mark_failed(generation, error.clone());
     error
 }
 
@@ -46,7 +50,11 @@ pub fn runtime_status(state: State<'_, AppState>) -> RuntimeStatus {
     status_snapshot(&*state)
 }
 
-async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMode) -> Result<RuntimeStatus, String> {
+async fn start_impl(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: RuntimeMode,
+) -> Result<RuntimeStatus, String> {
     if cfg!(mobile) {
         return Err("Android/iOS 使用 Remote Gateway，不允许启动桌面 dsh Runtime。".into());
     }
@@ -63,7 +71,10 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
     // cannot mutate the identity of an in-flight RuntimeLease.
     let launch = resolve_runtime_launch_spec(&app);
     let (generation, token) = {
-        let mut actor = state.runtime_actor.lock().map_err(|_| lock_err("RuntimeActor"))?;
+        let mut actor = state
+            .runtime_actor
+            .lock()
+            .map_err(|_| lock_err("RuntimeActor"))?;
         actor.begin_start(mode)?
     };
     let image = match load_runtime_image(&app) {
@@ -71,7 +82,10 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
         Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
     };
     let generation = {
-        let mut actor = state.runtime_actor.lock().map_err(|_| lock_err("RuntimeActor"))?;
+        let mut actor = state
+            .runtime_actor
+            .lock()
+            .map_err(|_| lock_err("RuntimeActor"))?;
         let generation = match actor.bind_image(generation.id, image.image_identity.clone()) {
             Ok(generation) => generation,
             Err(error) => {
@@ -96,11 +110,14 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
         .map_err(|error| mark_start_failed(&*state, generation.id, error))?;
     let shell_plugin_path = resource_path(&app, "plugin-harness-shell/index.js")
         .map_err(|error| mark_start_failed(&*state, generation.id, error))?;
-    let quarantine_state_path = quarantine_path(&app)
-        .map_err(|error| mark_start_failed(&*state, generation.id, error))?;
+    let quarantine_state_path =
+        quarantine_path(&app).map_err(|error| mark_start_failed(&*state, generation.id, error))?;
     for required in [&plugin_path, &compatibility_path, &shell_plugin_path] {
         if !required.is_file() {
-            let error = format!("Tauri Runtime integration resource missing: {}", required.display());
+            let error = format!(
+                "Tauri Runtime integration resource missing: {}",
+                required.display()
+            );
             return Err(mark_start_failed(&*state, generation.id, error));
         }
     }
@@ -124,7 +141,9 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
             starting_processes,
             quitting,
         )
-    }).await {
+    })
+    .await
+    {
         Ok(process) => process,
         Err(error) => {
             return Err(mark_start_failed(
@@ -143,11 +162,15 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
         process.stop();
         match state.runtime_actor.lock() {
             Ok(mut actor) => {
-                if actor.generation_id() == Some(generation.id) { actor.settle_stopped(); }
+                if actor.generation_id() == Some(generation.id) {
+                    actor.settle_stopped();
+                }
             }
             Err(poisoned) => {
                 let mut actor = poisoned.into_inner();
-                if actor.generation_id() == Some(generation.id) { actor.settle_stopped(); }
+                if actor.generation_id() == Some(generation.id) {
+                    actor.settle_stopped();
+                }
             }
         }
         return Err("Runtime generation was cancelled before publication".into());
@@ -161,7 +184,10 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
     };
     let degraded = process.safe_mode || !process.isolated_plugins.is_empty();
     {
-        let mut actor = state.runtime_actor.lock().map_err(|_| lock_err("RuntimeActor"))?;
+        let mut actor = state
+            .runtime_actor
+            .lock()
+            .map_err(|_| lock_err("RuntimeActor"))?;
         if let Err(mut stale) = actor.publish_ready(generation.id, process, lease, degraded) {
             stale.stop();
             return Err("陈旧 Runtime generation 已被丢弃。".into());
@@ -181,7 +207,10 @@ async fn start_impl(app: AppHandle, state: State<'_, AppState>, mode: RuntimeMod
 }
 
 #[tauri::command]
-pub async fn runtime_start(app: AppHandle, state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
+pub async fn runtime_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RuntimeStatus, String> {
     start_impl(app, state, RuntimeMode::Normal).await
 }
 
@@ -193,13 +222,21 @@ pub(crate) async fn start_for_boot(app: AppHandle) -> Result<RuntimeStatus, Stri
 pub fn stop_impl(state: &AppState) -> Result<RuntimeStatus, String> {
     crate::gateway_host::stop_managed(&state.gateway);
     let process = {
-        let mut actor = state.runtime_actor.lock().map_err(|_| lock_err("RuntimeActor"))?;
+        let mut actor = state
+            .runtime_actor
+            .lock()
+            .map_err(|_| lock_err("RuntimeActor"))?;
         actor.begin_stop()
     };
     process_control::stop_starting_processes(&state.starting_processes);
-    if let Some(mut process) = process { process.stop(); }
+    if let Some(mut process) = process {
+        process.stop();
+    }
     {
-        let mut actor = state.runtime_actor.lock().map_err(|_| lock_err("RuntimeActor"))?;
+        let mut actor = state
+            .runtime_actor
+            .lock()
+            .map_err(|_| lock_err("RuntimeActor"))?;
         actor.settle_stopped();
     }
     crate::gateway_host::stop_managed(&state.gateway);
@@ -239,7 +276,9 @@ pub(crate) fn stop_managed(runtime: &Mutex<RuntimeActor>) {
         Ok(mut actor) => actor.begin_stop(),
         Err(poisoned) => poisoned.into_inner().begin_stop(),
     };
-    if let Some(mut process) = process { process.stop(); }
+    if let Some(mut process) = process {
+        process.stop();
+    }
     match runtime.lock() {
         Ok(mut actor) => actor.settle_stopped(),
         Err(poisoned) => poisoned.into_inner().settle_stopped(),
