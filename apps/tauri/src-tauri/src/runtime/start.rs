@@ -285,8 +285,7 @@ pub fn start_blocking(
                     ));
                 }
             };
-            let (selected, suspected, reason) =
-                recovery_plan(&rows, &first_failure.diagnostic);
+            let (selected, suspected, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 return work_dir_guard.retain_result(safe_profile(
                     &image,
