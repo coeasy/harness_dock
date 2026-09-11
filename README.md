@@ -6,7 +6,7 @@
 
 **DeepSeek Harness 的跨平台原生客户端**
 
-[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.5-rc.2 发布说明](.github/release-notes/v0.1.5-rc.2.md)
+[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.5 发布说明](.github/release-notes/v0.1.5.md)
 
 </div>
 
@@ -18,7 +18,7 @@
 | --- | --- |
 | HarnessDock | `0.1.5` |
 | 发布通道 | `stable`（正式发布） |
-| 当前发布 tag | `v0.1.5-rc.2` |
+| 当前发布 tag | `v0.1.5` |
 | DeepSeek Harness Runtime | `dsh-v0.1.5-rc.2` |
 | Runtime commit | `fb2c4b9e698e30edb738bca4cf0618587db7d203` |
 | 桌面宿主 | Tauri 2 |
@@ -47,7 +47,7 @@ Android / iOS 不在设备中启动 Node/dsh，只作为 Remote Gateway 客户�
 
 ## dsh Profile 启动
 
-从 `v0.1.5-rc.2` 开始，HarnessDock 不再把 Runtime profile 固定为不可配置的 `web`。在 **插件诊断 / Diagnostics → dsh 启动配置** 中可以设置：
+从 `v0.1.5-rc.2` 候选线开始，HarnessDock 不再把 Runtime profile 固定为不可配置的 `web`。在 **插件诊断 / Diagnostics → dsh 启动配置** 中可以设置：
 
 | 配置 | 说明 |
 | --- | --- |
@@ -161,7 +161,7 @@ chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 
 ## Release 规则
 
-`v0.1.5-rc.2` 作为正式发布仍执行完整发布门禁，不因为 tag 保留 `rc.2` 后缀而降低标准：
+`v0.1.5` 作为正式稳定版执行完整发布门禁，不降低任何候选、Runtime、安装启动或校验要求：
 
 1. 从 `release-manifest.json` 的精确上游 tag/commit 构建 official dsh source closure；
 2. 为 Windows / Linux / macOS 分别生成 sealed Runtime；
@@ -170,7 +170,7 @@ chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 5. `tauri-candidate` 构建所有目标资产；
 6. 只有同一 main SHA 上所有 required workflows 绿色，`release` 才允许组装、校验 SHA-256 并发布 GitHub Release。
 
-当前上游 GitHub Release 已存在 `dsh-v0.1.5-rc.2`。准备本发布时，npm 上 `@deepseek-ai/dsh` 仍显示 `0.1.5-rc.1`；HarnessDock 因此从上游 Git tag/commit 构建 rc.2 Runtime，而不会伪造不存在的 npm rc.2 tarball/integrity。
+当前 Runtime 精确固定到上游 `dsh-v0.1.5-rc.2`。如果 npm 上 `@deepseek-ai/dsh` 的 umbrella 包落后于该 Git tag，HarnessDock 仍以不可变的上游 Git tag/commit 构建 Runtime，而不会伪造不存在的 npm tarball/integrity。
 
 ## 开发
 
