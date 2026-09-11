@@ -1,0 +1,82 @@
+name: Setup exact Tauri CLI
+description: Restore or source-build the exact pinned Tauri CLI with a toolchain-scoped cache.
+
+inputs:
+  rust-toolchain:
+    description: Exact Rust toolchain used for the Tauri CLI cache identity.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve exact Tauri CLI identity
+      id: identity
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(node -p "String(require('./scripts/versions.json').tauriCli || '')")"
+        if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "invalid Tauri CLI version in scripts/versions.json: $version" >&2
+          exit 1
+        fi
+
+        expected_rust='${{ inputs.rust-toolchain }}'
+        actual_rust="$(rustc --version)"
+        case "$actual_rust" in
+          "rustc ${expected_rust} "*) ;;
+          *)
+            echo "Rust toolchain mismatch for Tauri CLI cache: expected rustc ${expected_rust}, got ${actual_rust}" >&2
+            exit 1
+            ;;
+        esac
+
+        root=".local-tools/tauri-cli-${version}"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "root=$root" >> "$GITHUB_OUTPUT"
+
+    - name: Restore exact Tauri CLI cache
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.identity.outputs.root }}
+        key: harnessdock-tauri-cli-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ inputs.rust-toolchain }}-tauri-${{ steps.identity.outputs.version }}
+
+    - name: Source-build or verify exact Tauri CLI
+      shell: bash
+      env:
+        TAURI_CLI_ROOT: ${{ steps.identity.outputs.root }}
+        TAURI_CLI_VERSION: ${{ steps.identity.outputs.version }}
+        TAURI_CLI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        set -euo pipefail
+
+        binary="$TAURI_CLI_ROOT/bin/cargo-tauri"
+        if [ "${RUNNER_OS:-}" = Windows ]; then
+          binary="${binary}.exe"
+        fi
+
+        if [ "$TAURI_CLI_CACHE_HIT" != 'true' ]; then
+          rm -rf "$TAURI_CLI_ROOT"
+          cargo install tauri-cli \
+            --version "$TAURI_CLI_VERSION" \
+            --locked \
+            --root "$TAURI_CLI_ROOT" \
+            --force
+        fi
+
+        test -f "$binary" || {
+          echo "Tauri CLI binary is missing after setup: $binary" >&2
+          exit 1
+        }
+        actual="$($binary --version 2>&1)"
+        case "$actual" in
+          *"$TAURI_CLI_VERSION"*) ;;
+          *)
+            echo "Tauri CLI version mismatch: expected $TAURI_CLI_VERSION, got $actual" >&2
+            exit 1
+            ;;
+        esac
+
+        bin_path="$(node -e "const path=require('node:path'); console.log(path.resolve(process.argv[1], 'bin'))" "$TAURI_CLI_ROOT")"
+        echo "$bin_path" >> "$GITHUB_PATH"
+        echo "Exact Tauri CLI ready: version=$TAURI_CLI_VERSION cache_hit=${TAURI_CLI_CACHE_HIT:-false} root=$TAURI_CLI_ROOT"
