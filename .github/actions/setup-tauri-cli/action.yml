@@ -1,5 +1,5 @@
 name: Setup exact Tauri CLI
-description: Restore or source-build the exact pinned Tauri CLI with a toolchain-scoped cache.
+description: Restore or source-build the exact pinned Tauri CLI with a toolchain- and runner-image-scoped cache.
 
 inputs:
   rust-toolchain:
@@ -30,16 +30,37 @@ runs:
             ;;
         esac
 
+        runner_image="${ImageOS:-}"
+        if [ -z "$runner_image" ]; then
+          case "${RUNNER_OS:-unknown}" in
+            Linux)
+              libc_version="$(ldd --version 2>/dev/null | awk 'NR == 1 { print $NF }')"
+              runner_image="linux-glibc-${libc_version:-unknown}"
+              ;;
+            macOS)
+              runner_image="macos-$(sw_vers -productVersion 2>/dev/null || echo unknown)"
+              ;;
+            Windows)
+              runner_image="windows-${RUNNER_ENVIRONMENT:-hosted}"
+              ;;
+            *)
+              runner_image="${RUNNER_OS:-unknown}"
+              ;;
+          esac
+        fi
+        runner_image="$(printf '%s' "$runner_image" | tr -c 'A-Za-z0-9._-' '-')"
+
         root=".local-tools/tauri-cli-${version}"
         echo "version=$version" >> "$GITHUB_OUTPUT"
         echo "root=$root" >> "$GITHUB_OUTPUT"
+        echo "runner-image=$runner_image" >> "$GITHUB_OUTPUT"
 
     - name: Restore exact Tauri CLI cache
       id: cache
       uses: actions/cache@v6
       with:
         path: ${{ steps.identity.outputs.root }}
-        key: harnessdock-tauri-cli-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ inputs.rust-toolchain }}-tauri-${{ steps.identity.outputs.version }}
+        key: harnessdock-tauri-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.runner-image }}-rust-${{ inputs.rust-toolchain }}-tauri-${{ steps.identity.outputs.version }}
 
     - name: Source-build or verify exact Tauri CLI
       shell: bash
@@ -47,6 +68,7 @@ runs:
         TAURI_CLI_ROOT: ${{ steps.identity.outputs.root }}
         TAURI_CLI_VERSION: ${{ steps.identity.outputs.version }}
         TAURI_CLI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        TAURI_CLI_RUNNER_IMAGE: ${{ steps.identity.outputs.runner-image }}
       run: |
         set -euo pipefail
 
@@ -55,7 +77,45 @@ runs:
           binary="${binary}.exe"
         fi
 
+        verify_cli() {
+          local output_file
+          output_file="${RUNNER_TEMP:-.}/harnessdock-tauri-cli-version.txt"
+          : > "$output_file"
+
+          if [ ! -f "$binary" ]; then
+            echo "Tauri CLI binary is missing: $binary" >&2
+            return 1
+          fi
+          if [ "${RUNNER_OS:-}" != Windows ] && [ ! -x "$binary" ]; then
+            echo "Tauri CLI binary is not executable: $binary" >&2
+            return 1
+          fi
+          if ! "$binary" --version >"$output_file" 2>&1; then
+            echo "Tauri CLI binary cannot execute on runner image ${TAURI_CLI_RUNNER_IMAGE:-unknown}: $binary" >&2
+            cat "$output_file" >&2 || true
+            return 1
+          fi
+
+          local actual
+          actual="$(cat "$output_file")"
+          case "$actual" in
+            *"$TAURI_CLI_VERSION"*) return 0 ;;
+            *)
+              echo "Tauri CLI version mismatch: expected $TAURI_CLI_VERSION, got $actual" >&2
+              return 1
+              ;;
+          esac
+        }
+
+        needs_build=false
         if [ "$TAURI_CLI_CACHE_HIT" != 'true' ]; then
+          needs_build=true
+        elif ! verify_cli; then
+          echo "Cached Tauri CLI is unusable on runner image ${TAURI_CLI_RUNNER_IMAGE:-unknown}; rebuilding the exact pinned CLI." >&2
+          needs_build=true
+        fi
+
+        if [ "$needs_build" = true ]; then
           rm -rf "$TAURI_CLI_ROOT"
           cargo install tauri-cli \
             --version "$TAURI_CLI_VERSION" \
@@ -64,19 +124,11 @@ runs:
             --force
         fi
 
-        test -f "$binary" || {
-          echo "Tauri CLI binary is missing after setup: $binary" >&2
+        if ! verify_cli; then
+          echo "Exact Tauri CLI verification failed after setup." >&2
           exit 1
-        }
-        actual="$($binary --version 2>&1)"
-        case "$actual" in
-          *"$TAURI_CLI_VERSION"*) ;;
-          *)
-            echo "Tauri CLI version mismatch: expected $TAURI_CLI_VERSION, got $actual" >&2
-            exit 1
-            ;;
-        esac
+        fi
 
         bin_path="$(node -e "const path=require('node:path'); console.log(path.resolve(process.argv[1], 'bin'))" "$TAURI_CLI_ROOT")"
         echo "$bin_path" >> "$GITHUB_PATH"
-        echo "Exact Tauri CLI ready: version=$TAURI_CLI_VERSION cache_hit=${TAURI_CLI_CACHE_HIT:-false} root=$TAURI_CLI_ROOT"
+        echo "Exact Tauri CLI ready: version=$TAURI_CLI_VERSION cache_hit=${TAURI_CLI_CACHE_HIT:-false} runner_image=${TAURI_CLI_RUNNER_IMAGE:-unknown} root=$TAURI_CLI_ROOT"
