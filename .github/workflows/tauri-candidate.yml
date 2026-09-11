@@ -29,6 +29,7 @@ on:
       - 'scripts/versions.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - '.github/actions/setup-tauri-cli/**'
       - '.github/release-notes/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/release.yml'
@@ -293,12 +294,10 @@ jobs:
             test ! -e apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@img/sharp-linuxmusl-x64
             test -x apps/tauri/src-tauri/resources/dsh-runtime/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/landlock-run
           fi
-      - name: Install exact Tauri CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          tauri_version="$(node -p "require('./scripts/versions.json').tauriCli")"
-          cargo install tauri-cli --version "$tauri_version" --locked
+      - name: Install cached exact Tauri CLI
+        uses: ./.github/actions/setup-tauri-cli
+        with:
+          rust-toolchain: '1.98.0'
       - name: Confirm unsigned candidate packaging
         shell: bash
         run: |
@@ -419,12 +418,10 @@ jobs:
         with:
           workspaces: apps/tauri/src-tauri
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Install exact Tauri CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          tauri_version="$(node -p "require('./scripts/versions.json').tauriCli")"
-          cargo install tauri-cli --version "$tauri_version" --locked
+      - name: Install cached exact Tauri CLI
+        uses: ./.github/actions/setup-tauri-cli
+        with:
+          rust-toolchain: '1.98.0'
       - name: Resolve Android NDK
         id: ndk
         shell: bash
@@ -489,12 +486,10 @@ jobs:
         with:
           workspaces: apps/tauri/src-tauri
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Install exact Tauri CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          tauri_version="$(node -p "require('./scripts/versions.json').tauriCli")"
-          cargo install tauri-cli --version "$tauri_version" --locked
+      - name: Install cached exact Tauri CLI
+        uses: ./.github/actions/setup-tauri-cli
+        with:
+          rust-toolchain: '1.98.0'
       - name: Initialize iOS project
         working-directory: apps/tauri
         run: cargo tauri ios init --ci

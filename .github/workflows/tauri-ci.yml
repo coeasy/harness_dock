@@ -13,8 +13,11 @@ on:
       - 'packages/plugin-harness-shell/**'
       - 'protocol/**'
       - 'scripts/check-embedded-runtime.mjs'
+      - 'scripts/check-versions.mjs'
+      - 'scripts/versions.json'
       - 'tests/parity/**'
       - 'rust-toolchain.toml'
+      - '.github/actions/setup-tauri-cli/**'
       - '.github/workflows/tauri-ci.yml'
   pull_request:
     paths:
@@ -25,8 +28,11 @@ on:
       - 'packages/plugin-harness-shell/**'
       - 'protocol/**'
       - 'scripts/check-embedded-runtime.mjs'
+      - 'scripts/check-versions.mjs'
+      - 'scripts/versions.json'
       - 'tests/parity/**'
       - 'rust-toolchain.toml'
+      - '.github/actions/setup-tauri-cli/**'
       - '.github/workflows/tauri-ci.yml'
 
 concurrency:
@@ -104,8 +110,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/tauri/src-tauri
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Install cached exact Tauri CLI
+        uses: ./.github/actions/setup-tauri-cli
+        with:
+          rust-toolchain: '1.98.0'
       - name: Resolve Android NDK
         shell: bash
         run: |
@@ -145,8 +153,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/tauri/src-tauri
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.11.4 --locked
+      - name: Install cached exact Tauri CLI
+        uses: ./.github/actions/setup-tauri-cli
+        with:
+          rust-toolchain: '1.98.0'
       - name: Initialize iOS project
         working-directory: apps/tauri
         run: cargo tauri ios init --ci --skip-targets-install
