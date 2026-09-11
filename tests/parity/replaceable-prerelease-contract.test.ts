@@ -7,21 +7,30 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const read = (relative: string) => readFileSync(path.join(repoRoot, relative), 'utf8').replace(/\r\n/g, '\n')
 const manifest = JSON.parse(read('release-manifest.json')) as any
 
-describe('replaceable prerelease publication contract', () => {
-  it('allows the current RC tag to be reissued only as a GitHub prerelease', () => {
-    expect(manifest.channel).toBe('rc')
-    expect(manifest.publication.githubPrerelease).toBe(true)
-    expect(manifest.publication.replaceablePrerelease).toBe(true)
+describe('release publication classification contract', () => {
+  it('publishes v0.1.5 as an immutable stable GitHub release', () => {
+    expect(manifest.channel).toBe('stable')
+    expect(manifest.prerelease).toBe('')
+    expect(manifest.publication.tagTemplate).toBe('v{version}')
+    expect(manifest.publication.githubPrerelease).toBe(false)
+    expect(manifest.publication.replaceablePrerelease).toBe(false)
+  })
+
+  it('keeps the bundled upstream Runtime pinned to dsh rc.2 independently of client publication channel', () => {
+    expect(manifest.runtime.version).toBe('0.1.5-rc.2')
+    expect(manifest.runtime.gitTag).toBe('dsh-v0.1.5-rc.2')
+    expect(manifest.runtime.gitCommit).toBe('fb2c4b9e698e30edb738bca4cf0618587db7d203')
   })
 
   it('keeps stable releases permanently non-replaceable in the contract validator', () => {
     const contract = read('scripts/release/contract.mjs')
     expect(contract).toContain("manifest.channel === 'stable'")
     expect(contract).toContain("stable releases cannot move a replaceable prerelease tag")
+    expect(contract).toContain("stable releases cannot be GitHub prereleases")
     expect(contract).toContain("replaceablePrerelease requires githubPrerelease=true")
   })
 
-  it('replaces only an existing managed published prerelease and re-verifies the new tag and assets', () => {
+  it('retains guarded replacement logic only for managed prerelease channels', () => {
     const publisher = read('scripts/release/publish-github.mjs')
     expect(publisher).toContain('if (!plan.replaceablePrerelease)')
     expect(publisher).toContain('if (!release)')
