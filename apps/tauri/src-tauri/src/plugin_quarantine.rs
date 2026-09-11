@@ -7,10 +7,10 @@ use std::{
 
 const DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
 
-/// Schema v2: quarantine records carry a `dsh_base_version` and survive
-/// prerelease-only upgrades of the same base SemVer (e.g. 0.1.2-rc.1 ->
-/// 0.1.2), while still invalidating across base-version changes.
-const SCHEMA_VERSION: u8 = 2;
+/// Schema v3 binds a quarantine record to both the dsh base version and the
+/// effective Runtime launch scope. This prevents a record learned from one
+/// profile/DSH_HOME tree from disabling plugins in another tree.
+const SCHEMA_VERSION: u8 = 3;
 
 /// Extract the `MAJOR.MINOR.PATCH` base version from a full SemVer-ish string
 /// such as `0.1.2-rc.1` or `0.1.2`. Falls back to the input when it has no
@@ -27,6 +27,10 @@ pub(crate) struct PluginQuarantineRecord {
     pub dsh_version: String,
     #[serde(default)]
     pub dsh_base_version: String,
+    /// Stable identity of the profile plus effective DSH_HOME used when the
+    /// failure was attributed. Empty only on legacy schema records.
+    #[serde(default)]
+    pub launch_scope: String,
     pub created_at: u64,
     pub expires_at: u64,
     pub isolated_plugins: Vec<String>,
@@ -45,26 +49,31 @@ fn valid_reason(reason: &str) -> bool {
     reason == "diagnostic-match" || reason == "ambiguous"
 }
 
-/// Whether a persisted record still applies to the current runtime version.
-fn record_applies(record: &PluginQuarantineRecord, dsh_version: &str) -> bool {
-    if record.schema_version > SCHEMA_VERSION {
+/// Whether a persisted record still applies to the current Runtime launch.
+///
+/// Schema v1/v2 records predate profile/DSH_HOME scoping. They are deliberately
+/// invalidated once rather than being guessed into a possibly different plugin
+/// tree. A fresh failure can immediately rebuild a v3 record for that scope.
+fn record_applies(
+    record: &PluginQuarantineRecord,
+    dsh_version: &str,
+    launch_scope: &str,
+) -> bool {
+    if record.schema_version != SCHEMA_VERSION {
         return false;
     }
-    match record.schema_version {
-        // Schema v1 (strict version match) is honoured for backwards
-        // compatibility: a record written by an older client only applies to
-        // the exact runtime version it was created against.
-        1 => record.dsh_version == dsh_version,
-        // Schema v2: apply across prerelease-only upgrades of the same base
-        // SemVer, invalidate on cross-base-version upgrades.
-        _ => {
-            let expected_base = base_version(dsh_version);
-            !expected_base.is_empty() && record.dsh_base_version == expected_base
-        }
-    }
+    let expected_base = base_version(dsh_version);
+    !expected_base.is_empty()
+        && record.dsh_base_version == expected_base
+        && !launch_scope.is_empty()
+        && record.launch_scope == launch_scope
 }
 
-pub(crate) fn read(path: &Path, dsh_version: &str) -> Option<PluginQuarantineRecord> {
+pub(crate) fn read(
+    path: &Path,
+    dsh_version: &str,
+    launch_scope: &str,
+) -> Option<PluginQuarantineRecord> {
     let record = fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str::<PluginQuarantineRecord>(&raw).ok());
@@ -72,7 +81,7 @@ pub(crate) fn read(path: &Path, dsh_version: &str) -> Option<PluginQuarantineRec
         let _ = fs::remove_file(path);
         return None;
     };
-    if !record_applies(&record, dsh_version)
+    if !record_applies(&record, dsh_version, launch_scope)
         || record.expires_at <= now_secs()
         || record.isolated_plugins.is_empty()
         || !valid_reason(&record.reason)
@@ -110,10 +119,14 @@ fn commit_replace(tmp: &Path, path: &Path) -> Result<(), String> {
 pub(crate) fn write(
     path: &Path,
     dsh_version: &str,
+    launch_scope: &str,
     isolated_plugins: Vec<String>,
     suspected_plugins: Vec<String>,
     reason: &str,
 ) -> Result<PluginQuarantineRecord, String> {
+    if launch_scope.is_empty() {
+        return Err("plugin quarantine requires a launch scope".into());
+    }
     if isolated_plugins.is_empty() {
         return Err("plugin quarantine requires at least one plugin id".into());
     }
@@ -128,6 +141,7 @@ pub(crate) fn write(
         schema_version: SCHEMA_VERSION,
         dsh_version: dsh_version.to_string(),
         dsh_base_version: base_version(dsh_version),
+        launch_scope: launch_scope.to_string(),
         created_at,
         expires_at: created_at.saturating_add(DEFAULT_TTL_SECS),
         isolated_plugins,
@@ -153,6 +167,8 @@ pub(crate) fn clear(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    const SCOPE: &str = "profile=web\ndsh_home=/tmp/dsh-a";
+
     fn test_root(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "harnessdock-quarantine-{name}-{}-{:?}",
@@ -170,20 +186,19 @@ mod tests {
         write(
             &file,
             "old",
+            SCOPE,
             vec!["legacy-a".into(), "legacy-b".into()],
             vec!["legacy-a".into()],
             "diagnostic-match",
         )
         .unwrap();
-        assert!(read(&file, "new").is_none());
+        assert!(read(&file, "new", SCOPE).is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn newest_quarantine_survives_prerelease_ignored_upgrade() {
-        // v0.1.2-rc.1 and v0.1.2 share the same base SemVer: the isolation
-        // policy must outlive a prerelease-only runtime upgrade.
+    fn quarantine_survives_prerelease_upgrade_in_same_launch_scope() {
         let root = test_root("prerelease-upgrade");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -191,25 +206,74 @@ mod tests {
         write(
             &file,
             "0.1.2-rc.1",
+            SCOPE,
             vec!["bad-a".into()],
             vec!["bad-a".into()],
             "diagnostic-match",
         )
         .unwrap();
         assert_eq!(
-            read(&file, "0.1.2")
-                .expect("rc -> stable keeps quarantine")
+            read(&file, "0.1.2", SCOPE)
+                .expect("rc -> stable keeps quarantine in same scope")
                 .isolated_plugins,
             vec!["bad-a"]
         );
         assert_eq!(
-            read(&file, "0.1.2-rc.2")
-                .expect("rc -> rc keeps quarantine")
+            read(&file, "0.1.2-rc.2", SCOPE)
+                .expect("rc -> rc keeps quarantine in same scope")
                 .isolated_plugins,
             vec!["bad-a"]
         );
-        // Cross-base upgrade invalidates and removes.
-        assert!(read(&file, "0.2.0").is_none());
+        assert!(read(&file, "0.2.0", SCOPE).is_none());
+        assert!(!file.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn launch_scope_mismatch_invalidates_quarantine() {
+        let root = test_root("scope");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        write(
+            &file,
+            "0.1.5-rc.2",
+            SCOPE,
+            vec!["bad-a".into()],
+            vec!["bad-a".into()],
+            "diagnostic-match",
+        )
+        .unwrap();
+        assert!(read(
+            &file,
+            "0.1.5-rc.2",
+            "profile=web\ndsh_home=/tmp/dsh-b"
+        )
+        .is_none());
+        assert!(!file.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_unscoped_quarantine_is_invalidated_once() {
+        let root = test_root("legacy-scope");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        let now = now_secs();
+        let legacy = PluginQuarantineRecord {
+            schema_version: 2,
+            dsh_version: "0.1.5-rc.1".into(),
+            dsh_base_version: "0.1.5".into(),
+            launch_scope: String::new(),
+            created_at: now,
+            expires_at: now.saturating_add(DEFAULT_TTL_SECS),
+            isolated_plugins: vec!["bad-a".into()],
+            suspected_plugins: vec!["bad-a".into()],
+            reason: "diagnostic-match".into(),
+        };
+        fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert!(read(&file, "0.1.5-rc.2", SCOPE).is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -223,6 +287,7 @@ mod tests {
         write(
             &file,
             "same",
+            SCOPE,
             vec!["plugin-a".into()],
             vec!["plugin-a".into()],
             "diagnostic-match",
@@ -231,12 +296,14 @@ mod tests {
         let second = write(
             &file,
             "same",
+            SCOPE,
             vec!["plugin-b".into()],
             vec!["plugin-b".into()],
             "ambiguous",
         )
         .unwrap();
-        let persisted = read(&file, "same").expect("replacement quarantine should be readable");
+        let persisted =
+            read(&file, "same", SCOPE).expect("replacement quarantine should be readable");
         assert_eq!(persisted.isolated_plugins, vec!["plugin-b"]);
         assert_eq!(persisted.reason, "ambiguous");
         assert_eq!(persisted, second);
