@@ -13,11 +13,13 @@ describe('managed process lifecycle contract', () => {
     const desktop = read('apps/tauri/src-tauri/src/desktop.rs')
     const supervisor = read('apps/tauri/src-tauri/src/supervisor.rs')
 
-    expect(tray).toContain('"tray-quit" => crate::request_exit(app)')
-    expect(desktop).toContain('WindowEvent::CloseRequested')
-    expect(desktop).toContain('supervisor::request_exit(app_handle)')
-    expect(desktop).toContain('RunEvent::Exit => supervisor::stop_managed_processes(app_handle)')
-    expect(supervisor).toContain('state.quitting.swap(true, Ordering::AcqRel)')
+    expect(tray).toContain('"tray-quit" => {')
+    expect(tray).toContain('crate::request_exit(app);')
+    expect(desktop).toContain('tauri::WindowEvent::CloseRequested')
+    expect(desktop).toContain('crate::supervisor::request_exit(app_handle);')
+    expect(desktop).toContain('tauri::RunEvent::Exit => {')
+    expect(desktop).toContain('crate::supervisor::stop_managed_processes(app_handle);')
+    expect(supervisor).toContain('state.quitting.swap(true, Ordering::SeqCst)')
     expect(supervisor).toContain('process::stop_starting_processes(&state.starting_processes)')
     expect(supervisor).toContain('gateway_host::stop_managed(&state.gateway)')
     expect(supervisor).toContain('runtime::stop_managed(&state.runtime_actor)')
@@ -43,7 +45,7 @@ describe('managed process lifecycle contract', () => {
 
     const restart = control.indexOf('async fn restart_managed_mode')
     expect(restart).toBeGreaterThanOrEqual(0)
-    const restartBody = control.slice(restart, control.indexOf('\n#[tauri::command]', restart))
+    const restartBody = control.slice(restart)
     expect(restartBody.indexOf('stop_impl(')).toBeGreaterThanOrEqual(0)
     expect(restartBody.indexOf('start_impl(')).toBeGreaterThan(restartBody.indexOf('stop_impl('))
     expect(surface).toContain('if self.operation != SurfaceOperation::Idle')
@@ -51,13 +53,14 @@ describe('managed process lifecycle contract', () => {
 
   it('owns Runtime trees and reaps short-lived helper descendants', () => {
     const process = read('apps/tauri/src-tauri/src/process.rs')
+    const platform = read('apps/tauri/src-tauri/src/platform.rs')
     const spawn = read('apps/tauri/src-tauri/src/runtime/spawn.rs')
     const runtimeTypes = read('apps/tauri/src-tauri/src/runtime/types.rs')
 
     expect(process).toContain('JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE')
     expect(process).toContain('AssignProcessToJobObject')
     expect(process).toContain('TerminateJobObject')
-    expect(process).toContain('command.process_group')
+    expect(platform).toContain('command.process_group(0)')
     expect(process).toContain('stop_process_group_after_parent_exit')
     expect(process).toContain('Err(poisoned) => poisoned.into_inner().is_empty()')
     expect(spawn).toContain('registration.terminate_descendants_after_parent_exit()')
