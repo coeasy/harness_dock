@@ -28,7 +28,10 @@ pub fn launch_attempt(
         starting_processes,
         quitting,
     )
-    .map_err(|message| AttemptFailure { message, diagnostic: String::new() })?;
+    .map_err(|message| AttemptFailure {
+        message,
+        diagnostic: String::new(),
+    })?;
     let pid = child.id();
     let ready = match wait_for_ready(
         &mut child,
@@ -90,7 +93,11 @@ pub fn safe_profile(
         quitting,
     )
     .map_err(|error| {
-        format!("安全配置启动失败: {}\n{}", error.message, public_diagnostic(&error.diagnostic))
+        format!(
+            "安全配置启动失败: {}\n{}",
+            error.message,
+            public_diagnostic(&error.diagnostic)
+        )
     })?;
     process.safe_mode = true;
     process.recovery_source = "safe-profile".into();
@@ -199,12 +206,18 @@ pub fn start_blocking(
         };
     }
 
-    let recovery_enabled = std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+    let recovery_enabled =
+        std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
     if recovery_enabled {
-        if let Some(quarantine) = plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version) {
+        if let Some(quarantine) =
+            plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version)
+        {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
-            fs::write(&quarantine_file, recovery_patch_ids(&quarantine.isolated_plugins)?)
-                .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
+            fs::write(
+                &quarantine_file,
+                recovery_patch_ids(&quarantine.isolated_plugins)?,
+            )
+            .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
             if let Ok(mut process) = launch_attempt(
                 &image,
@@ -241,7 +254,11 @@ pub fn start_blocking(
                 return Err("Runtime generation cancelled during startup".into());
             }
             if !recovery_enabled {
-                return Err(format!("{}\n{}", first_failure.message, public_diagnostic(&first_failure.diagnostic)));
+                return Err(format!(
+                    "{}\n{}",
+                    first_failure.message,
+                    public_diagnostic(&first_failure.diagnostic)
+                ));
             }
             let rows = match recovery_rows(
                 &image,
@@ -253,24 +270,42 @@ pub fn start_blocking(
             ) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    eprintln!("Plugin recovery config discovery failed; using safe profile: {error}");
+                    eprintln!(
+                        "Plugin recovery config discovery failed; using safe profile: {error}"
+                    );
                     return work_dir_guard.retain_result(safe_profile(
-                        &image, &patch_file, &ready_file, &dir, &generation, &token,
-                        &starting_processes, &quitting,
+                        &image,
+                        &patch_file,
+                        &ready_file,
+                        &dir,
+                        &generation,
+                        &token,
+                        &starting_processes,
+                        &quitting,
                     ));
                 }
             };
-            let (selected, suspected, reason) = recovery_plan(&rows, &first_failure.diagnostic);
+            let (selected, suspected, reason) =
+                recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 return work_dir_guard.retain_result(safe_profile(
-                    &image, &patch_file, &ready_file, &dir, &generation, &token,
-                    &starting_processes, &quitting,
+                    &image,
+                    &patch_file,
+                    &ready_file,
+                    &dir,
+                    &generation,
+                    &token,
+                    &starting_processes,
+                    &quitting,
                 ));
             }
             let recovery_file = dir.join("plugin-recovery.patch.yml");
             fs::write(&recovery_file, recovery_patch(&selected)?)
                 .map_err(|error| format!("无法写入插件兼容恢复 patch: {error}"))?;
-            let isolated = selected.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+            let isolated = selected
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<_>>();
             let _ = fs::remove_file(&ready_file);
             match launch_attempt(
                 &image,
@@ -307,8 +342,14 @@ pub fn start_blocking(
                         first_failure.message, recovery_failure.message
                     );
                     work_dir_guard.retain_result(safe_profile(
-                        &image, &patch_file, &ready_file, &dir, &generation, &token,
-                        &starting_processes, &quitting,
+                        &image,
+                        &patch_file,
+                        &ready_file,
+                        &dir,
+                        &generation,
+                        &token,
+                        &starting_processes,
+                        &quitting,
                     ))
                 }
             }
@@ -316,8 +357,12 @@ pub fn start_blocking(
     }
 }
 
-pub fn lease_from_process(generation: RuntimeGeneration, process: &RuntimeProcess) -> Result<RuntimeLease, String> {
-    let url = Url::parse(&process.ready.url).map_err(|_| "Runtime ready URL invalid".to_string())?;
+pub fn lease_from_process(
+    generation: RuntimeGeneration,
+    process: &RuntimeProcess,
+) -> Result<RuntimeLease, String> {
+    let url =
+        Url::parse(&process.ready.url).map_err(|_| "Runtime ready URL invalid".to_string())?;
     Ok(RuntimeLease {
         generation,
         pid: process.ready.pid,
