@@ -185,10 +185,10 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
 pub fn schedule_harness_watchdog(app: &AppHandle, navigation_id: u64, runtime_generation: u64) {
     let watchdog_app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_secs(20));
-        })
-        .await;
+        // A refresh/navigation watchdog is a timer, not blocking work. Keeping
+        // the 20-second wait on Tokio prevents repeated refreshes from pinning
+        // one blocking-pool thread per stale navigation.
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
         if watchdog_app
             .state::<crate::AppState>()
             .quitting
