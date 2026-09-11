@@ -54,11 +54,7 @@ fn valid_reason(reason: &str) -> bool {
 /// Schema v1/v2 records predate profile/DSH_HOME scoping. They are deliberately
 /// invalidated once rather than being guessed into a possibly different plugin
 /// tree. A fresh failure can immediately rebuild a v3 record for that scope.
-fn record_applies(
-    record: &PluginQuarantineRecord,
-    dsh_version: &str,
-    launch_scope: &str,
-) -> bool {
+fn record_applies(record: &PluginQuarantineRecord, dsh_version: &str, launch_scope: &str) -> bool {
     if record.schema_version != SCHEMA_VERSION {
         return false;
     }
@@ -244,12 +240,7 @@ mod tests {
             "diagnostic-match",
         )
         .unwrap();
-        assert!(read(
-            &file,
-            "0.1.5-rc.2",
-            "profile=web\ndsh_home=/tmp/dsh-b"
-        )
-        .is_none());
+        assert!(read(&file, "0.1.5-rc.2", "profile=web\ndsh_home=/tmp/dsh-b").is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
