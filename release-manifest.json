@@ -4,7 +4,7 @@
   "version": "0.1.5",
   "channel": "stable",
   "publication": {
-    "tagTemplate": "v{version}-{prerelease}",
+    "tagTemplate": "v{version}",
     "githubPrerelease": false,
     "replaceablePrerelease": false,
     "candidateWorkflow": ".github/workflows/tauri-candidate.yml",
@@ -18,7 +18,7 @@
     "version": "0.1.5",
     "apiVersion": 1
   },
-  "prerelease": "rc.2",
+  "prerelease": "",
   "runtime": {
     "version": "0.1.5-rc.2",
     "gitTag": "dsh-v0.1.5-rc.2",
