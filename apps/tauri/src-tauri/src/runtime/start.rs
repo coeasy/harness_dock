@@ -112,6 +112,14 @@ fn direct_failure(profile: &str, failure: AttemptFailure) -> String {
     )
 }
 
+fn launch_quarantine_scope(launch: &RuntimeLaunchSpec) -> String {
+    let home = launch.dsh_home.clone().or_else(dsh_home_path);
+    let home = home
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unresolved>".into());
+    format!("profile={}\ndsh_home={home}", launch.profile)
+}
+
 pub fn start_blocking(
     image: RuntimeImage,
     launch: RuntimeLaunchSpec,
@@ -208,10 +216,13 @@ pub fn start_blocking(
 
     let recovery_enabled =
         std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+    let quarantine_scope = launch_quarantine_scope(&launch);
     if recovery_enabled {
-        if let Some(quarantine) =
-            plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version)
-        {
+        if let Some(quarantine) = plugin_quarantine::read(
+            &quarantine_state_path,
+            &image.origin.dsh_version,
+            &quarantine_scope,
+        ) {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
             fs::write(
                 &quarantine_file,
@@ -323,6 +334,7 @@ pub fn start_blocking(
                     let quarantine = plugin_quarantine::write(
                         &quarantine_state_path,
                         &image.origin.dsh_version,
+                        &quarantine_scope,
                         isolated.clone(),
                         suspected.clone(),
                         &reason,
