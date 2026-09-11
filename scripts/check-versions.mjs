@@ -16,15 +16,9 @@ const mismatches = []
 
 const toolVersionsPath = path.join(repoRoot, 'scripts', 'versions.json')
 const toolVersions = existsSync(toolVersionsPath) ? JSON.parse(readFileSync(toolVersionsPath, 'utf8')) : {}
-const rustVersion = String(toolVersions.rust ?? '')
 const tauriCliVersion = String(toolVersions.tauriCli ?? '')
-for (const [name, version] of [
-  ['rust', rustVersion],
-  ['tauriCli', tauriCliVersion],
-]) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
-    mismatches.push(`scripts/versions.json ${name}: expected exact SemVer, got ${version || '<missing>'}`)
-  }
+if (!/^\d+\.\d+\.\d+$/.test(tauriCliVersion)) {
+  mismatches.push(`scripts/versions.json tauriCli: expected exact SemVer, got ${tauriCliVersion || '<missing>'}`)
 }
 
 let activeReleaseTag = `v${rootVersion}`
@@ -83,12 +77,14 @@ for (const [relativePath, readVersion] of versionedFiles) {
 }
 
 const rustToolchainPath = path.join(repoRoot, 'rust-toolchain.toml')
+let rustVersion = ''
 if (!existsSync(rustToolchainPath)) {
   mismatches.push('rust-toolchain.toml: file is missing; release Rust toolchain must be frozen')
 } else {
   const rustToolchain = readFileSync(rustToolchainPath, 'utf8')
-  if (rustVersion && !rustToolchain.includes(`channel = "${rustVersion}"`)) {
-    mismatches.push(`rust-toolchain.toml: expected Rust ${rustVersion} from scripts/versions.json`)
+  rustVersion = rustToolchain.match(/^channel\s*=\s*"([^"]+)"\s*$/m)?.[1] ?? ''
+  if (!/^\d+\.\d+\.\d+$/.test(rustVersion)) {
+    mismatches.push(`rust-toolchain.toml: expected exact Rust SemVer channel, got ${rustVersion || '<missing>'}`)
   }
 }
 
@@ -141,7 +137,7 @@ for (const relativePath of ['.github/workflows/ci.yml', ...tauriCliWorkflowFiles
   const pins = [...workflow.matchAll(/^\s+(?:toolchain|rust-toolchain):\s*['"]?(\d+\.\d+\.\d+)['"]?\s*$/gm)].map((match) => match[1])
   for (const pin of pins) {
     if (rustVersion && pin !== rustVersion) {
-      mismatches.push(`${relativePath}: Rust toolchain ${pin} differs from scripts/versions.json ${rustVersion}`)
+      mismatches.push(`${relativePath}: Rust toolchain ${pin} differs from rust-toolchain.toml ${rustVersion}`)
     }
   }
 }
