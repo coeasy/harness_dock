@@ -38,18 +38,15 @@ pub(crate) fn show_splash(app: &AppHandle, status: &str) {
 /// can expose an unpainted WebView2 frame and produces the visible white flash
 /// that this boundary is designed to avoid.
 #[cfg(not(mobile))]
-pub(crate) fn show_primary_lifecycle_overlay(
-    app: &AppHandle,
-    mode: &str,
-    status: &str,
-) -> bool {
+pub(crate) fn show_primary_lifecycle_overlay(app: &AppHandle, mode: &str, status: &str) -> bool {
     let Some(window) = app.get_webview_window("harness") else {
         return false;
     };
     if !window.is_visible().unwrap_or(false) {
         return false;
     }
-    let (Ok(mode), Ok(status)) = (serde_json::to_string(mode), serde_json::to_string(status)) else {
+    let (Ok(mode), Ok(status)) = (serde_json::to_string(mode), serde_json::to_string(status))
+    else {
         return false;
     };
     window
@@ -60,11 +57,7 @@ pub(crate) fn show_primary_lifecycle_overlay(
 }
 
 #[cfg(mobile)]
-pub(crate) fn show_primary_lifecycle_overlay(
-    _app: &AppHandle,
-    _mode: &str,
-    _status: &str,
-) -> bool {
+pub(crate) fn show_primary_lifecycle_overlay(_app: &AppHandle, _mode: &str, _status: &str) -> bool {
     false
 }
 
