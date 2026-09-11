@@ -1,11 +1,10 @@
 //! The blocking multi-attempt start loop and generation lease publication.
 
-// The parent module owns the shared imports; every submodule can see
-// them and its siblings through this glob (glob imports never warn).
 use super::*;
 
 pub fn launch_attempt(
     image: &RuntimeImage,
+    profile: &str,
     patches: &[&Path],
     dsh_home: Option<&Path>,
     ready_file: &Path,
@@ -18,6 +17,7 @@ pub fn launch_attempt(
 ) -> Result<RuntimeProcess, AttemptFailure> {
     let (mut child, stdout, stderr, registration) = spawn_runtime(
         image,
+        profile,
         patches,
         dsh_home,
         ready_file,
@@ -81,6 +81,7 @@ pub fn safe_profile(
     let _ = fs::remove_file(ready_file);
     let mut process = launch_attempt(
         image,
+        DEFAULT_PROFILE,
         &[embedded_patch_file],
         Some(&safe_home),
         ready_file,
@@ -103,8 +104,25 @@ pub fn safe_profile(
     Ok(process)
 }
 
+fn direct_failure(profile: &str, failure: AttemptFailure) -> String {
+    format!(
+        "dsh profile {profile:?} Direct 启动失败: {}\n{}",
+        failure.message,
+        public_diagnostic(&failure.diagnostic)
+    )
+}
+
+fn launch_quarantine_scope(launch: &RuntimeLaunchSpec) -> String {
+    let home = launch.dsh_home.clone().or_else(dsh_home_path);
+    let home = home
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unresolved>".into());
+    format!("profile={}\ndsh_home={home}", launch.profile)
+}
+
 pub fn start_blocking(
     image: RuntimeImage,
+    launch: RuntimeLaunchSpec,
     plugin_path: PathBuf,
     compatibility_path: PathBuf,
     shell_plugin_path: PathBuf,
@@ -125,7 +143,7 @@ pub fn start_blocking(
         return Err("Runtime generation cancelled before startup".into());
     }
 
-    if force_safe_mode {
+    if force_safe_mode || launch.startup_policy == RuntimeStartupPolicy::Safe {
         return work_dir_guard.retain_result(safe_profile(
             &image,
             &patch_file,
@@ -138,12 +156,73 @@ pub fn start_blocking(
         ));
     }
 
+    let launch_selected = |attempt: &str, ready_file: &Path| {
+        launch_attempt(
+            &image,
+            &launch.profile,
+            &[patch_file.as_path()],
+            launch.dsh_home.as_deref(),
+            ready_file,
+            &dir,
+            attempt,
+            &generation,
+            &token,
+            &starting_processes,
+            &quitting,
+        )
+    };
+
+    if launch.startup_policy == RuntimeStartupPolicy::Direct {
+        let _ = fs::remove_file(&ready_file);
+        return match launch_selected("direct", &ready_file) {
+            Ok(process) => {
+                work_dir_guard.retain();
+                Ok(process)
+            }
+            Err(failure) => Err(direct_failure(&launch.profile, failure)),
+        };
+    }
+
+    // Existing automatic plugin attribution is intentionally restricted to
+    // the shipped web profile. Other profiles may compose a very different
+    // application tree; reusing web-centric quarantine attribution against
+    // them can disable unrelated rows. They still get selected-profile startup
+    // followed by the fail-open safe web profile.
+    if launch.profile != DEFAULT_PROFILE {
+        let _ = fs::remove_file(&ready_file);
+        return match launch_selected("profile", &ready_file) {
+            Ok(process) => {
+                work_dir_guard.retain();
+                Ok(process)
+            }
+            Err(failure) => {
+                eprintln!(
+                    "Selected profile {:?} failed in Auto mode; falling back to safe web profile: {}",
+                    launch.profile, failure.message
+                );
+                work_dir_guard.retain_result(safe_profile(
+                    &image,
+                    &patch_file,
+                    &ready_file,
+                    &dir,
+                    &generation,
+                    &token,
+                    &starting_processes,
+                    &quitting,
+                ))
+            }
+        };
+    }
+
     let recovery_enabled =
         std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
+    let quarantine_scope = launch_quarantine_scope(&launch);
     if recovery_enabled {
-        if let Some(quarantine) =
-            plugin_quarantine::read(&quarantine_state_path, &image.origin.dsh_version)
-        {
+        if let Some(quarantine) = plugin_quarantine::read(
+            &quarantine_state_path,
+            &image.origin.dsh_version,
+            &quarantine_scope,
+        ) {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
             fs::write(
                 &quarantine_file,
@@ -153,8 +232,9 @@ pub fn start_blocking(
             let _ = fs::remove_file(&ready_file);
             if let Ok(mut process) = launch_attempt(
                 &image,
+                &launch.profile,
                 &[patch_file.as_path(), quarantine_file.as_path()],
-                None,
+                launch.dsh_home.as_deref(),
                 &ready_file,
                 &dir,
                 "quarantine",
@@ -175,49 +255,47 @@ pub fn start_blocking(
     }
 
     let _ = fs::remove_file(&ready_file);
-    match launch_attempt(
-        &image,
-        &[patch_file.as_path()],
-        None,
-        &ready_file,
-        &dir,
-        "normal",
-        &generation,
-        &token,
-        &starting_processes,
-        &quitting,
-    ) {
+    match launch_selected("normal", &ready_file) {
         Ok(process) => {
             work_dir_guard.retain();
-            return Ok(process);
+            Ok(process)
         }
         Err(first_failure) => {
             if cancelled(&token, &quitting) {
                 return Err("Runtime generation cancelled during startup".into());
             }
             if !recovery_enabled {
-                let summary = public_diagnostic(&first_failure.diagnostic);
-                return Err(format!("{}\n{}", first_failure.message, summary));
+                return Err(format!(
+                    "{}\n{}",
+                    first_failure.message,
+                    public_diagnostic(&first_failure.diagnostic)
+                ));
             }
-            let rows =
-                match recovery_rows(&image, &patch_file, &token, &starting_processes, &quitting) {
-                    Ok(rows) => rows,
-                    Err(error) => {
-                        eprintln!(
-                            "Plugin recovery config discovery failed; using safe profile: {error}"
-                        );
-                        return work_dir_guard.retain_result(safe_profile(
-                            &image,
-                            &patch_file,
-                            &ready_file,
-                            &dir,
-                            &generation,
-                            &token,
-                            &starting_processes,
-                            &quitting,
-                        ));
-                    }
-                };
+            let rows = match recovery_rows(
+                &image,
+                &launch,
+                &patch_file,
+                &token,
+                &starting_processes,
+                &quitting,
+            ) {
+                Ok(rows) => rows,
+                Err(error) => {
+                    eprintln!(
+                        "Plugin recovery config discovery failed; using safe profile: {error}"
+                    );
+                    return work_dir_guard.retain_result(safe_profile(
+                        &image,
+                        &patch_file,
+                        &ready_file,
+                        &dir,
+                        &generation,
+                        &token,
+                        &starting_processes,
+                        &quitting,
+                    ));
+                }
+            };
             let (selected, suspected, reason) = recovery_plan(&rows, &first_failure.diagnostic);
             if selected.is_empty() {
                 return work_dir_guard.retain_result(safe_profile(
@@ -241,8 +319,9 @@ pub fn start_blocking(
             let _ = fs::remove_file(&ready_file);
             match launch_attempt(
                 &image,
+                &launch.profile,
                 &[patch_file.as_path(), recovery_file.as_path()],
-                None,
+                launch.dsh_home.as_deref(),
                 &ready_file,
                 &dir,
                 "recovery",
@@ -255,6 +334,7 @@ pub fn start_blocking(
                     let quarantine = plugin_quarantine::write(
                         &quarantine_state_path,
                         &image.origin.dsh_version,
+                        &quarantine_scope,
                         isolated.clone(),
                         suspected.clone(),
                         &reason,

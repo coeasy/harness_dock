@@ -19,55 +19,82 @@
         </div>
         <span id="overall-state" class="state-dot" data-state="checking">检查中</span>
       </div>
-      <p class="muted">快速确认 Runtime 是否健康；详细信息和恢复操作按需展开。</p>
+      <p class="muted">快速确认 Runtime 是否健康，并配置 dsh profile 启动方式。</p>
       <div class="hero-actions">
         <button id="settings-close" class="secondary">关闭</button>
         <button id="settings-quit" class="danger">退出客户端</button>
       </div>
     </section>
+
     <section class="card overview-card" aria-label="当前状态">
       <div class="overview-grid">
-        <div class="overview-item">
-          <span class="overview-label">Harness Web</span>
-          <strong id="web-state">检查中</strong>
-        </div>
-        <div class="overview-item">
-          <span class="overview-label">Runtime</span>
-          <strong id="runtime-state">checking</strong>
-        </div>
-        <div class="overview-item">
-          <span class="overview-label">dsh 版本</span>
-          <strong id="runtime-version">读取中</strong>
-        </div>
+        <div class="overview-item"><span class="overview-label">Harness Web</span><strong id="web-state">检查中</strong></div>
+        <div class="overview-item"><span class="overview-label">Runtime</span><strong id="runtime-state">checking</strong></div>
+        <div class="overview-item"><span class="overview-label">dsh 版本</span><strong id="runtime-version">读取中</strong></div>
       </div>
       <p id="web-detail" class="status">正在读取启动策略…</p>
     </section>
+
+    <section class="card action-card">
+      <div class="card-heading">
+        <div>
+          <h2>dsh 启动配置</h2>
+          <p>沿用官方 <code>dsh --profile</code> 语义。运行时仍使用 HarnessDock 内置 sealed dsh，不允许设置替换可执行文件。</p>
+        </div>
+        <span class="badge" id="profile-badge">web / auto · 已保存</span>
+      </div>
+      <label for="runtime-profile">Profile</label>
+      <input id="runtime-profile" list="runtime-profile-presets" autocomplete="off" spellcheck="false" value="web" />
+      <datalist id="runtime-profile-presets">
+        <option value="web"></option>
+        <option value="acp"></option>
+        <option value="headless"></option>
+        <option value="sdk"></option>
+        <option value="sdk-minimal"></option>
+      </datalist>
+      <p class="field-help">可填写自定义 profile 名称；目录对应 <code>$DSH_HOME/profiles/&lt;name&gt;</code>。HarnessDock 桌面主 Surface 还要求该 profile 最终提供 <code>webServer + connection</code>，以通过受管 Web-ready 检查；部分上游非 Web profile 可能不会直接产生可显示的 Harness Web。</p>
+
+      <label for="runtime-dsh-home">DSH_HOME</label>
+      <input id="runtime-dsh-home" autocomplete="off" spellcheck="false" placeholder="留空：使用系统 DSH_HOME 或 ~/.dsh" />
+      <p class="field-help">填写时必须是绝对路径。这里只改变 profile/config 根目录，不改变内置 dsh Runtime 来源；插件隔离状态会按有效 DSH_HOME 分开，避免不同配置树互相污染。</p>
+
+      <label for="runtime-startup-policy">启动策略</label>
+      <select id="runtime-startup-policy">
+        <option value="auto">Auto · profile → 隔离恢复(web) → Safe</option>
+        <option value="direct">Direct · 仅启动所选 profile，失败即报错</option>
+        <option value="safe">Safe · 固定 web + 临时私有 DSH_HOME</option>
+      </select>
+      <p class="field-help">非 web profile 在 Auto 模式失败时直接进入 Safe，不执行 web 专用插件归因，避免误隔离；Direct 用于需要保留首个 profile 启动错误的诊断场景。</p>
+      <div class="actions">
+        <button id="runtime-settings-save" class="primary">保存启动配置</button>
+      </div>
+      <p id="runtime-settings-detail" class="status">这是下次启动配置；当前 Runtime generation 不会被热切换。配置在下一次 Runtime 启动或重启时生效。</p>
+    </section>
+
     <section class="card action-card">
       <div class="card-heading">
         <div><h2>Runtime 与插件</h2><p>第三方插件异常会进入隔离恢复，不会修改用户配置。</p></div>
         <span class="badge" id="runtime-badge">checking</span>
       </div>
-      <div class="actions">
-        <button id="runtime-refresh" class="primary">刷新状态</button>
-      </div>
+      <div class="actions"><button id="runtime-refresh" class="primary">刷新状态</button></div>
       <details class="technical-details">
         <summary>查看技术诊断</summary>
         <p id="runtime-detail" class="status"></p>
       </details>
     </section>
+
     <section class="card action-card">
       <div class="card-heading">
         <div><h2>版本与更新</h2><p>只检查已发布版本；安装包仍由用户从 GitHub Release 手动下载。</p></div>
         <span class="badge">manual</span>
       </div>
-      <div class="actions">
-        <button id="update-install" class="secondary">检查更新</button>
-      </div>
+      <div class="actions"><button id="update-install" class="secondary">检查更新</button></div>
       <p id="update-detail" class="status">点击后检查可用 Release。</p>
     </section>
+
     <section class="card compact-card">
       <div class="card-heading">
-        <div><h2>使用提示</h2><p>关闭本窗口不会停止 Runtime 或 Harness Web。需要恢复插件时，请从主窗口菜单选择“隔离插件启动”。</p></div>
+        <div><h2>使用提示</h2><p>关闭本窗口不会停止 Runtime 或 Harness Web。配置修改在下一次 Runtime 重启生效。</p></div>
         <span class="badge">on demand</span>
       </div>
     </section>
@@ -76,4 +103,3 @@
   <script src="./settings.js" defer></script>
 </body>
 </html>
-

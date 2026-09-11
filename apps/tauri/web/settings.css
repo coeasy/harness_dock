@@ -1,6 +1,6 @@
 /* Compact diagnostics surface: status first, technical detail on demand. */
 .settings-page{background:radial-gradient(circle at top,#162b48 0,#08111f 56%,#050b14 100%)}
-.settings-page .shell{width:min(520px,100%);padding:20px 18px 14px}
+.settings-page .shell{width:min(560px,100%);padding:20px 18px 14px}
 .settings-page .hero{padding:0 0 12px}
 .diagnostics-hero .hero-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
 .diagnostics-hero h1{font-size:30px;margin-top:4px}
@@ -20,6 +20,12 @@
 .settings-page .card{margin:10px 0;padding:14px;border-radius:14px}
 .settings-page .card-heading{gap:10px}.settings-page .card h2{font-size:15px}.settings-page .card p{font-size:12px;line-height:1.5}
 .settings-page .actions{gap:7px;margin-top:12px}.settings-page button{padding:8px 11px;font-size:12px}
+.settings-page label{margin-top:13px}
+.settings-page input,.settings-page select{width:100%;margin-top:7px;padding:10px 11px;border:1px solid #31435e;border-radius:10px;background:#091422;color:#f3f6fb;outline:none;font:inherit;font-size:12px}
+.settings-page select{appearance:auto}
+.settings-page input:focus,.settings-page select:focus{border-color:#2dd4bf;box-shadow:0 0 0 3px rgba(45,212,191,.12)}
+.field-help{margin:6px 0 0!important;color:#7387a3!important;font-size:11px!important;line-height:1.45!important}
+.field-help code,.action-card code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#9fe9df}
 .technical-details{margin-top:12px;border-top:1px solid #263750;padding-top:10px}
 .technical-details summary{color:#9eb0c7;cursor:pointer;font-size:11px;font-weight:700;list-style-position:inside}
 .technical-details[open] summary{color:#78e6d7}.technical-details .status{margin-top:9px!important;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}

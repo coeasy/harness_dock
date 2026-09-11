@@ -34,7 +34,7 @@ pub async fn host_execute(
                 protocol_version: HOST_PROTOCOL_VERSION,
                 request_id,
                 result: Err(error),
-            }
+            };
         }
     };
     envelope.subject = subject;
@@ -182,10 +182,6 @@ pub fn host_snapshot(
 ) -> Result<HostSnapshot, HostError> {
     let (subject, surface, origin, runtime_generation) = snapshot_subject(&app, &window)?;
     let state = app.state::<crate::AppState>();
-    // Read through the single read-only snapshot layer (service::snapshot).
-    // This fixes one canonical lock order for status readers (runtime ->
-    // surface -> gateway) instead of letting each bridge command lock actors
-    // ad hoc.
     let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&*state);
     let runtime_phase = snapshot.runtime_phase;
     let lease = crate::runtime::live_lease(&*state);
@@ -219,14 +215,8 @@ pub fn host_snapshot(
     })
 }
 
-/// Transitional public diagnostics status. This function deliberately has a
-/// distinct Rust command name so it cannot collide with the legacy runtime
-/// module macro. It never returns the private launch credential URL.
 #[tauri::command]
 pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
-    // Read-only snapshot: this command only reports state. It must never
-    // reap a dead process or stop the gateway as a side effect of a status
-    // query issued from the diagnostics Surface.
     let mut status = crate::runtime::status_snapshot_readonly(&*app.state::<crate::AppState>());
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
@@ -240,8 +230,6 @@ pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
     status
 }
 
-/// Diagnostics is on-demand. Closing destroys the WebView instead of keeping a
-/// hidden renderer alive for the lifetime of the desktop process.
 #[tauri::command]
 pub fn diagnostics_close(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
@@ -260,6 +248,8 @@ macro_rules! handler {
             $crate::bridge::public_runtime_status,
             $crate::bridge::diagnostics_close,
             $crate::runtime::runtime_status,
+            $crate::runtime::runtime_launch_settings_get,
+            $crate::runtime::runtime_launch_settings_set,
             $crate::platform::platform_info,
             $crate::gateway::gateway_health,
             $crate::gateway::pair_gateway,

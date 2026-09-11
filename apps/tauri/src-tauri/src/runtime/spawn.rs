@@ -1,7 +1,5 @@
 //! Process spawning, readiness probing and config dumps for a Runtime image.
 
-// The parent module owns the shared imports; every submodule can see
-// them and its siblings through this glob (glob imports never warn).
 use super::*;
 
 pub struct WorkDirGuard {
@@ -122,6 +120,7 @@ pub fn cancelled(token: &CancellationToken, quitting: &std::sync::atomic::Atomic
 
 pub fn spawn_runtime(
     image: &RuntimeImage,
+    profile: &str,
     patches: &[&Path],
     dsh_home: Option<&Path>,
     ready_file: &Path,
@@ -152,7 +151,8 @@ pub fn spawn_runtime(
     let mut command = Command::new(platform::node_cli_path(&image.node));
     command
         .arg(platform::node_cli_path(&image.dsh))
-        .args(["--profile", "web"]);
+        .arg("--profile")
+        .arg(profile);
     for patch in patches {
         command.arg("--patch").arg(platform::node_cli_path(patch));
     }
@@ -262,6 +262,7 @@ pub fn wait_for_ready(
 
 pub fn dump_config(
     image: &RuntimeImage,
+    launch: &RuntimeLaunchSpec,
     embedded_patch_file: &Path,
     default_only: bool,
     token: &CancellationToken,
@@ -274,14 +275,18 @@ pub fn dump_config(
     let mut command = Command::new(platform::node_cli_path(&image.node));
     command
         .arg(platform::node_cli_path(&image.dsh))
-        .args(["--profile", "web"]);
+        .arg("--profile")
+        .arg(&launch.profile);
     if default_only {
         command.arg("--dump-default-config");
     } else {
         command
-            .args(["--patch"])
+            .arg("--patch")
             .arg(platform::node_cli_path(embedded_patch_file))
             .arg("--dump-config");
+    }
+    if let Some(home) = launch.dsh_home.as_deref() {
+        command.env("DSH_HOME", platform::node_cli_path(home));
     }
     command
         .stdin(Stdio::null())

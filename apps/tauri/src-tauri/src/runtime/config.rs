@@ -24,7 +24,7 @@ pub fn embedded_patch(plugin: &Path, compatibility: &Path, shell: &Path) -> Resu
 
 pub fn decode_yaml_scalar(raw: &str) -> String {
     let value = raw.trim();
-    if value.starts_with('"') && value.ends_with('"') {
+    if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
         return serde_json::from_str::<String>(value)
             .unwrap_or_else(|_| value[1..value.len().saturating_sub(1)].to_string());
     }
@@ -82,7 +82,10 @@ pub fn is_official_source(source: &str) -> bool {
 pub fn is_official_row(row: &ConfigDumpRow) -> bool {
     is_official_source(&row.source)
         || row.name.as_deref().is_some_and(|name| {
-            name.starts_with("@deepseek-ai/") || name.contains("/node_modules/@deepseek-ai/")
+            name.starts_with("@deepseek-ai/")
+                || name
+                    .replace('\\', "/")
+                    .contains("/node_modules/@deepseek-ai/")
         })
 }
 
@@ -177,12 +180,13 @@ pub fn recovery_patch(rows: &[ConfigDumpRow]) -> Result<String, String> {
     recovery_patch_ids(&rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>())
 }
 
-pub fn user_patch_rows() -> Vec<ConfigDumpRow> {
-    let Some(home) = dsh_home_path() else {
+pub fn user_patch_rows(profile: &str, explicit_home: Option<&Path>) -> Vec<ConfigDumpRow> {
+    let home = explicit_home.map(Path::to_path_buf).or_else(dsh_home_path);
+    let Some(home) = home else {
         return Vec::new();
     };
     let paths = [
-        home.join("profiles").join("web").join("cordis.patch.yml"),
+        home.join("profiles").join(profile).join("cordis.patch.yml"),
         home.join("cordis.patch.yml"),
     ];
     let mut rows = Vec::new();
@@ -217,6 +221,7 @@ pub fn user_patch_rows() -> Vec<ConfigDumpRow> {
 
 pub fn recovery_rows(
     image: &RuntimeImage,
+    launch: &RuntimeLaunchSpec,
     embedded_patch_file: &Path,
     token: &CancellationToken,
     starting_processes: &process_control::StartingProcessRegistry,
@@ -224,6 +229,7 @@ pub fn recovery_rows(
 ) -> Result<Vec<ConfigDumpRow>, String> {
     match dump_config(
         image,
+        launch,
         embedded_patch_file,
         false,
         token,
@@ -234,6 +240,7 @@ pub fn recovery_rows(
         Err(full_error) => {
             let default = dump_config(
                 image,
+                launch,
                 embedded_patch_file,
                 true,
                 token,
@@ -244,7 +251,7 @@ pub fn recovery_rows(
                 format!("{full_error}; 默认配置转储也失败: {default_error}")
             })?;
             let mut rows = parse_config_dump_rows(&default);
-            rows.extend(user_patch_rows());
+            rows.extend(user_patch_rows(&launch.profile, launch.dsh_home.as_deref()));
             Ok(rows)
         }
     }
@@ -348,6 +355,11 @@ mod tests {
             name: Some("@deepseek-ai/plugin-core".into()),
             source: "/tmp/embedded.patch.yml".into(),
         };
+        let by_windows_name = ConfigDumpRow {
+            id: "x".into(),
+            name: Some("C:\\runtime\\node_modules\\@deepseek-ai\\plugin-core".into()),
+            source: "/tmp/embedded.patch.yml".into(),
+        };
         let neither = ConfigDumpRow {
             id: "x".into(),
             name: Some("@legacy/old-market-plugin".into()),
@@ -355,6 +367,7 @@ mod tests {
         };
         assert!(is_official_row(&by_source));
         assert!(is_official_row(&by_name));
+        assert!(is_official_row(&by_windows_name));
         assert!(!is_official_row(&neither));
     }
 
@@ -483,9 +496,9 @@ mod tests {
         assert!(rows[1].name.is_none());
     }
 
-    /// `user_patch_rows` reads the process DSH home, so the fixture test scopes
-    /// the environment variable under a process-wide lock and restores it on
-    /// drop even when an assertion panics.
+    /// `user_patch_rows` reads the process DSH home when no explicit root is
+    /// supplied, so the fixture test scopes the environment variable under a
+    /// process-wide lock and restores it on drop even when an assertion panics.
     static DSH_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct DshHomeScope {
@@ -534,12 +547,36 @@ mod tests {
         .expect("write home fixture");
 
         let _scope = DshHomeScope::enter(&root);
-        let rows = user_patch_rows();
+        let rows = user_patch_rows("web", None);
 
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(ids, vec!["profile-plugin", "home-plugin"]);
         assert!(rows.iter().all(|row| !row.source.is_empty()));
         assert!(rows.iter().all(|row| row.name.is_some()));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn user_patch_rows_follows_selected_profile_and_explicit_home() {
+        let root = std::env::temp_dir().join("harnessdock-selected-profile-patch-fixture");
+        let _ = fs::remove_dir_all(&root);
+        let profile_dir = root.join("profiles").join("research");
+        fs::create_dir_all(&profile_dir).expect("create selected profile fixture dirs");
+        fs::write(
+            profile_dir.join("cordis.patch.yml"),
+            "- id: research-plugin\n  name: 'file:///tmp/research-plugin.js'\n",
+        )
+        .expect("write selected profile fixture");
+        fs::write(
+            root.join("cordis.patch.yml"),
+            "- id: home-plugin\n  name: 'file:///tmp/home-plugin.js'\n",
+        )
+        .expect("write home fixture");
+
+        let rows = user_patch_rows("research", Some(&root));
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, vec!["research-plugin", "home-plugin"]);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -549,6 +586,7 @@ mod tests {
         fs::create_dir_all(&root).expect("create empty fixture");
 
         let _scope = DshHomeScope::enter(&root);
-        assert!(user_patch_rows().is_empty());
+        assert!(user_patch_rows("web", None).is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 }

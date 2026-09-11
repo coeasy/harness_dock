@@ -18,11 +18,11 @@
     "version": "0.1.5",
     "apiVersion": 1
   },
-  "prerelease": "rc.1",
+  "prerelease": "rc.2",
   "runtime": {
-    "version": "0.1.5-rc.1",
-    "gitTag": "dsh-v0.1.5-rc.1",
-    "gitCommit": "183f08e9c6dde7e36cd2318eaee70b0da08fb35e"
+    "version": "0.1.5-rc.2",
+    "gitTag": "dsh-v0.1.5-rc.2",
+    "gitCommit": "fb2c4b9e698e30edb738bca4cf0618587db7d203"
   },
   "targets": {
     "windows-x64": {
@@ -34,12 +34,7 @@
       "bundles": ["nsis"],
       "candidateArtifact": "tauri-desktop-win-x64",
       "startupGate": "installed",
-      "assets": [
-        {
-          "match": "*setup.exe",
-          "output": "HarnessDock-{version}-windows-x64-setup.exe"
-        }
-      ]
+      "assets": [{"match": "*setup.exe", "output": "HarnessDock-{version}-windows-x64-setup.exe"}]
     },
     "linux-x64": {
       "platform": "linux",
@@ -51,14 +46,8 @@
       "candidateArtifact": "tauri-desktop-linux-x64",
       "startupGate": "runtime-smoke",
       "assets": [
-        {
-          "match": "*.deb",
-          "output": "HarnessDock-{version}-linux-x64.deb"
-        },
-        {
-          "match": "*.AppImage",
-          "output": "HarnessDock-{version}-linux-x64.AppImage"
-        }
+        {"match": "*.deb", "output": "HarnessDock-{version}-linux-x64.deb"},
+        {"match": "*.AppImage", "output": "HarnessDock-{version}-linux-x64.AppImage"}
       ]
     },
     "macos-x64": {
@@ -71,14 +60,8 @@
       "candidateArtifact": "tauri-desktop-mac-x64",
       "startupGate": "runtime-smoke",
       "assets": [
-        {
-          "match": "*.dmg",
-          "output": "HarnessDock-{version}-macos-x64.dmg"
-        },
-        {
-          "match": "*.app.tar.gz",
-          "output": "HarnessDock-{version}-macos-x64.app.tar.gz"
-        }
+        {"match": "*.dmg", "output": "HarnessDock-{version}-macos-x64.dmg"},
+        {"match": "*.app.tar.gz", "output": "HarnessDock-{version}-macos-x64.app.tar.gz"}
       ]
     },
     "macos-arm64": {
@@ -91,14 +74,8 @@
       "candidateArtifact": "tauri-desktop-mac-arm64",
       "startupGate": "runtime-smoke",
       "assets": [
-        {
-          "match": "*.dmg",
-          "output": "HarnessDock-{version}-macos-arm64.dmg"
-        },
-        {
-          "match": "*.app.tar.gz",
-          "output": "HarnessDock-{version}-macos-arm64.app.tar.gz"
-        }
+        {"match": "*.dmg", "output": "HarnessDock-{version}-macos-arm64.dmg"},
+        {"match": "*.app.tar.gz", "output": "HarnessDock-{version}-macos-arm64.app.tar.gz"}
       ]
     },
     "android-arm64": {
@@ -109,14 +86,8 @@
       "candidateArtifact": "tauri-android-arm64-candidate",
       "startupGate": "package-contract",
       "assets": [
-        {
-          "match": "*.apk",
-          "output": "HarnessDock-{version}-android-arm64-release.apk"
-        },
-        {
-          "match": "*.aab",
-          "output": "HarnessDock-{version}-android-arm64-release.aab"
-        }
+        {"match": "*.apk", "output": "HarnessDock-{version}-android-arm64-release.apk"},
+        {"match": "*.aab", "output": "HarnessDock-{version}-android-arm64-release.aab"}
       ]
     },
     "ios-arm64-simulator": {
@@ -126,12 +97,7 @@
       "candidateRunner": "macos-latest",
       "candidateArtifact": "tauri-ios-simulator-candidate",
       "startupGate": "package-contract",
-      "assets": [
-        {
-          "match": "*.zip",
-          "output": "HarnessDock-{version}-ios-arm64-simulator.zip"
-        }
-      ]
+      "assets": [{"match": "*.zip", "output": "HarnessDock-{version}-ios-arm64-simulator.zip"}]
     }
   },
   "runtimeBundles": {
@@ -164,10 +130,6 @@
       "output": "HarnessDock-runtime-{runtimeVersion}-darwin-arm64.tar.gz"
     }
   },
-  "checksums": {
-    "algorithm": "sha256",
-    "file": "SHA256SUMS"
-  },
+  "checksums": {"algorithm": "sha256", "file": "SHA256SUMS"},
   "origin": "packages/docs-sync/origin.json"
 }
-
