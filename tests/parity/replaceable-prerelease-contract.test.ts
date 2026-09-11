@@ -8,11 +8,18 @@ const read = (relative: string) => readFileSync(path.join(repoRoot, relative), '
 const manifest = JSON.parse(read('release-manifest.json')) as any
 
 describe('release publication classification contract', () => {
-  it('publishes the requested v0.1.5-rc.2 tag as an immutable GitHub release', () => {
+  it('publishes v0.1.5 as an immutable stable GitHub release', () => {
     expect(manifest.channel).toBe('stable')
-    expect(manifest.prerelease).toBe('rc.2')
+    expect(manifest.prerelease).toBe('')
+    expect(manifest.publication.tagTemplate).toBe('v{version}')
     expect(manifest.publication.githubPrerelease).toBe(false)
     expect(manifest.publication.replaceablePrerelease).toBe(false)
+  })
+
+  it('keeps the bundled upstream Runtime pinned to dsh rc.2 independently of client publication channel', () => {
+    expect(manifest.runtime.version).toBe('0.1.5-rc.2')
+    expect(manifest.runtime.gitTag).toBe('dsh-v0.1.5-rc.2')
+    expect(manifest.runtime.gitCommit).toBe('fb2c4b9e698e30edb738bca4cf0618587db7d203')
   })
 
   it('keeps stable releases permanently non-replaceable in the contract validator', () => {
@@ -23,7 +30,7 @@ describe('release publication classification contract', () => {
     expect(contract).toContain("replaceablePrerelease requires githubPrerelease=true")
   })
 
-  it('retains guarded replacement logic only for future managed prerelease channels', () => {
+  it('retains guarded replacement logic only for managed prerelease channels', () => {
     const publisher = read('scripts/release/publish-github.mjs')
     expect(publisher).toContain('if (!plan.replaceablePrerelease)')
     expect(publisher).toContain('if (!release)')
