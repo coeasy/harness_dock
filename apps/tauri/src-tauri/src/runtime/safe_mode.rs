@@ -9,6 +9,12 @@
 
 use super::*;
 
+const HARNESSDOCK_INTEGRATION_IDS: [&str; 3] = [
+    "embedded-client",
+    "harnessdock-client-runtime-compat",
+    "harness-shell",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RescuePlan {
     pub isolated_rows: Vec<ConfigDumpRow>,
@@ -28,17 +34,52 @@ impl RescuePlan {
     }
 }
 
+fn is_harnessdock_integration(row: &ConfigDumpRow) -> bool {
+    HARNESSDOCK_INTEGRATION_IDS.contains(&row.id.as_str())
+}
+
+/// Rescue mode treats provenance as authoritative. A row coming from the
+/// shipped DeepSeek package graph is official even if its declared name is
+/// unusual. Conversely, a row written by a user/profile patch is external even
+/// if it declares an `@deepseek-ai/*`-looking package name. This closes the gap
+/// where a damaged or misleading user patch could otherwise escape isolation.
+fn rescue_candidates(rows: &[ConfigDumpRow]) -> Vec<ConfigDumpRow> {
+    rows.iter()
+        .filter(|row| {
+            !is_harnessdock_integration(row)
+                && !row.source.is_empty()
+                && !is_official_source(&row.source)
+        })
+        .cloned()
+        .collect()
+}
+
+fn rescue_suspects(rows: &[ConfigDumpRow], diagnostic: &str) -> Vec<String> {
+    let fingerprint = crate::diagnostic::parse_diagnostic(diagnostic);
+    let structured = fingerprint != crate::diagnostic::DiagnosticFingerprint::None;
+    rows.iter()
+        .filter(|row| {
+            if structured {
+                crate::diagnostic::fingerprint_matches(&fingerprint, &row_tokens(row))
+            } else {
+                diagnostic_matches(row, diagnostic)
+            }
+        })
+        .map(|row| row.id.clone())
+        .collect()
+}
+
 /// Build an ephemeral Rescue Web plan from the effective `web` config.
 ///
-/// `recovery_candidates` is the canonical external-plugin classifier: it
-/// excludes all `@deepseek-ai/*` rows and HarnessDock's embedded/compat/shell
-/// rows. Reusing it here keeps normal automatic recovery and explicit rescue on
-/// one definition of "third party" without weakening automatic quarantine.
+/// Normal automatic quarantine intentionally remains more conservative and
+/// still uses `recovery_candidates` / `is_official_row`. Rescue Web instead
+/// isolates every non-official *source* while preserving the official web graph
+/// and HarnessDock integration rows.
 pub fn plan(rows: &[ConfigDumpRow], diagnostic: Option<&str>) -> RescuePlan {
-    let isolated_rows = recovery_candidates(rows);
+    let isolated_rows = rescue_candidates(rows);
     let suspected_plugins = diagnostic
         .filter(|value| !value.trim().is_empty())
-        .map(|diagnostic| recovery_plan(rows, diagnostic).1)
+        .map(|diagnostic| rescue_suspects(&isolated_rows, diagnostic))
         .unwrap_or_default();
     RescuePlan {
         isolated_rows,
@@ -98,6 +139,24 @@ mod tests {
         assert!(!patch.contains("modules"));
         assert!(!patch.contains("ui-sidebar-documentpreview"));
         assert!(!patch.contains("embedded-client"));
+    }
+
+    #[test]
+    fn rescue_uses_source_provenance_not_a_spoofable_declared_name() {
+        let rows = vec![
+            row(
+                "spoofed-user-plugin",
+                "@deepseek-ai/dsh-client-ui-chat",
+                "/home/me/.dsh/cordis.patch.yml",
+            ),
+            row(
+                "official-unusual-name",
+                "@vendor/transitive-helper",
+                "@deepseek-ai/dsh-web-app",
+            ),
+        ];
+        let rescue = plan(&rows, None);
+        assert_eq!(rescue.isolated_plugin_ids(), vec!["spoofed-user-plugin"]);
     }
 
     #[test]
