@@ -144,3 +144,7 @@ pnpm tauri:check
 - `.github/workflows/release.yml` 只在 required same-SHA workflows 全绿后组装资产、复核 Runtime identity、生成并验证 `SHA256SUMS`，然后发布 GitHub prerelease。
 
 Release 不接受跨 SHA 复用旧 candidate；稳定 `v0.1.5` 不移动、不覆盖，`v0.1.5-rc.2` 仅按 `release-manifest.json` 的 guarded replaceable-prerelease 合同重建。
+
+## 文档权威来源
+
+当前行为以本文件、根 `README.md`、`docs/PROJECT_INTRO.md`、`docs/VERSIONING.md`、当前 release notes、`release-manifest.json` 与代码为准。带旧日期/旧版本基线的架构审查和优化计划属于历史快照，不应覆盖当前 rc.2 行为或发布合同。
