@@ -29,14 +29,17 @@ dsh-v1.0.0-beta.1  -> HarnessDock 1.0.0
 - 精确 `gitTag`；
 - 精确 `gitCommit`。
 
-当前 v0.1.5：
+当前 v0.1.5-rc.2 发布线：
 
 ```text
 HarnessDock: 0.1.5
-dshVersion:  0.1.5-rc.1
-gitTag:      dsh-v0.1.5-rc.1
-gitCommit:   183f08e9c6dde7e36cd2318eaee70b0da08fb35e
+release tag: v0.1.5-rc.2
+dshVersion:  0.1.5-rc.2
+gitTag:      dsh-v0.1.5-rc.2
+gitCommit:   fb2c4b9e698e30edb738bca4cf0618587db7d203
 ```
+
+正式 `v0.1.5` 已发布并保持不可变；当前同基础版本的修复与重建通过 `v0.1.5-rc.2` 候选标签交付，不覆盖稳定 tag 或稳定资产。
 
 禁止使用 `latest`、`next` 或未固定 commit 的 Runtime 进入发布候选。
 
@@ -66,7 +69,10 @@ gitCommit:   183f08e9c6dde7e36cd2318eaee70b0da08fb35e
 2. Runtime version/tag/commit 在 manifest 与 origin 中完全一致；
 3. 不允许 floating dsh version；
 4. Runtime 发生跨基础版本变化时，客户端基础版本必须同步变化；
-5. rc Runtime bundle URL 必须指向当前 HarnessDock rc tag。
+5. rc Runtime bundle URL 必须指向当前 HarnessDock rc tag；
+6. 发布 tag、Release Notes、候选工作流以及 required same-SHA gates 必须由同一个 `release-manifest.json` 合同推导。
+
+候选发布必须使用 GitHub prerelease；同一个受管候选 tag 只有在发布合同明确允许时才可重建，稳定 tag 永远不可移动。
 
 ## 5. 上游升级流程
 
@@ -77,7 +83,7 @@ gitCommit:   183f08e9c6dde7e36cd2318eaee70b0da08fb35e
   -> 更新 origin.json Runtime provenance
   -> 记录 dsh 基础 SemVer 与完整 provenance
   -> 让 HarnessDock/root/workspace/Tauri/Rust/Shell 基础版本与 dsh 基础版本一致
-  -> 更新 Runtime bundle Release URL
+  -> 更新 Runtime bundle Release URL / 候选 tag 合同
   -> 更新当前文档与 Release Notes
   -> pnpm check:versions
   -> pnpm check:release
@@ -85,11 +91,10 @@ gitCommit:   183f08e9c6dde7e36cd2318eaee70b0da08fb35e
   -> 同 SHA 发布
 ```
 
-如果上游只在同一基础 SemVer 内更新预发布后缀，例如 `0.1.5-alpha.1 -> 0.1.5-rc.1`，HarnessDock 保持客户端基础版本 `0.1.5`，但必须产生新的、可区分的候选发布标签；不得覆盖已经发布的不可变资产。
+如果上游只在同一基础 SemVer 内更新预发布后缀，例如 `0.1.5-alpha.1 -> 0.1.5-rc.2`，HarnessDock 保持客户端基础版本 `0.1.5`，但必须产生新的、可区分的候选发布标签；不得覆盖已经发布的不可变稳定资产。
 
 ## 6. 历史 `v0.2.x` 文件名
 
-仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前已经重新校正产品基础版本到 `v0.1.5`，候选标签为 `v0.1.5-rc.1`；这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
+仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前已经重新校正产品基础版本到 `v0.1.5`；当前活动候选标签为 `v0.1.5-rc.2`。这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
 
 活动版本的唯一权威来源是根 `package.json`，发布关系由 `release-manifest.json` 与 `packages/docs-sync/origin.json` 补充描述。
-
