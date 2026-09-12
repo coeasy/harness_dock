@@ -20,6 +20,11 @@ const SHELL_WEB_SCRIPT: &str =
 ///   When it throws, the session controller cannot establish a stream, the
 ///   connection client backs off forever, and the Settings chrome stays on
 ///   "connecting" while the browser console is filled with TypeErrors.
+/// * PDF.js 6.x accesses the global `Iterator.prototype` while the optional
+///   document-preview client bundle is imported. Chromium/WebView2 versions
+///   without the Iterator Helpers global otherwise fail the whole loader entry
+///   with `ReferenceError: Iterator is not defined` before PDF.js can install
+///   its own compatibility methods.
 const POLYFILL_SCRIPT: &str = r#"
 (() => {
   'use strict';
@@ -79,6 +84,44 @@ const POLYFILL_SCRIPT: &str = r#"
       return controller.signal;
     };
   }
+  if (typeof globalThis.Iterator === 'undefined') {
+    try {
+      // Standard Array/Map/Set iterators all inherit from the intrinsic
+      // %IteratorPrototype%. Expose that exact shared prototype through a
+      // compatibility constructor instead of inventing a disconnected class:
+      // PDF.js extends `Iterator.prototype`, and the extension must therefore
+      // also be visible to real built-in iterators.
+      const sampleIterator = [][Symbol.iterator]();
+      const concreteIteratorPrototype = Object.getPrototypeOf(sampleIterator);
+      const iteratorPrototype = concreteIteratorPrototype &&
+        Object.getPrototypeOf(concreteIteratorPrototype);
+      if (iteratorPrototype && iteratorPrototype !== Object.prototype) {
+        const IteratorCompat = function Iterator() {
+          throw new TypeError('Iterator cannot be constructed directly');
+        };
+        IteratorCompat.prototype = iteratorPrototype;
+        Object.defineProperty(IteratorCompat, 'from', {
+          configurable: true,
+          writable: true,
+          value(iterable) {
+            if (iterable == null) throw new TypeError('Iterator.from requires an iterable');
+            if (typeof iterable.next === 'function') return iterable;
+            const factory = iterable[Symbol.iterator];
+            if (typeof factory !== 'function') throw new TypeError('Value is not iterable');
+            return factory.call(iterable);
+          }
+        });
+        Object.defineProperty(globalThis, 'Iterator', {
+          configurable: true,
+          writable: true,
+          value: IteratorCompat
+        });
+      }
+    } catch (_) {
+      // Keep the compatibility layer fail-open. A damaged or highly unusual
+      // JS engine must not prevent the remaining shell bridge from installing.
+    }
+  }
 })();
 "#;
 
@@ -92,7 +135,15 @@ const POLYFILL_SCRIPT: &str = r#"
 const LIFECYCLE_SCRIPT: &str = r#"
 (() => {
   'use strict';
-  const DARK = '#07101d';
+  if (window.__HARNESSDOCK_LIFECYCLE_INSTALLED__ === true) return;
+  Object.defineProperty(window, '__HARNESSDOCK_LIFECYCLE_INSTALLED__', {
+    configurable: false,
+    enumerable: false,
+    value: true,
+    writable: false
+  });
+
+  const DARK = '#050b14';
   const installFirstPaint = () => {
     const root = document.documentElement;
     if (!root) return;
@@ -104,6 +155,9 @@ const LIFECYCLE_SCRIPT: &str = r#"
   let host = null;
   let surface = null;
   let status = null;
+  let startupObserver = null;
+  let startupSettlePending = false;
+
   const ensure = () => {
     installFirstPaint();
     if (host?.isConnected && surface) return surface;
@@ -118,11 +172,12 @@ const LIFECYCLE_SCRIPT: &str = r#"
     const style = document.createElement('style');
     style.textContent = `
       :host { all: initial; color-scheme: dark; }
-      .surface { align-items: center; background: rgba(7,16,29,.965); display: flex; inset: 0; justify-content: center; opacity: 0; pointer-events: all; position: fixed; transform: translateZ(0); transition: opacity .14s ease; visibility: hidden; z-index: 2147483646; }
+      .surface { align-items: center; background: rgba(5,11,20,.985); display: flex; inset: 0; justify-content: center; opacity: 0; pointer-events: all; position: fixed; transform: translateZ(0); transition: opacity .14s ease; visibility: hidden; z-index: 2147483646; }
       .surface.show { opacity: 1; visibility: visible; }
-      .card { align-items: center; background: rgba(17,28,44,.94); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; box-shadow: 0 14px 42px rgba(0,0,0,.28); color: #dce8f6; display: flex; font: 12px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; gap: 11px; max-width: min(420px, calc(100vw - 48px)); padding: 12px 16px; transform: translateY(3px) scale(.99); transition: transform .16s cubic-bezier(.2,.8,.2,1); }
+      .card { align-items: center; background: rgba(13,20,31,.96); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; box-shadow: 0 14px 42px rgba(0,0,0,.3); color: #dce8f6; display: flex; font: 12px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; gap: 11px; max-width: min(420px, calc(100vw - 48px)); padding: 12px 16px; transform: translateY(3px) scale(.99); transition: transform .16s cubic-bezier(.2,.8,.2,1); }
       .surface.show .card { transform: translateY(0) scale(1); }
-      .spinner { animation: spin .82s linear infinite; border: 2px solid rgba(125,211,252,.2); border-radius: 50%; border-top-color: #5eead4; flex: 0 0 auto; height: 17px; width: 17px; }
+      .spinner { animation: spin .82s linear infinite; border: 2px solid rgba(94,234,212,.16); border-radius: 50%; border-top-color: #5eead4; flex: 0 0 auto; height: 17px; width: 17px; }
+      .surface[data-mode="startup"] .card { background: rgba(11,17,26,.92); box-shadow: 0 12px 36px rgba(0,0,0,.24); }
       .surface[data-mode="exit"] .spinner { animation-duration: 1.05s; border-top-color: #7dd3fc; }
       .text { overflow-wrap: anywhere; }
       @keyframes spin { to { transform: rotate(360deg); } }
@@ -144,22 +199,80 @@ const LIFECYCLE_SCRIPT: &str = r#"
     return surface;
   };
 
+  const stopStartupObservation = () => {
+    startupObserver?.disconnect();
+    startupObserver = null;
+    startupSettlePending = false;
+  };
+
+  const hasMeaningfulHarnessContent = () => {
+    const body = document.body;
+    if (!body) return false;
+    for (const child of body.children) {
+      if (child.id === 'harnessdock-lifecycle-surface' || child.id === 'dsh-harness-shell') continue;
+      if (['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT'].includes(child.tagName)) continue;
+      if (child.childElementCount > 0) return true;
+      if ((child.textContent || '').trim().length > 0) return true;
+    }
+    return false;
+  };
+
+  const settleStartupPaint = () => {
+    if (!hasMeaningfulHarnessContent() || startupSettlePending) return;
+    startupSettlePending = true;
+    // PageLoadEvent::Finished only proves the document/network phase. Keep the
+    // handoff surface for two compositor frames after real app/error content
+    // exists so a painted neutral card, not a bare WebView background, bridges
+    // the native splash to Harness.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        startupSettlePending = false;
+        if (!hasMeaningfulHarnessContent()) return;
+        stopStartupObservation();
+        surface?.classList.remove('show');
+        host?.setAttribute('aria-busy', 'false');
+      });
+    });
+  };
+
+  const beginStartupHandoff = () => {
+    const node = ensure();
+    const body = document.body;
+    if (!node || !body) return;
+    if (status) status.textContent = '正在载入 Harness Web…';
+    node.dataset.mode = 'startup';
+    node.classList.add('show');
+    startupObserver = new MutationObserver(settleStartupPaint);
+    startupObserver.observe(body, { childList: true, subtree: true, characterData: true });
+    settleStartupPaint();
+  };
+
   window.__HARNESSDOCK_LIFECYCLE__ = Object.freeze({
     show(message, mode = 'work') {
       const node = ensure();
       if (!node) return false;
+      if (String(mode || 'work') !== 'startup') stopStartupObservation();
       if (status) status.textContent = String(message || '正在处理…');
       node.dataset.mode = String(mode || 'work');
       node.classList.add('show');
+      host?.setAttribute('aria-busy', 'true');
       return true;
     },
     update(message) {
       if (status) status.textContent = String(message || '正在处理…');
     },
     hide() {
+      stopStartupObservation();
       surface?.classList.remove('show');
+      host?.setAttribute('aria-busy', 'false');
     }
   });
+
+  if (document.body) {
+    beginStartupHandoff();
+  } else {
+    document.addEventListener('DOMContentLoaded', beginStartupHandoff, { once: true });
+  }
 })();
 "#;
 
