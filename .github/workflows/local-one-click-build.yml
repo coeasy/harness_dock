@@ -74,6 +74,9 @@ jobs:
       - name: Install the exact one-click artifact and prove Harness Web startup
         shell: pwsh
         run: ./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer -TimeoutSeconds 120
+      - name: Reinstall exact one-click artifact and prove private Rescue under profile writer-lock contention
+        shell: pwsh
+        run: ./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer -TimeoutSeconds 120 -BlockProfileWriter
       - name: Verify bootstrap artifacts stayed local-only
         shell: pwsh
         run: |
