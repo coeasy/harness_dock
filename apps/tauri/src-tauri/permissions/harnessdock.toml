@@ -24,6 +24,11 @@ description = "Allows an eligible surface to use the typed Host Protocol. Author
 commands.allow = ["host_execute", "host_snapshot"]
 
 [[permission]]
+identifier = "client-plugin-diagnostics"
+description = "Allows only the managed Harness WebView to report a sanitized plugin identifier from a recognized client Loader failure; the command revalidates RuntimeLease/origin and never accepts full exception text."
+commands.allow = ["report_client_plugin_failure"]
+
+[[permission]]
 identifier = "harness-window"
 description = "Legacy local control primitives for the managed Harness WebView; remote Harness Web receives only harness-shell plus Host Protocol."
 commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "shell_settings_show"]
