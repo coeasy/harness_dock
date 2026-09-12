@@ -53,7 +53,7 @@ describe('older WebView compatibility and Rescue Web mode', () => {
 
     expect(lifecycle).toContain("status.textContent = '正在载入 Harness Web…'")
     expect(lifecycle).toContain("node.dataset.mode = 'startup'")
-    expect(lifecycle).toContain('new MutationObserver(settleStartupPaint)')
+    expect(lifecycle).toContain('new MutationObserver(observeStartup)')
     expect(lifecycle).toContain("child.id === 'dsh-harness-shell'")
     expect(lifecycle).toContain("child.id === 'harnessdock-lifecycle-surface'")
     expect(lifecycle.match(/requestAnimationFrame\(\(\) => \{/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
@@ -84,12 +84,30 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(start).toContain('"rescue-web-private-home"')
     expect(launch).toContain('Start the shipped Web application while isolating all external/user')
 
-    // Normal automatic quarantine remains conservative and name-aware, while
-    // explicit rescue is stricter about user/external source provenance.
     expect(config).toContain('&& !is_official_row(row)')
     expect(config).toContain('recovery_never_targets_official_or_embedded_rows')
     expect(safeMode).not.toContain('SAFE_MODE_OPTIONAL_OFFICIAL_IDS')
     expect(safeMode).toContain('assert!(!patch.contains("ui-sidebar-documentpreview"))')
+  })
+
+  it('retains only sanitized Loader plugin attribution across the Rescue Web restart', () => {
+    const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
+    const lifecycle = rawRustScript(shellHost, 'LIFECYCLE_SCRIPT')
+    const bridge = read('apps/tauri/src-tauri/src/bridge.rs')
+    const state = read('apps/tauri/src-tauri/src/state.rs')
+    const window = read('apps/tauri/src-tauri/src/harness_window/window.rs')
+
+    expect(lifecycle).toContain('failed to import loader entry')
+    expect(lifecycle).toContain("invoke('report_client_plugin_failure', { plugin })")
+    expect(lifecycle).toContain("window.addEventListener('error'")
+    expect(lifecycle).toContain("window.addEventListener('unhandledrejection'")
+    expect(lifecycle).toContain('reportedLoaderPlugins = new Set()')
+    expect(bridge).toContain('const MAX_CLIENT_PLUGIN_FAILURES: usize = 32')
+    expect(bridge).toContain('trusted_subject(&app, &window, SubjectKind::HarnessWeb)')
+    expect(bridge).toContain('normalize_client_plugin_identifier')
+    expect(bridge).toContain('status.suspected_plugins.push(plugin)')
+    expect(state).toContain('client_plugin_failures: Mutex<Vec<String>>')
+    expect(window).toContain('client_plugin_failures.lock()')
   })
 
   it('makes Rescue Web diagnosis and restore actions visible to the user', () => {
