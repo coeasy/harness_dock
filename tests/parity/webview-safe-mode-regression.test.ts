@@ -63,7 +63,7 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(lifecycle).not.toContain('setTimeout(')
   })
 
-  it('starts the normal web profile while isolating every external plugin generation-locally', () => {
+  it('runs every Rescue Web generation in a private DSH_HOME and never reuses the failing profile writer lock', () => {
     const safeMode = read('apps/tauri/src-tauri/src/runtime/safe_mode.rs')
     const start = read('apps/tauri/src-tauri/src/runtime/start.rs')
     const config = read('apps/tauri/src-tauri/src/runtime/config.rs')
@@ -75,15 +75,25 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(safeMode).toContain('rescue_suspects(&isolated_rows, diagnostic)')
     expect(safeMode).toContain('pub struct RescuePlan')
     expect(safeMode).toContain('rescue_uses_source_provenance_not_a_spoofable_declared_name')
-    expect(start).toContain('profile: DEFAULT_PROFILE.into()')
-    expect(start).toContain('dsh_home: launch.dsh_home.clone()')
-    expect(start).toContain('let rescue = safe_mode::plan(&rows, diagnostic)')
-    expect(start).toContain('let rescue_patch_file = dir.join("rescue-web.patch.yml")')
-    expect(start).toContain('process.recovery_source = "rescue-web".into()')
-    expect(start).toContain('process.isolated_plugins = isolated_plugins')
-    expect(start).toContain('process.suspected_plugins = suspected_plugins')
+
+    expect(start).toContain('let rows = user_patch_rows(DEFAULT_PROFILE, launch.dsh_home.as_deref())')
+    expect(start).toContain('let safe_home = dir.join("rescue-dsh-home")')
+    expect(start).toContain('Some(&safe_home)')
+    expect(start).toContain('"rescue-private-home"')
     expect(start).toContain('"rescue-web-private-home"')
-    expect(launch).toContain('Start the shipped Web application while isolating all external/user')
+    expect(start).toContain('"profile-lock-private-home"')
+    expect(start).toContain('profile_writer_lock_failure')
+    expect(start).toContain('diagnostic.contains("node_modules.lock")')
+    expect(start).toContain('switching directly to private Rescue Web')
+    expect(start).not.toContain('dsh_home: launch.dsh_home.clone()')
+    expect(start).not.toContain('rescue_launch.dsh_home.as_deref()')
+    expect(start).not.toContain('let rescue_patch_file = dir.join("rescue-web.patch.yml")')
+
+    // Normal starts still honour the configured/user DSH_HOME. Only Rescue is
+    // isolated, preserving normal profile semantics without inheriting its lock.
+    expect(start).toContain('launch.dsh_home.as_deref()')
+    expect(launch).toContain('generation-private DSH_HOME')
+    expect(launch).toContain('writer locks cannot block the fallback Web')
 
     expect(config).toContain('&& !is_official_row(row)')
     expect(config).toContain('recovery_never_targets_official_or_embedded_rows')
