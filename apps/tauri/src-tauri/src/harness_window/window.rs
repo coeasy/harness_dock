@@ -167,6 +167,10 @@ pub async fn restart_harness_web_impl(
             show_runtime_transition_error(&app, &error);
             error
         })?;
+        match app.state::<crate::AppState>().client_plugin_failures.lock() {
+            Ok(mut failures) => failures.clear(),
+            Err(poisoned) => poisoned.into_inner().clear(),
+        }
     }
     let status = if safe_mode {
         crate::runtime::restart_managed_safe(app.clone()).await
