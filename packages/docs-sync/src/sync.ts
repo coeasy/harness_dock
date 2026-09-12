@@ -13,7 +13,6 @@ import {
   intersectVersions,
   pickLatestVersion,
   rejectFloatingDistTag,
-  versionToGitTag,
 } from './versions.ts'
 
 const DEFAULT_CLIENT_VERSION = '0.2.0'
@@ -77,30 +76,50 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     gitTags.map((t) => t.version),
     npmVersions,
   )
-  if (intersection.length === 0) {
-    throw new Error('No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh')
-  }
 
-  const version = pin ?? pickLatestVersion(intersection)
-  if (!intersection.includes(version)) {
-    throw new Error(
-      `Pin ${version} is not in git tag ∩ npm. Available: ${intersection.sort().join(', ')}`,
-    )
+  // Automatic sync stays conservative: only select an upstream version that is
+  // available from both the immutable dsh Git tag and the public npm umbrella
+  // package. An explicit pin is different: release engineering may need to
+  // follow a newer immutable Git prerelease before npm catches up. In that case
+  // the Git tag/commit is authoritative and npm provenance is intentionally
+  // empty instead of borrowing metadata from an older package.
+  let version: string
+  if (pin) {
+    if (!gitTags.some((tag) => tag.version === pin)) {
+      throw new Error(
+        `Pin ${pin} is not an upstream dsh Git tag. Available: ${gitTags
+          .map((tag) => tag.version)
+          .sort()
+          .join(', ')}`,
+      )
+    }
+    version = pin
+  } else {
+    if (intersection.length === 0) {
+      throw new Error('No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh')
+    }
+    version = pickLatestVersion(intersection)
   }
 
   const tag = gitTags.find((t) => t.version === version)
-  const gitTag = tag?.tag ?? versionToGitTag(version)
+  const gitTag = tag?.tag
   const gitCommit = tag?.sha
-  if (!gitCommit) {
-    throw new Error(`Missing git commit for ${gitTag}`)
+  if (!gitTag || !gitCommit) {
+    throw new Error(`Missing immutable git provenance for dsh-v${version}`)
   }
 
-  const npmMeta = await fetchNpmPackageMeta(version, fetchImpl)
-  const tarball = inspectPublishedPackage(npmMeta)
-  if (!tarball.ok) {
-    throw new Error(
-      `Refusing ${version}: ${tarball.reason}. Tag exists but the npm artifact is unusable.`,
-    )
+  let npmIntegrity = ''
+  let npmTarball = ''
+  if (npmVersions.includes(version)) {
+    const npmMeta = await fetchNpmPackageMeta(version, fetchImpl)
+    const tarball = inspectPublishedPackage(npmMeta)
+    if (!tarball.ok) {
+      throw new Error(
+        `Refusing ${version}: ${tarball.reason}. Tag exists but the npm artifact is unusable.`,
+      )
+    }
+    npmIntegrity = tarball.integrity
+    npmTarball = tarball.tarball
   }
 
   const docs = await fetchGuideDocs(gitTag, fetchImpl)
@@ -109,8 +128,8 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     dshVersion: version,
     gitTag,
     gitCommit,
-    npmIntegrity: tarball.integrity,
-    npmTarball: tarball.tarball,
+    npmIntegrity,
+    npmTarball,
     docsHash: hashDocs(docs),
     clientVersion,
   })
