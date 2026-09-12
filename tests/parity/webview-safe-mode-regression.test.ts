@@ -81,10 +81,6 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(start).toContain('"rescue-web-private-home"')
     expect(launch).toContain('Start the shipped Web application while isolating all external/user')
 
-    // Normal automatic recovery remains conservative: arbitrary official rows
-    // are still protected. Rescue Web uses that same classifier, instead of a
-    // static official deny-list. The Rust fixture proves an official optional
-    // UI row is present in inventory but absent from the generated rescue patch.
     expect(config).toContain('&& !is_official_row(row)')
     expect(config).toContain('recovery_never_targets_official_or_embedded_rows')
     expect(safeMode).not.toContain('SAFE_MODE_OPTIONAL_OFFICIAL_IDS')
@@ -94,6 +90,8 @@ describe('older WebView compatibility and Rescue Web mode', () => {
   it('makes Rescue Web diagnosis and restore actions visible to the user', () => {
     const html = read('apps/tauri/web/settings.html')
     const js = read('apps/tauri/web/settings.js')
+    const launch = read('apps/tauri/src-tauri/src/runtime/launch_settings.rs')
+    const window = read('apps/tauri/src-tauri/src/harness_window/window.rs')
 
     expect(html).toContain('救援模式（隔离第三方插件）')
     expect(html).toContain('恢复全部插件并正常重启')
@@ -104,5 +102,17 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(js).toContain("'clear-quarantine'")
     expect(js).toContain('runtimeStatus?.isolatedPlugins')
     expect(js).toContain('runtimeStatus?.suspectedPlugins')
+
+    // "恢复全部插件" must really leave Rescue Web for this and future boots.
+    // A persisted Safe policy is switched back to Auto before the normal restart.
+    expect(launch).toContain('pub fn restore_normal_startup_policy')
+    expect(launch).toContain('settings.startup_policy = RuntimeStartupPolicy::Auto')
+    expect(window).toContain('crate::runtime::restore_normal_startup_policy(&app)')
+    expect(window.indexOf('runtime_clear_plugin_quarantine')).toBeLessThan(
+      window.indexOf('restore_normal_startup_policy'),
+    )
+    expect(window.indexOf('restore_normal_startup_policy')).toBeLessThan(
+      window.indexOf('restart_managed(app.clone()).await'),
+    )
   })
 })
