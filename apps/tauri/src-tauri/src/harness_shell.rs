@@ -156,6 +156,12 @@ const LIFECYCLE_SCRIPT: &str = r#"
   // failures. Full exception text may contain local paths, URLs or secrets and
   // therefore never crosses the WebView -> Host diagnostic boundary.
   const reportedLoaderPlugins = new Set();
+  let diagnosticRequestSequence = 0;
+  const diagnosticRequestId = () => {
+    diagnosticRequestSequence += 1;
+    const random = globalThis.crypto?.randomUUID?.();
+    return random || `diagnostic-${Date.now()}-${diagnosticRequestSequence}`;
+  };
   const loaderPluginIdentifier = (value) => {
     const text = String(value ?? '');
     const packaged = text.match(/failed to import loader entry\s+[^\s(]+\s+\(([@A-Za-z0-9_./-]+)\)/i);
@@ -168,10 +174,20 @@ const LIFECYCLE_SCRIPT: &str = r#"
     if (!plugin || reportedLoaderPlugins.has(plugin)) return;
     const invoke = window.__TAURI__?.core?.invoke;
     if (typeof invoke !== 'function') return;
+    const envelope = {
+      protocolVersion: 2,
+      requestId: diagnosticRequestId(),
+      subject: 'harness-web',
+      command: { type: 'report-client-plugin-failure', plugin }
+    };
     reportedLoaderPlugins.add(plugin);
-    void Promise.resolve(invoke('report_client_plugin_failure', { plugin })).catch(() => {
-      reportedLoaderPlugins.delete(plugin);
-    });
+    void Promise.resolve(invoke('host_execute', { envelope }))
+      .then((response) => {
+        if (response?.result?.Err) throw new Error('Host diagnostic report denied');
+      })
+      .catch(() => {
+        reportedLoaderPlugins.delete(plugin);
+      });
   };
   window.addEventListener('error', (event) => {
     reportLoaderFailure(event?.error?.stack || event?.message || '');

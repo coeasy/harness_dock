@@ -13,6 +13,7 @@
 | `clear-quarantine` | `runtime-quarantine-admin` |
 | `show-gateway` | `surface-open-gateway` |
 | `show-diagnostics` | `surface-open-diagnostics` |
+| `report-client-plugin-failure` | `client-diagnostic-report` |
 | `install-update` | `update-install` |
 | `quit` | `app-quit` |
 
@@ -37,6 +38,7 @@
 - `surface-open-diagnostics`
 - `diagnostics-read`
 - `diagnostics-export`
+- `client-diagnostic-report`
 - `plugin-admin`
 - `profile-admin`
 - `cli-admin`

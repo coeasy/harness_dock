@@ -23,6 +23,16 @@ pub struct CommandEnvelope {
     pub command: HostCommand,
 }
 
+fn valid_client_plugin_identifier(raw: &str) -> bool {
+    let value = raw.trim();
+    value == raw
+        && (3..=160).contains(&value.len())
+        && value.is_ascii()
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, '@' | '/' | '-' | '_' | '.')
+        })
+}
+
 impl CommandEnvelope {
     pub fn validate(&self) -> Result<(), HostError> {
         if self.protocol_version < HOST_PROTOCOL_MIN_COMPATIBLE_VERSION
@@ -55,6 +65,16 @@ impl CommandEnvelope {
                 "requestId must be at most 128 bytes",
                 false,
             ));
+        }
+        if let HostCommand::ReportClientPluginFailure { plugin } = &self.command {
+            if !valid_client_plugin_identifier(plugin) {
+                return Err(HostError::new(
+                    "CLIENT_PLUGIN_ID_INVALID",
+                    ErrorScope::Protocol,
+                    "client plugin identifier must be 3-160 canonical ASCII identifier bytes",
+                    false,
+                ));
+            }
         }
         Ok(())
     }
@@ -186,10 +206,42 @@ mod tests {
     }
 
     #[test]
+    fn validates_client_plugin_diagnostic_payload() {
+        let good = CommandEnvelope {
+            protocol_version: HOST_PROTOCOL_VERSION,
+            request_id: "req-plugin-good".into(),
+            subject: SubjectKind::HarnessWeb,
+            command: HostCommand::ReportClientPluginFailure {
+                plugin: "@deepseek-ai/dsh-client-ui-sidebar-documentpreview".into(),
+            },
+        };
+        assert!(good.validate().is_ok());
+
+        let bad = CommandEnvelope {
+            protocol_version: HOST_PROTOCOL_VERSION,
+            request_id: "req-plugin-bad".into(),
+            subject: SubjectKind::HarnessWeb,
+            command: HostCommand::ReportClientPluginFailure {
+                plugin: "Error: https://127.0.0.1/?token=secret".into(),
+            },
+        };
+        let error = bad.validate().unwrap_err();
+        assert_eq!(error.code, "CLIENT_PLUGIN_ID_INVALID");
+        assert_eq!(error.scope, ErrorScope::Protocol);
+    }
+
+    #[test]
     fn protocol_command_capability_mapping_is_generated() {
         assert_eq!(
             HostCommand::RestartRuntime.capability(),
             Capability::RuntimeRestart
+        );
+        assert_eq!(
+            HostCommand::ReportClientPluginFailure {
+                plugin: "pkg.test".into(),
+            }
+            .capability(),
+            Capability::ClientDiagnosticReport
         );
         assert_eq!(
             HostCommand::InstallUpdate.capability(),

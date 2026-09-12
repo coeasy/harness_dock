@@ -166,7 +166,7 @@ describe('Harness Shell contract lockstep', () => {
     )
     const missing = declared.filter((capability) => !webBranch.includes(capability))
     expect(missing).toEqual([])
-    expect(declared.length).toBe(16)
+    expect(declared.length).toBe(17)
   })
 })
 

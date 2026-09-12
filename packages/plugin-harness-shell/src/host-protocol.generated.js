@@ -19,6 +19,7 @@ export const HOST_CAPABILITIES = Object.freeze({
   "SurfaceOpenDiagnostics": "surface-open-diagnostics",
   "DiagnosticsRead": "diagnostics-read",
   "DiagnosticsExport": "diagnostics-export",
+  "ClientDiagnosticReport": "client-diagnostic-report",
   "PluginAdmin": "plugin-admin",
   "ProfileAdmin": "profile-admin",
   "CliAdmin": "cli-admin",
@@ -34,6 +35,7 @@ export const HOST_COMMANDS = Object.freeze({
   "ClearQuarantine": "clear-quarantine",
   "ShowGateway": "show-gateway",
   "ShowDiagnostics": "show-diagnostics",
+  "ReportClientPluginFailure": "report-client-plugin-failure",
   "InstallUpdate": "install-update",
   "Quit": "quit"
 })
@@ -45,6 +47,7 @@ export const HOST_COMMAND_CAPABILITIES = Object.freeze({
   "clear-quarantine": "runtime-quarantine-admin",
   "show-gateway": "surface-open-gateway",
   "show-diagnostics": "surface-open-diagnostics",
+  "report-client-plugin-failure": "client-diagnostic-report",
   "install-update": "update-install",
   "quit": "app-quit"
 })

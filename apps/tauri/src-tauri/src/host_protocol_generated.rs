@@ -40,6 +40,8 @@ pub enum Capability {
     DiagnosticsRead,
     #[serde(rename = "diagnostics-export")]
     DiagnosticsExport,
+    #[serde(rename = "client-diagnostic-report")]
+    ClientDiagnosticReport,
     #[serde(rename = "plugin-admin")]
     PluginAdmin,
     #[serde(rename = "profile-admin")]
@@ -71,6 +73,8 @@ pub enum HostCommand {
     ShowGateway,
     #[serde(rename = "show-diagnostics")]
     ShowDiagnostics,
+    #[serde(rename = "report-client-plugin-failure")]
+    ReportClientPluginFailure { plugin: String },
     #[serde(rename = "install-update")]
     InstallUpdate,
     #[serde(rename = "quit")]
@@ -87,6 +91,7 @@ impl HostCommand {
             Self::ClearQuarantine => Capability::RuntimeQuarantineAdmin,
             Self::ShowGateway => Capability::SurfaceOpenGateway,
             Self::ShowDiagnostics => Capability::SurfaceOpenDiagnostics,
+            Self::ReportClientPluginFailure { .. } => Capability::ClientDiagnosticReport,
             Self::InstallUpdate => Capability::UpdateInstall,
             Self::Quit => Capability::AppQuit,
         }

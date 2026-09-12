@@ -7,6 +7,8 @@ use crate::{
     surface_actor::SurfaceKind,
 };
 
+const MAX_CLIENT_PLUGIN_FAILURES: usize = 32;
+
 fn bump_revision(app: &AppHandle) {
     app.state::<crate::AppState>()
         .revision
@@ -84,6 +86,22 @@ async fn activate_primary(app: AppHandle) -> Result<(), String> {
     }
 }
 
+fn record_client_plugin_failure(app: &AppHandle, plugin: String) -> Result<(), String> {
+    let state = app.state::<crate::AppState>();
+    let mut failures = match state.client_plugin_failures.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if failures.contains(&plugin) {
+        return Ok(());
+    }
+    if failures.len() >= MAX_CLIENT_PLUGIN_FAILURES {
+        failures.remove(0);
+    }
+    failures.push(plugin);
+    Ok(())
+}
+
 async fn reconcile_command(app: AppHandle, command: HostCommand) -> Result<(), String> {
     match command {
         HostCommand::ActivatePrimary => activate_primary(app).await,
@@ -101,6 +119,9 @@ async fn reconcile_command(app: AppHandle, command: HostCommand) -> Result<(), S
         }
         HostCommand::ShowGateway => crate::harness_window::control_show(app),
         HostCommand::ShowDiagnostics => crate::harness_window::shell_settings_show(app).await,
+        HostCommand::ReportClientPluginFailure { plugin } => {
+            record_client_plugin_failure(&app, plugin)
+        }
         HostCommand::InstallUpdate => crate::update::update_install(app).await.map(|_| ()),
         HostCommand::Quit => {
             crate::request_exit(&app);

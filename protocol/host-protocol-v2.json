@@ -19,6 +19,7 @@
     { "rust": "SurfaceOpenDiagnostics", "wire": "surface-open-diagnostics" },
     { "rust": "DiagnosticsRead", "wire": "diagnostics-read" },
     { "rust": "DiagnosticsExport", "wire": "diagnostics-export" },
+    { "rust": "ClientDiagnosticReport", "wire": "client-diagnostic-report" },
     { "rust": "PluginAdmin", "wire": "plugin-admin" },
     { "rust": "ProfileAdmin", "wire": "profile-admin" },
     { "rust": "CliAdmin", "wire": "cli-admin" },
@@ -34,6 +35,7 @@
     { "rust": "ClearQuarantine", "wire": "clear-quarantine", "capability": "RuntimeQuarantineAdmin" },
     { "rust": "ShowGateway", "wire": "show-gateway", "capability": "SurfaceOpenGateway" },
     { "rust": "ShowDiagnostics", "wire": "show-diagnostics", "capability": "SurfaceOpenDiagnostics" },
+    { "rust": "ReportClientPluginFailure", "wire": "report-client-plugin-failure", "capability": "ClientDiagnosticReport", "fields": [{ "rust": "plugin", "rustType": "String" }] },
     { "rust": "InstallUpdate", "wire": "install-update", "capability": "UpdateInstall" },
     { "rust": "Quit", "wire": "quit", "capability": "AppQuit" }
   ]
