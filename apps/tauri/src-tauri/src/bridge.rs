@@ -13,6 +13,8 @@ use crate::host_protocol::{
 };
 use crate::surface_actor::SurfaceKind;
 
+const MAX_CLIENT_PLUGIN_FAILURES: usize = 32;
+
 #[tauri::command]
 pub async fn host_execute(
     app: AppHandle,
@@ -215,9 +217,63 @@ pub fn host_snapshot(
     })
 }
 
+fn normalize_client_plugin_identifier(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if !(3..=160).contains(&value.len()) || !value.is_ascii() {
+        return None;
+    }
+    if !value.chars().all(|ch| {
+        ch.is_ascii_alphanumeric() || matches!(ch, '@' | '/' | '-' | '_' | '.')
+    }) {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+/// Narrow diagnostic ingress from the trusted Harness WebView.
+///
+/// The initialization script extracts only a plugin/package identifier from a
+/// recognized Loader error before calling this command. We revalidate the
+/// WebView's RuntimeLease/origin and the identifier alphabet here. Full client
+/// exception text, URLs, paths and tokens never cross this boundary.
+#[tauri::command]
+pub fn report_client_plugin_failure(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    plugin: String,
+) -> Result<(), String> {
+    trusted_subject(&app, &window, SubjectKind::HarnessWeb)
+        .map_err(|_| "仅当前受管 Harness Web 可以报告插件加载诊断。".to_string())?;
+    let plugin = normalize_client_plugin_identifier(&plugin)
+        .ok_or_else(|| "插件诊断标识无效。".to_string())?;
+    let state = app.state::<crate::AppState>();
+    let mut failures = match state.client_plugin_failures.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if failures.contains(&plugin) {
+        return Ok(());
+    }
+    if failures.len() >= MAX_CLIENT_PLUGIN_FAILURES {
+        failures.remove(0);
+    }
+    failures.push(plugin);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
-    let mut status = crate::runtime::status_snapshot_readonly(&*app.state::<crate::AppState>());
+    let state = app.state::<crate::AppState>();
+    let mut status = crate::runtime::status_snapshot_readonly(&*state);
+    let reported = match state.client_plugin_failures.lock() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    for plugin in reported {
+        if !status.suspected_plugins.contains(&plugin) {
+            status.suspected_plugins.push(plugin);
+        }
+    }
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
             parsed.set_username("").ok();
@@ -245,6 +301,7 @@ macro_rules! handler {
         tauri::generate_handler![
             $crate::bridge::host_execute,
             $crate::bridge::host_snapshot,
+            $crate::bridge::report_client_plugin_failure,
             $crate::bridge::public_runtime_status,
             $crate::bridge::diagnostics_close,
             $crate::runtime::runtime_status,
