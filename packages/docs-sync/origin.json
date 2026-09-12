@@ -3,8 +3,8 @@
   "gitTag": "dsh-v0.1.5-rc.2",
   "gitCommit": "fb2c4b9e698e30edb738bca4cf0618587db7d203",
   "npmPackage": "@deepseek-ai/dsh",
-  "npmIntegrity": "sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==",
-  "npmTarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.1.tgz",
+  "npmIntegrity": "",
+  "npmTarball": "",
   "docsHash": "6e65435e65af939c98f89421d3c0907434b7b08be11517a49f4ea4f4b62a34a3",
   "syncedAt": "2026-09-11T03:17:00.000Z",
   "clientVersion": "0.1.5"
