@@ -28,9 +28,9 @@ fn valid_client_plugin_identifier(raw: &str) -> bool {
     value == raw
         && (3..=160).contains(&value.len())
         && value.is_ascii()
-        && value.chars().all(|ch| {
-            ch.is_ascii_alphanumeric() || matches!(ch, '@' | '/' | '-' | '_' | '.')
-        })
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '@' | '/' | '-' | '_' | '.'))
 }
 
 impl CommandEnvelope {
