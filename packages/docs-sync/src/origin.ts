@@ -35,6 +35,7 @@ export function diffOrigin(
     'npmIntegrity',
     'npmTarball',
     'docsHash',
+    'clientVersion',
   ]
   for (const key of keys) {
     if (current[key] !== next[key]) fields.push(key)
