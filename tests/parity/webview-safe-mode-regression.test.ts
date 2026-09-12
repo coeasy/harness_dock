@@ -51,6 +51,7 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
     const lifecycle = rawRustScript(shellHost, 'LIFECYCLE_SCRIPT')
 
+    expect(() => new vm.Script(lifecycle)).not.toThrow()
     expect(lifecycle).toContain("status.textContent = '正在载入 Harness Web…'")
     expect(lifecycle).toContain("node.dataset.mode = 'startup'")
     expect(lifecycle).toContain('new MutationObserver(observeStartup)')
