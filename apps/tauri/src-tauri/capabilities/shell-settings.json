@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "shell-settings",
-  "description": "Local on-demand Diagnostics surface. State/business operations use Host Protocol; validated Runtime launch preferences are scoped to this local surface.",
+  "description": "Local on-demand Diagnostics surface. State/business operations use Host Protocol; validated Runtime launch preferences and read-only Runtime status are scoped to this local surface.",
   "windows": ["settings"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "shell-settings",
     "runtime-launch-settings",
+    "runtime-status",
     "host-protocol"
   ]
 }
