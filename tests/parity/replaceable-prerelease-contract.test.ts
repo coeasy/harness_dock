@@ -8,12 +8,12 @@ const read = (relative: string) => readFileSync(path.join(repoRoot, relative), '
 const manifest = JSON.parse(read('release-manifest.json')) as any
 
 describe('release publication classification contract', () => {
-  it('publishes v0.1.5 as an immutable stable GitHub release', () => {
-    expect(manifest.channel).toBe('stable')
-    expect(manifest.prerelease).toBe('')
-    expect(manifest.publication.tagTemplate).toBe('v{version}')
-    expect(manifest.publication.githubPrerelease).toBe(false)
-    expect(manifest.publication.replaceablePrerelease).toBe(false)
+  it('publishes v0.1.5-rc.2 as a guarded replaceable GitHub prerelease', () => {
+    expect(manifest.channel).toBe('rc')
+    expect(manifest.prerelease).toBe('rc.2')
+    expect(manifest.publication.tagTemplate).toBe('v{version}-{prerelease}')
+    expect(manifest.publication.githubPrerelease).toBe(true)
+    expect(manifest.publication.replaceablePrerelease).toBe(true)
   })
 
   it('keeps the bundled upstream Runtime pinned to dsh rc.2 independently of client publication channel', () => {
