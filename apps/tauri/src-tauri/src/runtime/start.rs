@@ -374,9 +374,7 @@ pub fn start_blocking(
             ) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    eprintln!(
-                        "Plugin recovery config discovery failed; using Rescue Web: {error}"
-                    );
+                    eprintln!("Plugin recovery config discovery failed; using Rescue Web: {error}");
                     return work_dir_guard.retain_result(safe_profile(
                         &image,
                         &launch,
