@@ -68,7 +68,7 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     const config = read('apps/tauri/src-tauri/src/runtime/config.rs')
     const launch = read('apps/tauri/src-tauri/src/runtime/launch_settings.rs')
 
-    expect(safeMode).toContain('recovery_candidates(rows)')
+    expect(safeMode).toContain('let isolated_rows = recovery_candidates(rows)')
     expect(safeMode).toContain('recovery_plan(rows, diagnostic).1')
     expect(safeMode).toContain('pub struct RescuePlan')
     expect(start).toContain('profile: DEFAULT_PROFILE.into()')
@@ -81,13 +81,14 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(start).toContain('"rescue-web-private-home"')
     expect(launch).toContain('Start the shipped Web application while isolating all external/user')
 
-    // Automatic quarantine remains conservative: normal mode still never
-    // disables arbitrary official rows. Rescue Web reuses that external-row
-    // classifier, rather than maintaining a fragile official allow/deny list.
+    // Normal automatic recovery remains conservative: arbitrary official rows
+    // are still protected. Rescue Web uses that same classifier, instead of a
+    // static official deny-list. The Rust fixture proves an official optional
+    // UI row is present in inventory but absent from the generated rescue patch.
     expect(config).toContain('&& !is_official_row(row)')
     expect(config).toContain('recovery_never_targets_official_or_embedded_rows')
     expect(safeMode).not.toContain('SAFE_MODE_OPTIONAL_OFFICIAL_IDS')
-    expect(safeMode).not.toContain('ui-sidebar-documentpreview')
+    expect(safeMode).toContain('assert!(!patch.contains("ui-sidebar-documentpreview"))')
   })
 
   it('makes Rescue Web diagnosis and restore actions visible to the user', () => {
