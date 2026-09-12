@@ -62,7 +62,7 @@ describe('older WebView compatibility and explicit safe mode', () => {
     expect(lifecycle).toContain("child.id === 'harnessdock-lifecycle-surface'")
     expect(lifecycle).toContain('requestAnimationFrame(() => {')
     expect(lifecycle.match(/requestAnimationFrame\(\(\) => \{/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
-    expect(lifecycle).toContain("const DARK = '#050b14'")
+    expect(lifecycle).toContain("const DARK = '#07101d'")
     expect(lifecycle).toContain('__HARNESSDOCK_LIFECYCLE_INSTALLED__')
     expect(lifecycle).not.toContain('setTimeout(')
   })
