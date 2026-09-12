@@ -11,6 +11,10 @@ pub(crate) struct AppState {
     pub(crate) revision: AtomicU64,
     pub(crate) host_kernel: Mutex<Option<host_kernel::HostKernelHandle>>,
     pub(crate) startup_recovery_error: Mutex<Option<String>>,
+    /// Bounded, sanitized plugin identifiers reported by the currently trusted
+    /// Harness WebView when its client Loader fails after Runtime readiness.
+    /// Full exception text is never stored here.
+    pub(crate) client_plugin_failures: Mutex<Vec<String>>,
     pub(crate) starting_processes: process::StartingProcessRegistry,
     pub(crate) quitting: Arc<AtomicBool>,
     pub(crate) tray_available: AtomicBool,
@@ -26,6 +30,7 @@ impl Default for AppState {
             revision: AtomicU64::new(0),
             host_kernel: Mutex::new(None),
             startup_recovery_error: Mutex::new(None),
+            client_plugin_failures: Mutex::new(Vec::new()),
             starting_processes: Arc::new(Mutex::new(std::collections::HashSet::new())),
             quitting: Arc::new(AtomicBool::new(false)),
             tray_available: AtomicBool::new(false),
