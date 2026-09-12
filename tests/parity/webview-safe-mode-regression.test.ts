@@ -68,9 +68,12 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     const config = read('apps/tauri/src-tauri/src/runtime/config.rs')
     const launch = read('apps/tauri/src-tauri/src/runtime/launch_settings.rs')
 
-    expect(safeMode).toContain('let isolated_rows = recovery_candidates(rows)')
-    expect(safeMode).toContain('recovery_plan(rows, diagnostic).1')
+    expect(safeMode).toContain('let isolated_rows = rescue_candidates(rows)')
+    expect(safeMode).toContain('!is_official_source(&row.source)')
+    expect(safeMode).toContain('HARNESSDOCK_INTEGRATION_IDS')
+    expect(safeMode).toContain('rescue_suspects(&isolated_rows, diagnostic)')
     expect(safeMode).toContain('pub struct RescuePlan')
+    expect(safeMode).toContain('rescue_uses_source_provenance_not_a_spoofable_declared_name')
     expect(start).toContain('profile: DEFAULT_PROFILE.into()')
     expect(start).toContain('dsh_home: launch.dsh_home.clone()')
     expect(start).toContain('let rescue = safe_mode::plan(&rows, diagnostic)')
@@ -81,6 +84,8 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(start).toContain('"rescue-web-private-home"')
     expect(launch).toContain('Start the shipped Web application while isolating all external/user')
 
+    // Normal automatic quarantine remains conservative and name-aware, while
+    // explicit rescue is stricter about user/external source provenance.
     expect(config).toContain('&& !is_official_row(row)')
     expect(config).toContain('recovery_never_targets_official_or_embedded_rows')
     expect(safeMode).not.toContain('SAFE_MODE_OPTIONAL_OFFICIAL_IDS')
@@ -103,8 +108,6 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(js).toContain('runtimeStatus?.isolatedPlugins')
     expect(js).toContain('runtimeStatus?.suspectedPlugins')
 
-    // "恢复全部插件" must really leave Rescue Web for this and future boots.
-    // A persisted Safe policy is switched back to Auto before the normal restart.
     expect(launch).toContain('pub fn restore_normal_startup_policy')
     expect(launch).toContain('settings.startup_policy = RuntimeStartupPolicy::Auto')
     expect(window).toContain('crate::runtime::restore_normal_startup_policy(&app)')
