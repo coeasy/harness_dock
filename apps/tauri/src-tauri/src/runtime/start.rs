@@ -66,16 +66,47 @@ pub fn launch_attempt(
     })
 }
 
-fn hard_rescue_profile(
+fn profile_writer_lock_diagnostic(diagnostic: &str) -> bool {
+    let diagnostic = diagnostic.to_ascii_lowercase();
+    diagnostic.contains("node_modules.lock")
+        || diagnostic.contains("timed out waiting for the writer lock")
+        || (diagnostic.contains("atomic-write") && diagnostic.contains("writer lock"))
+}
+
+fn profile_writer_lock_failure(failure: &AttemptFailure) -> bool {
+    profile_writer_lock_diagnostic(&failure.diagnostic)
+}
+
+/// Start the shipped Web application from a private DSH_HOME.
+///
+/// Rescue is an availability boundary, not only a plugin-disable patch. It must
+/// never compose the same user profile that just failed: profile composition can
+/// itself be blocked by `profiles/node_modules.lock`, corrupt state, or another
+/// dsh writer. We inspect user patch files directly for diagnostics only, then
+/// launch the official Web profile in a generation-private home with the three
+/// HarnessDock embedded integrations. The private home is owned by the Runtime
+/// work directory and is removed when that Runtime generation stops.
+pub fn safe_profile(
     image: &RuntimeImage,
+    launch: &RuntimeLaunchSpec,
     embedded_patch_file: &Path,
     ready_file: &Path,
     dir: &Path,
+    diagnostic: Option<&str>,
     generation: &RuntimeGeneration,
     token: &CancellationToken,
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &std::sync::atomic::AtomicBool,
 ) -> Result<RuntimeProcess, String> {
+    // Reading patch files is side-effect free and, unlike `dsh --dump-config`,
+    // cannot enter profile healing or contend on the upstream writer lock.
+    // These rows are metadata only: actual isolation comes from the private
+    // DSH_HOME used below, so an incomplete inventory cannot weaken Rescue.
+    let rows = user_patch_rows(DEFAULT_PROFILE, launch.dsh_home.as_deref());
+    let rescue = safe_mode::plan(&rows, diagnostic);
+    let isolated_plugins = rescue.isolated_plugin_ids();
+    let suspected_plugins = rescue.suspected_plugins.clone();
+
     let safe_home = dir.join("rescue-dsh-home");
     fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建救援 DSH_HOME: {error}"))?;
     let _ = fs::remove_file(ready_file);
@@ -100,94 +131,11 @@ fn hard_rescue_profile(
         )
     })?;
     process.safe_mode = true;
-    process.recovery_source = "rescue-web-private-home".into();
-    Ok(process)
-}
-
-/// Start the normal shipped `web` profile with every third-party/user row from
-/// the effective config disabled for this generation only.
-///
-/// Rescue mode intentionally keeps the effective DSH_HOME when config discovery
-/// succeeds so model/settings state remains available. If even config discovery
-/// is damaged, it falls back once to a private DSH_HOME so the official Web app
-/// still has a deterministic last-resort startup path.
-pub fn safe_profile(
-    image: &RuntimeImage,
-    launch: &RuntimeLaunchSpec,
-    embedded_patch_file: &Path,
-    ready_file: &Path,
-    dir: &Path,
-    diagnostic: Option<&str>,
-    generation: &RuntimeGeneration,
-    token: &CancellationToken,
-    starting_processes: &process_control::StartingProcessRegistry,
-    quitting: &std::sync::atomic::AtomicBool,
-) -> Result<RuntimeProcess, String> {
-    let rescue_launch = RuntimeLaunchSpec {
-        profile: DEFAULT_PROFILE.into(),
-        dsh_home: launch.dsh_home.clone(),
-        startup_policy: RuntimeStartupPolicy::Safe,
+    process.recovery_source = if diagnostic.is_some_and(profile_writer_lock_diagnostic) {
+        "profile-lock-private-home".into()
+    } else {
+        "rescue-web-private-home".into()
     };
-    let rows = match recovery_rows(
-        image,
-        &rescue_launch,
-        embedded_patch_file,
-        token,
-        starting_processes,
-        quitting,
-    ) {
-        Ok(rows) => rows,
-        Err(error) => {
-            eprintln!(
-                "Rescue Web config inventory failed; using private-home hard rescue: {error}"
-            );
-            return hard_rescue_profile(
-                image,
-                embedded_patch_file,
-                ready_file,
-                dir,
-                generation,
-                token,
-                starting_processes,
-                quitting,
-            );
-        }
-    };
-    let rescue = safe_mode::plan(&rows, diagnostic);
-    let isolated_plugins = rescue.isolated_plugin_ids();
-    let suspected_plugins = rescue.suspected_plugins.clone();
-    let rescue_patch = rescue.patch()?;
-    let rescue_patch_file = dir.join("rescue-web.patch.yml");
-    let mut patches = vec![embedded_patch_file];
-    if !rescue_patch.is_empty() {
-        fs::write(&rescue_patch_file, rescue_patch)
-            .map_err(|error| format!("无法写入救援模式插件隔离 patch: {error}"))?;
-        patches.push(rescue_patch_file.as_path());
-    }
-
-    let _ = fs::remove_file(ready_file);
-    let mut process = launch_attempt(
-        image,
-        DEFAULT_PROFILE,
-        &patches,
-        rescue_launch.dsh_home.as_deref(),
-        ready_file,
-        dir,
-        "rescue-web",
-        generation,
-        token,
-        starting_processes,
-        quitting,
-    )
-    .map_err(|error| {
-        format!(
-            "Harness Web 救援模式启动失败: {}\n{}",
-            error.message,
-            public_diagnostic(&error.diagnostic)
-        )
-    })?;
-    process.safe_mode = true;
-    process.recovery_source = "rescue-web".into();
     process.isolated_plugins = isolated_plugins;
     process.suspected_plugins = suspected_plugins;
     Ok(process)
@@ -278,7 +226,7 @@ pub fn start_blocking(
     // the shipped web profile. Other profiles may compose a very different
     // application tree; reusing web-centric quarantine attribution against
     // them can disable unrelated rows. They still get selected-profile startup
-    // followed by Rescue Web.
+    // followed by private-home Rescue Web.
     if launch.profile != DEFAULT_PROFILE {
         let _ = fs::remove_file(&ready_file);
         return match launch_selected("profile", &ready_file) {
@@ -288,7 +236,7 @@ pub fn start_blocking(
             }
             Err(failure) => {
                 eprintln!(
-                    "Selected profile {:?} failed in Auto mode; falling back to Rescue Web: {}",
+                    "Selected profile {:?} failed in Auto mode; falling back to private Rescue Web: {}",
                     launch.profile, failure.message
                 );
                 work_dir_guard.retain_result(safe_profile(
@@ -323,7 +271,7 @@ pub fn start_blocking(
             )
             .map_err(|error| format!("无法写入插件隔离 patch: {error}"))?;
             let _ = fs::remove_file(&ready_file);
-            if let Ok(mut process) = launch_attempt(
+            match launch_attempt(
                 &image,
                 &launch.profile,
                 &[patch_file.as_path(), quarantine_file.as_path()],
@@ -336,14 +284,35 @@ pub fn start_blocking(
                 &starting_processes,
                 &quitting,
             ) {
-                process.recovery_source = "quarantine".into();
-                process.isolated_plugins = quarantine.isolated_plugins;
-                process.suspected_plugins = quarantine.suspected_plugins;
-                process.quarantine_expires_at = Some(quarantine.expires_at);
-                work_dir_guard.retain();
-                return Ok(process);
+                Ok(mut process) => {
+                    process.recovery_source = "quarantine".into();
+                    process.isolated_plugins = quarantine.isolated_plugins;
+                    process.suspected_plugins = quarantine.suspected_plugins;
+                    process.quarantine_expires_at = Some(quarantine.expires_at);
+                    work_dir_guard.retain();
+                    return Ok(process);
+                }
+                Err(failure) => {
+                    let _ = plugin_quarantine::clear(&quarantine_state_path);
+                    if profile_writer_lock_failure(&failure) {
+                        eprintln!(
+                            "Quarantine startup hit the profile writer lock; switching directly to private Rescue Web."
+                        );
+                        return work_dir_guard.retain_result(safe_profile(
+                            &image,
+                            &launch,
+                            &patch_file,
+                            &ready_file,
+                            &dir,
+                            Some(&failure.diagnostic),
+                            &generation,
+                            &token,
+                            &starting_processes,
+                            &quitting,
+                        ));
+                    }
+                }
             }
-            let _ = plugin_quarantine::clear(&quarantine_state_path);
         }
     }
 
@@ -357,6 +326,29 @@ pub fn start_blocking(
             if cancelled(&token, &quitting) {
                 return Err("Runtime generation cancelled during startup".into());
             }
+
+            // A writer-lock failure is profile state contention, not plugin
+            // attribution. Any dump-config/quarantine attempt against the same
+            // DSH_HOME would contend on the same lock and only delay Web
+            // availability. Fail over immediately to a generation-private home.
+            if profile_writer_lock_failure(&first_failure) {
+                eprintln!(
+                    "Normal startup hit the profile writer lock; switching directly to private Rescue Web."
+                );
+                return work_dir_guard.retain_result(safe_profile(
+                    &image,
+                    &launch,
+                    &patch_file,
+                    &ready_file,
+                    &dir,
+                    Some(&first_failure.diagnostic),
+                    &generation,
+                    &token,
+                    &starting_processes,
+                    &quitting,
+                ));
+            }
+
             if !recovery_enabled {
                 return Err(format!(
                     "{}\n{}",
@@ -374,7 +366,7 @@ pub fn start_blocking(
             ) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    eprintln!("Plugin recovery config discovery failed; using Rescue Web: {error}");
+                    eprintln!("Plugin recovery config discovery failed; using private Rescue Web: {error}");
                     return work_dir_guard.retain_result(safe_profile(
                         &image,
                         &launch,
@@ -478,4 +470,29 @@ pub fn lease_from_process(
         launch_url: process.ready.url.clone(),
         dsh_version: process.ready.dsh_version.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failure(diagnostic: &str) -> AttemptFailure {
+        AttemptFailure {
+            message: "dsh Runtime 在 ready 前退出: exit code: 1".into(),
+            diagnostic: diagnostic.into(),
+        }
+    }
+
+    #[test]
+    fn detects_upstream_profile_writer_lock_failures() {
+        assert!(profile_writer_lock_failure(&failure(
+            "Error: atomic-write: timed out waiting for the writer lock at C:\\Users\\runner\\.dsh\\profiles\\node_modules.lock"
+        )));
+        assert!(profile_writer_lock_failure(&failure(
+            "failed while opening /home/me/.dsh/profiles/node_modules.lock"
+        )));
+        assert!(!profile_writer_lock_failure(&failure(
+            "failed to import loader entry @vendor/example-plugin"
+        )));
+    }
 }
