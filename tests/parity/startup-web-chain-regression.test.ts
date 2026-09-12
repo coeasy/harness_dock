@@ -145,7 +145,7 @@ describe('packaged startup Web chain regression', () => {
     expect(candidate).toContain('@dsh/client-runtime smoke-runtime')
   })
 
-  it('launches the installed binary from a neutral cwd and proves a durable BrowserAuth session', () => {
+  it('launches the installed binary from a neutral cwd, proves BrowserAuth, and gates private Rescue under profile-lock contention', () => {
     const cargo = read('apps/tauri/src-tauri/Cargo.toml')
     const packagedWorkflow = read('.github/workflows/windows-packaged-startup.yml')
     const packagedSmoke = read('scripts/smoke-windows-installer.ps1')
@@ -154,6 +154,8 @@ describe('packaged startup Web chain regression', () => {
     expect(packagedWorkflow).toContain('Checkout exact candidate lifecycle smoke')
     expect(packagedWorkflow).toContain('ref: ${{ env.CANDIDATE_SHA }}')
     expect(packagedWorkflow).toContain('./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer')
+    expect(packagedWorkflow).toContain('-BlockProfileWriter')
+    expect(packagedWorkflow).toContain('private Rescue startup under user profile writer-lock contention')
     expect(packagedSmoke).toContain("-Filter 'harnessdock-tauri.exe'")
     expect(packagedSmoke).not.toContain("-Filter 'HarnessDock.exe'")
     expect(packagedSmoke).toContain('Installed harnessdock-tauri.exe not found')
@@ -166,6 +168,12 @@ describe('packaged startup Web chain regression', () => {
     expect(packagedSmoke).toContain('Test-HarnessWebHtml $webSession.Client $cleanUrl')
     expect(packagedSmoke).toContain('$healthyCleanProbes -ge 2')
     expect(packagedSmoke).toContain('stable cookie-authenticated HTML')
+    expect(packagedSmoke).toContain('[switch]$BlockProfileWriter')
+    expect(packagedSmoke).toContain("Join-Path $profileDir 'node_modules.lock'")
+    expect(packagedSmoke).toContain('Assert-PrivateRescueWasExercised')
+    expect(packagedSmoke).toContain("-Filter 'rescue-dsh-home'")
+    expect(packagedSmoke).toContain('atomic-write')
+    expect(packagedSmoke).toContain('contended user profile failed over to generation-private Rescue Web')
   })
 
   it('keeps skipped duplicate startup smokes from masquerading as package failures', () => {
