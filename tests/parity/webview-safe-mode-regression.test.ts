@@ -18,7 +18,7 @@ function rawRustScript(source: string, constant: string): string {
   return source.slice(bodyStart, end)
 }
 
-describe('older WebView compatibility and explicit safe mode', () => {
+describe('older WebView compatibility and Rescue Web mode', () => {
   it('installs a shared Iterator compatibility global before PDF.js loader entries run', () => {
     const shellHost = read('apps/tauri/src-tauri/src/harness_shell.rs')
     const polyfill = rawRustScript(shellHost, 'POLYFILL_SCRIPT')
@@ -34,10 +34,6 @@ describe('older WebView compatibility and explicit safe mode', () => {
         context,
       ),
     ).toBe(true)
-
-    // PDF.js 6.x extends Iterator.prototype during import. Prove that such an
-    // extension reaches a real built-in iterator, rather than a disconnected
-    // compatibility prototype.
     vm.runInContext(
       "Iterator.prototype.__harnessDockProbe = function () { return this.next().value }",
       context,
@@ -60,44 +56,52 @@ describe('older WebView compatibility and explicit safe mode', () => {
     expect(lifecycle).toContain('new MutationObserver(settleStartupPaint)')
     expect(lifecycle).toContain("child.id === 'dsh-harness-shell'")
     expect(lifecycle).toContain("child.id === 'harnessdock-lifecycle-surface'")
-    expect(lifecycle).toContain('requestAnimationFrame(() => {')
     expect(lifecycle.match(/requestAnimationFrame\(\(\) => \{/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
     expect(lifecycle).toContain("const DARK = '#07101d'")
     expect(lifecycle).toContain('__HARNESSDOCK_LIFECYCLE_INSTALLED__')
     expect(lifecycle).not.toContain('setTimeout(')
   })
 
-  it('makes explicit safe mode stronger than an empty DSH_HOME without weakening normal quarantine', () => {
+  it('starts the normal web profile while isolating every external plugin generation-locally', () => {
     const safeMode = read('apps/tauri/src-tauri/src/runtime/safe_mode.rs')
     const start = read('apps/tauri/src-tauri/src/runtime/start.rs')
     const config = read('apps/tauri/src-tauri/src/runtime/config.rs')
+    const launch = read('apps/tauri/src-tauri/src/runtime/launch_settings.rs')
 
-    expect(safeMode).toContain('SAFE_MODE_OPTIONAL_OFFICIAL_IDS')
-    expect(safeMode).toContain('"ui-sidebar-documentpreview"')
-    for (const protectedId of [
-      'modules',
-      'connection',
-      'cordis-client-runner',
-      'ui-renderer',
-      'ui-session',
-      'resources',
-      'ui-sidebar-right',
-      'embedded-client',
-      'harnessdock-client-runtime-compat',
-      'harness-shell',
-    ]) {
-      expect(safeMode).not.toContain(`&["${protectedId}"]`)
-      expect(safeMode).not.toContain(`SAFE_MODE_OPTIONAL_OFFICIAL_IDS: &[&str] = &["${protectedId}"]`)
-    }
+    expect(safeMode).toContain('recovery_candidates(rows)')
+    expect(safeMode).toContain('recovery_plan(rows, diagnostic).1')
+    expect(safeMode).toContain('pub struct RescuePlan')
+    expect(start).toContain('profile: DEFAULT_PROFILE.into()')
+    expect(start).toContain('dsh_home: launch.dsh_home.clone()')
+    expect(start).toContain('let rescue = safe_mode::plan(&rows, diagnostic)')
+    expect(start).toContain('let rescue_patch_file = dir.join("rescue-web.patch.yml")')
+    expect(start).toContain('process.recovery_source = "rescue-web".into()')
+    expect(start).toContain('process.isolated_plugins = isolated_plugins')
+    expect(start).toContain('process.suspected_plugins = suspected_plugins')
+    expect(start).toContain('"rescue-web-private-home"')
+    expect(launch).toContain('Start the shipped Web application while isolating all external/user')
 
-    expect(start).toContain('let safe_patch_file = dir.join("safe-mode.patch.yml")')
-    expect(start).toContain('fs::write(&safe_patch_file, safe_mode::patch())')
-    expect(start).toContain('&[embedded_patch_file, safe_patch_file.as_path()]')
-    expect(start).toContain('process.isolated_plugins = safe_mode::isolated_plugin_ids()')
-
-    // Normal automatic recovery remains conservative: arbitrary official rows
-    // are still excluded. The reviewed official deny-list is safe-mode-only.
+    // Automatic quarantine remains conservative: normal mode still never
+    // disables arbitrary official rows. Rescue Web reuses that external-row
+    // classifier, rather than maintaining a fragile official allow/deny list.
     expect(config).toContain('&& !is_official_row(row)')
     expect(config).toContain('recovery_never_targets_official_or_embedded_rows')
+    expect(safeMode).not.toContain('SAFE_MODE_OPTIONAL_OFFICIAL_IDS')
+    expect(safeMode).not.toContain('ui-sidebar-documentpreview')
+  })
+
+  it('makes Rescue Web diagnosis and restore actions visible to the user', () => {
+    const html = read('apps/tauri/web/settings.html')
+    const js = read('apps/tauri/web/settings.js')
+
+    expect(html).toContain('救援模式（隔离第三方插件）')
+    expect(html).toContain('恢复全部插件并正常重启')
+    expect(html).toContain('id="suspected-plugin-list"')
+    expect(html).toContain('id="isolated-plugin-list"')
+    expect(js).toContain("call('public_runtime_status')")
+    expect(js).toContain("'start-safe-mode'")
+    expect(js).toContain("'clear-quarantine'")
+    expect(js).toContain('runtimeStatus?.isolatedPlugins')
+    expect(js).toContain('runtimeStatus?.suspectedPlugins')
   })
 })
