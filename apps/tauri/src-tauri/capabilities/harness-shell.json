@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "harness-shell",
-  "description": "Remote Harness Web capability for the exact managed 127.0.0.1 Runtime origin family. It receives only window primitives plus Host Protocol v2; business authority is revalidated against the current RuntimeLease by the Capability Broker.",
+  "description": "Remote Harness Web capability for the exact managed 127.0.0.1 Runtime origin family. It receives only window primitives, narrow client-plugin diagnostics, plus Host Protocol v2; business authority is revalidated against the current RuntimeLease by the Capability Broker.",
   "local": false,
   "platforms": ["linux", "macOS", "windows"],
   "remote": {
@@ -16,6 +16,7 @@
     "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
     "harness-shell",
+    "client-plugin-diagnostics",
     "host-protocol"
   ]
 }
