@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$InstallerPath,
-    [int]$TimeoutSeconds = 120
+    [int]$TimeoutSeconds = 120,
+    [switch]$BlockProfileWriter
 )
 
 Set-StrictMode -Version Latest
@@ -18,6 +19,8 @@ $tempRoot = [IO.Path]::GetTempPath()
 $traceDir = Join-Path $tempRoot 'harnessdock-logs'
 $installDir = Join-Path $tempRoot 'HarnessDockInstallerSmoke'
 $neutralCwd = Join-Path $tempRoot 'HarnessDockInstallerSmokeNeutralCwd'
+$profileWriterLock = $null
+$lockCreatedBySmoke = $false
 
 function New-HarnessWebSession {
     Add-Type -AssemblyName System.Net.Http
@@ -94,6 +97,35 @@ function Wait-InstalledProcessesGone([string]$Root, [int]$TimeoutSeconds = 10) {
     throw "HarnessDock graceful exit left $($remaining.Count) process(es) running from $Root"
 }
 
+function Assert-PrivateRescueWasExercised([string]$TempRoot) {
+    $workDirs = @(Get-ChildItem $TempRoot -Directory -Filter 'harnessdock-tauri-*' -ErrorAction SilentlyContinue)
+    $attemptLogs = @(
+        $workDirs |
+            ForEach-Object { Get-ChildItem $_.FullName -File -Filter '*.stderr.log' -ErrorAction SilentlyContinue }
+    )
+    $sawWriterLockFailure = $false
+    foreach ($log in $attemptLogs) {
+        $raw = Get-Content $log.FullName -Raw -ErrorAction SilentlyContinue
+        if ($raw -match '(?i)atomic-write[\s\S]*writer lock|node_modules\.lock') {
+            $sawWriterLockFailure = $true
+            Write-Host "[smoke] observed expected writer-lock failure in $($log.Name)"
+            break
+        }
+    }
+    if (-not $sawWriterLockFailure) {
+        throw 'Profile-lock recovery smoke did not observe the injected upstream writer-lock failure'
+    }
+
+    $rescueHomes = @(
+        $workDirs |
+            ForEach-Object { Get-ChildItem $_.FullName -Directory -Filter 'rescue-dsh-home' -ErrorAction SilentlyContinue }
+    )
+    if ($rescueHomes.Count -eq 0) {
+        throw 'Profile-lock recovery smoke reached Harness Web without a private rescue-dsh-home'
+    }
+    Write-Host 'PASS: contended user profile failed over to generation-private Rescue Web'
+}
+
 # Ensure a previous failed runner attempt cannot contaminate this lifecycle
 # smoke. Kill the whole previous HarnessDock tree, not only its GUI parent.
 Get-Process -Name 'harnessdock-tauri' -ErrorAction SilentlyContinue | ForEach-Object {
@@ -122,6 +154,27 @@ if (-not $app) {
     Get-ChildItem $installDir -Recurse -Force -ErrorAction SilentlyContinue |
         ForEach-Object { Write-Host $_.FullName }
     throw "Installed harnessdock-tauri.exe not found under $installDir"
+}
+
+if ($BlockProfileWriter) {
+    $effectiveDshHome = if (-not [string]::IsNullOrWhiteSpace($env:DSH_HOME)) {
+        [IO.Path]::GetFullPath($env:DSH_HOME)
+    }
+    else {
+        Join-Path $env:USERPROFILE '.dsh'
+    }
+    $profileDir = Join-Path $effectiveDshHome 'profiles'
+    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+    $profileWriterLock = Join-Path $profileDir 'node_modules.lock'
+    if (Test-Path -LiteralPath $profileWriterLock) {
+        throw "Profile writer lock already exists before smoke injection: $profileWriterLock"
+    }
+    # Upstream @deepseek-ai/dsh-atomic-write acquires this exact sibling using
+    # exclusive `wx` creation and deliberately never removes a contended lock.
+    # Any existing file therefore reproduces the real writer-lock timeout.
+    Set-Content -LiteralPath $profileWriterLock -Value "$PID`n" -NoNewline
+    $lockCreatedBySmoke = $true
+    Write-Host "[smoke] Injected profile writer contention at $profileWriterLock"
 }
 
 Write-Host "[smoke] Launching installed client from neutral cwd: $neutralCwd"
@@ -214,6 +267,10 @@ try {
         throw "Timed out waiting for healthy primary Harness Web. readyUrl=$readyUrl authenticated=$authenticated healthyCleanProbes=$healthyCleanProbes Last trace:`n$content"
     }
 
+    if ($BlockProfileWriter) {
+        Assert-PrivateRescueWasExercised $tempRoot
+    }
+
     # Prove this test is observing the packaged Runtime rather than merely the
     # GUI process. At least one bundled node.exe must be alive under installDir
     # before the graceful close is requested.
@@ -252,5 +309,8 @@ finally {
     $leftovers = @(Get-InstalledProcessSnapshot $installDir)
     foreach ($process in $leftovers) {
         taskkill /PID $process.ProcessId /T /F | Out-Null
+    }
+    if ($lockCreatedBySmoke -and $profileWriterLock) {
+        Remove-Item -LiteralPath $profileWriterLock -Force -ErrorAction SilentlyContinue
     }
 }
