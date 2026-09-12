@@ -2,11 +2,11 @@
   "schemaVersion": 2,
   "product": "HarnessDock",
   "version": "0.1.5",
-  "channel": "stable",
+  "channel": "rc",
   "publication": {
-    "tagTemplate": "v{version}",
-    "githubPrerelease": false,
-    "replaceablePrerelease": false,
+    "tagTemplate": "v{version}-{prerelease}",
+    "githubPrerelease": true,
+    "replaceablePrerelease": true,
     "candidateWorkflow": ".github/workflows/tauri-candidate.yml",
     "requiredSameShaWorkflows": [
       ".github/workflows/ci.yml",
@@ -18,7 +18,7 @@
     "version": "0.1.5",
     "apiVersion": 1
   },
-  "prerelease": "",
+  "prerelease": "rc.2",
   "runtime": {
     "version": "0.1.5-rc.2",
     "gitTag": "dsh-v0.1.5-rc.2",

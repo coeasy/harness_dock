@@ -217,7 +217,17 @@ pub fn host_snapshot(
 
 #[tauri::command]
 pub fn public_runtime_status(app: AppHandle) -> crate::runtime::RuntimeStatus {
-    let mut status = crate::runtime::status_snapshot_readonly(&*app.state::<crate::AppState>());
+    let state = app.state::<crate::AppState>();
+    let mut status = crate::runtime::status_snapshot_readonly(&*state);
+    let reported = match state.client_plugin_failures.lock() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    for plugin in reported {
+        if !status.suspected_plugins.contains(&plugin) {
+            status.suspected_plugins.push(plugin);
+        }
+    }
     status.app_url = status.app_url.and_then(|value| {
         url::Url::parse(&value).ok().map(|mut parsed| {
             parsed.set_username("").ok();

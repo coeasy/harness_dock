@@ -30,6 +30,7 @@ mod config;
 mod control;
 mod launch_settings;
 mod paths;
+mod safe_mode;
 mod spawn;
 mod start;
 pub(crate) mod types;

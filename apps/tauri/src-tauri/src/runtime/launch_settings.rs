@@ -13,13 +13,15 @@ const SETTINGS_FILE: &str = "runtime-launch.v1.json";
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeStartupPolicy {
     /// Normal HarnessDock behavior: try the selected profile, honour a valid
-    /// quarantine, attribute startup failures, then fall back to safe mode.
+    /// quarantine, attribute startup failures, then fall back to Rescue Web.
     Auto,
     /// Start the selected profile exactly once. Useful for diagnosing custom
     /// profiles because HarnessDock does not mask the first startup failure.
     Direct,
-    /// Ignore user profile state and start the built-in web profile from a
-    /// private temporary DSH_HOME.
+    /// Start the shipped Web application while isolating all external/user
+    /// plugin rows for this Runtime generation. The effective DSH_HOME is kept
+    /// when its config can be inventoried so model/settings state remains
+    /// available; an unreadable config falls back to a private rescue home.
     Safe,
 }
 
@@ -69,10 +71,6 @@ pub struct RuntimeLaunchSpec {
 }
 
 fn validate_profile_name(value: &str) -> Result<(), String> {
-    // Keep this aligned with upstream `resolveProfileDir`: profile names are a
-    // single directory component. Passing the value as one Command argument
-    // already prevents shell/argv injection; rejecting control characters
-    // also keeps logs and settings serialization unambiguous.
     if value.is_empty()
         || value == "."
         || value == ".."
@@ -177,12 +175,24 @@ pub fn load_runtime_launch_settings(app: &AppHandle) -> RuntimeLaunchSettings {
     {
         Ok(settings) => settings,
         Err(error) => {
-            // A damaged preference file must never replace the primary Harness
-            // Web startup path with a settings/recovery failure.
             eprintln!("Runtime launch settings invalid; using defaults: {error}");
             RuntimeLaunchSettings::default()
         }
     }
+}
+
+/// Leaving Rescue Web is an explicit user action. If Rescue Web was selected
+/// as the persisted startup policy, restore it to Auto before the normal
+/// restart; otherwise a successful repair would immediately re-enter rescue on
+/// the next generation or next application launch. Direct/Auto preferences are
+/// preserved because neither one forces plugin isolation.
+pub fn restore_normal_startup_policy(app: &AppHandle) -> Result<RuntimeLaunchSettings, String> {
+    let mut settings = load_runtime_launch_settings(app);
+    if settings.startup_policy == RuntimeStartupPolicy::Safe {
+        settings.startup_policy = RuntimeStartupPolicy::Auto;
+        save_runtime_launch_settings(app, &settings)?;
+    }
+    Ok(settings)
 }
 
 pub fn resolve_runtime_launch_spec(app: &AppHandle) -> RuntimeLaunchSpec {

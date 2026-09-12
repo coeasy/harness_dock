@@ -19,7 +19,7 @@
         </div>
         <span id="overall-state" class="state-dot" data-state="checking">检查中</span>
       </div>
-      <p class="muted">快速确认 Runtime 是否健康，并配置 dsh profile 启动方式。</p>
+      <p class="muted">确认 Runtime 与 Harness Web 健康状态，快速定位插件问题并进入救援模式。</p>
       <div class="hero-actions">
         <button id="settings-close" class="secondary">关闭</button>
         <button id="settings-quit" class="danger">退出客户端</button>
@@ -52,33 +52,49 @@
         <option value="sdk"></option>
         <option value="sdk-minimal"></option>
       </datalist>
-      <p class="field-help">可填写自定义 profile 名称；目录对应 <code>$DSH_HOME/profiles/&lt;name&gt;</code>。HarnessDock 桌面主 Surface 还要求该 profile 最终提供 <code>webServer + connection</code>，以通过受管 Web-ready 检查；部分上游非 Web profile 可能不会直接产生可显示的 Harness Web。</p>
+      <p class="field-help">可填写自定义 profile 名称；目录对应 <code>$DSH_HOME/profiles/&lt;name&gt;</code>。HarnessDock 桌面主 Surface 还要求该 profile 最终提供 <code>webServer + connection</code>，以通过受管 Web-ready 检查。</p>
 
       <label for="runtime-dsh-home">DSH_HOME</label>
       <input id="runtime-dsh-home" autocomplete="off" spellcheck="false" placeholder="留空：使用系统 DSH_HOME 或 ~/.dsh" />
-      <p class="field-help">填写时必须是绝对路径。这里只改变 profile/config 根目录，不改变内置 dsh Runtime 来源；插件隔离状态会按有效 DSH_HOME 分开，避免不同配置树互相污染。</p>
+      <p class="field-help">救援模式会优先保留这个配置根目录和基础设置，只临时禁用其中识别到的第三方/用户插件；不会修改插件文件。</p>
 
       <label for="runtime-startup-policy">启动策略</label>
       <select id="runtime-startup-policy">
-        <option value="auto">Auto · profile → 隔离恢复(web) → Safe</option>
+        <option value="auto">Auto · profile → 自动插件恢复 → Rescue Web</option>
         <option value="direct">Direct · 仅启动所选 profile，失败即报错</option>
-        <option value="safe">Safe · 固定 web + 临时私有 DSH_HOME</option>
+        <option value="safe">Rescue Web · 正常 web + 隔离全部第三方插件</option>
       </select>
-      <p class="field-help">非 web profile 在 Auto 模式失败时直接进入 Safe，不执行 web 专用插件归因，避免误隔离；Direct 用于需要保留首个 profile 启动错误的诊断场景。</p>
+      <p class="field-help">Rescue Web 固定启动官方 web 主应用，保留核心 Runtime/Connection/Session/UI，只隔离第三方和用户插件；配置树无法读取时才退到临时私有 DSH_HOME。</p>
       <div class="actions">
         <button id="runtime-settings-save" class="primary">保存启动配置</button>
       </div>
-      <p id="runtime-settings-detail" class="status">这是下次启动配置；当前 Runtime generation 不会被热切换。配置在下一次 Runtime 启动或重启时生效。</p>
+      <p id="runtime-settings-detail" class="status">这是下次启动配置；当前 Runtime generation 不会被热切换。</p>
     </section>
 
-    <section class="card action-card">
+    <section class="card action-card" aria-label="插件救援与诊断">
       <div class="card-heading">
-        <div><h2>Runtime 与插件</h2><p>第三方插件异常会进入隔离恢复，不会修改用户配置。</p></div>
-        <span class="badge" id="runtime-badge">checking</span>
+        <div>
+          <h2>插件救援</h2>
+          <p>救援模式会正常启动 Harness Web，同时阻止第三方插件进入当前 Runtime generation。</p>
+        </div>
+        <span class="badge" id="plugin-mode-badge">normal</span>
       </div>
-      <div class="actions"><button id="runtime-refresh" class="primary">刷新状态</button></div>
+      <p id="plugin-summary" class="status">正在读取插件隔离状态…</p>
+      <div class="actions">
+        <button id="rescue-start" class="primary">救援模式（隔离第三方插件）</button>
+        <button id="plugins-restore" class="secondary">恢复全部插件并正常重启</button>
+        <button id="runtime-refresh" class="secondary">刷新状态</button>
+      </div>
+      <details class="technical-details" open>
+        <summary>疑似故障插件</summary>
+        <pre id="suspected-plugin-list" class="status">暂无明确故障归因</pre>
+      </details>
       <details class="technical-details">
-        <summary>查看技术诊断</summary>
+        <summary>当前已隔离插件</summary>
+        <pre id="isolated-plugin-list" class="status">无</pre>
+      </details>
+      <details class="technical-details">
+        <summary>查看 Runtime 技术诊断</summary>
         <p id="runtime-detail" class="status"></p>
       </details>
     </section>
@@ -94,7 +110,7 @@
 
     <section class="card compact-card">
       <div class="card-heading">
-        <div><h2>使用提示</h2><p>关闭本窗口不会停止 Runtime 或 Harness Web。配置修改在下一次 Runtime 重启生效。</p></div>
+        <div><h2>使用提示</h2><p>救援模式不会删除插件。确认 Harness Web 正常后，可修复/升级疑似故障插件，再点击“恢复全部插件并正常重启”进行验证。</p></div>
         <span class="badge">on demand</span>
       </div>
     </section>

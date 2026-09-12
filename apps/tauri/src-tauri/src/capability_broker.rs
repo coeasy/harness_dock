@@ -19,7 +19,7 @@ pub(crate) enum Decision {
     Deny(&'static str),
 }
 
-pub(crate) const ALL_CAPABILITIES: [Capability; 16] = [
+pub(crate) const ALL_CAPABILITIES: [Capability; 17] = [
     Capability::WindowControl,
     Capability::WebReload,
     Capability::RuntimeRestart,
@@ -30,6 +30,7 @@ pub(crate) const ALL_CAPABILITIES: [Capability; 16] = [
     Capability::SurfaceOpenDiagnostics,
     Capability::DiagnosticsRead,
     Capability::DiagnosticsExport,
+    Capability::ClientDiagnosticReport,
     Capability::PluginAdmin,
     Capability::ProfileAdmin,
     Capability::CliAdmin,
@@ -65,7 +66,8 @@ pub(crate) fn authorize(
             | Capability::RuntimeRestart
             | Capability::RuntimeSafeMode
             | Capability::SurfaceOpenGateway
-            | Capability::SurfaceOpenDiagnostics => Decision::Allow,
+            | Capability::SurfaceOpenDiagnostics
+            | Capability::ClientDiagnosticReport => Decision::Allow,
             Capability::RuntimeQuarantineAdmin
             | Capability::GatewayAdmin
             | Capability::DiagnosticsRead
@@ -77,6 +79,10 @@ pub(crate) fn authorize(
             | Capability::UpdateInstall
             | Capability::AppQuit => Decision::Deny("remote-harness-capability-denied"),
         };
+    }
+
+    if request.capability == Capability::ClientDiagnosticReport {
+        return Decision::Deny("client-diagnostic-report-requires-harness-web");
     }
 
     match request.subject {
@@ -96,7 +102,9 @@ pub(crate) fn authorize(
             | Capability::UpdateCheck
             | Capability::UpdateInstall
             | Capability::AppQuit => Decision::Allow,
-            Capability::WindowControl | Capability::WebReload => {
+            Capability::WindowControl
+            | Capability::WebReload
+            | Capability::ClientDiagnosticReport => {
                 Decision::Deny("diagnostics-surface-capability-denied")
             }
         },
@@ -207,6 +215,31 @@ mod tests {
     }
 
     #[test]
+    fn client_diagnostic_report_is_harness_web_only() {
+        let lease = lease();
+        let web = AuthorizationRequest {
+            subject: SubjectKind::HarnessWeb,
+            surface: SurfaceKind::Harness,
+            origin: Some(&lease.origin),
+            runtime_generation: Some(lease.generation.id),
+            capability: Capability::ClientDiagnosticReport,
+        };
+        assert_eq!(authorize(&web, Some(&lease)), Decision::Allow);
+
+        let diagnostics = AuthorizationRequest {
+            subject: SubjectKind::Diagnostics,
+            surface: SurfaceKind::Diagnostics,
+            origin: None,
+            runtime_generation: None,
+            capability: Capability::ClientDiagnosticReport,
+        };
+        assert_eq!(
+            authorize(&diagnostics, None),
+            Decision::Deny("client-diagnostic-report-requires-harness-web")
+        );
+    }
+
+    #[test]
     fn local_diagnostics_can_manage_privileged_resources() {
         let allowed = allowed_capabilities(
             SubjectKind::Diagnostics,
@@ -219,5 +252,6 @@ mod tests {
         assert!(allowed.contains(&Capability::DiagnosticsExport));
         assert!(allowed.contains(&Capability::UpdateInstall));
         assert!(allowed.contains(&Capability::AppQuit));
+        assert!(!allowed.contains(&Capability::ClientDiagnosticReport));
     }
 }

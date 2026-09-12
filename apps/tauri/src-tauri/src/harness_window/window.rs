@@ -34,10 +34,6 @@ pub async fn harness_open_impl(
     if runtime_url.origin().ascii_serialization() != lease.origin {
         return Err("Harness Web URL 与当前 RuntimeLease origin 不一致。".into());
     }
-    // A published URL is not enough to navigate. A failed Loader can tear down
-    // the HTTP listener while leaving the Node supervisor process alive. Catch
-    // that state before creating/reusing a WebView so users never see the
-    // browser's raw 127.0.0.1 connection-refused page.
     if !runtime_listener_reachable(&runtime_url) {
         return Err(
             "Harness Runtime 已发布地址，但本地 Web 监听不可达（127.0.0.1 拒绝连接）。".into(),
@@ -144,17 +140,14 @@ pub async fn restart_harness_web_impl(
     safe_mode: bool,
 ) -> Result<crate::runtime::RuntimeStatus, String> {
     let (mode, status_text) = if safe_mode {
-        ("safe-mode", "正在以隔离插件模式重启…")
+        ("safe-mode", "正在启动 Rescue Web 并隔离第三方插件…")
     } else if clear_quarantine {
-        ("restart", "正在清除插件隔离并重启…")
+        ("restart", "正在恢复全部插件并正常重启…")
     } else {
         ("restart", "正在重启 Runtime…")
     };
     let overlay_visible = show_primary_lifecycle_overlay(&app, mode, status_text);
     if overlay_visible {
-        // Paint the transition before the old Runtime is stopped. Keeping the
-        // old document alive underneath this layer avoids a compositor gap even
-        // while Node is being replaced.
         tokio::time::sleep(std::time::Duration::from_millis(48)).await;
     }
 
@@ -170,6 +163,14 @@ pub async fn restart_harness_web_impl(
             show_runtime_transition_error(&app, &error);
             error
         })?;
+        crate::runtime::restore_normal_startup_policy(&app).map_err(|error| {
+            show_runtime_transition_error(&app, &error);
+            error
+        })?;
+        match app.state::<crate::AppState>().client_plugin_failures.lock() {
+            Ok(mut failures) => failures.clear(),
+            Err(poisoned) => poisoned.into_inner().clear(),
+        }
     }
     let status = if safe_mode {
         crate::runtime::restart_managed_safe(app.clone()).await

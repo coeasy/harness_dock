@@ -66,7 +66,7 @@ pub fn launch_attempt(
     })
 }
 
-pub fn safe_profile(
+fn hard_rescue_profile(
     image: &RuntimeImage,
     embedded_patch_file: &Path,
     ready_file: &Path,
@@ -76,8 +76,8 @@ pub fn safe_profile(
     starting_processes: &process_control::StartingProcessRegistry,
     quitting: &std::sync::atomic::AtomicBool,
 ) -> Result<RuntimeProcess, String> {
-    let safe_home = dir.join("safe-dsh-home");
-    fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建安全 DSH_HOME: {error}"))?;
+    let safe_home = dir.join("rescue-dsh-home");
+    fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建救援 DSH_HOME: {error}"))?;
     let _ = fs::remove_file(ready_file);
     let mut process = launch_attempt(
         image,
@@ -86,7 +86,7 @@ pub fn safe_profile(
         Some(&safe_home),
         ready_file,
         dir,
-        "safe",
+        "rescue-private-home",
         generation,
         token,
         starting_processes,
@@ -94,13 +94,102 @@ pub fn safe_profile(
     )
     .map_err(|error| {
         format!(
-            "安全配置启动失败: {}\n{}",
+            "Harness Web 救援模式启动失败: {}\n{}",
             error.message,
             public_diagnostic(&error.diagnostic)
         )
     })?;
     process.safe_mode = true;
-    process.recovery_source = "safe-profile".into();
+    process.recovery_source = "rescue-web-private-home".into();
+    Ok(process)
+}
+
+/// Start the normal shipped `web` profile with every third-party/user row from
+/// the effective config disabled for this generation only.
+///
+/// Rescue mode intentionally keeps the effective DSH_HOME when config discovery
+/// succeeds so model/settings state remains available. If even config discovery
+/// is damaged, it falls back once to a private DSH_HOME so the official Web app
+/// still has a deterministic last-resort startup path.
+pub fn safe_profile(
+    image: &RuntimeImage,
+    launch: &RuntimeLaunchSpec,
+    embedded_patch_file: &Path,
+    ready_file: &Path,
+    dir: &Path,
+    diagnostic: Option<&str>,
+    generation: &RuntimeGeneration,
+    token: &CancellationToken,
+    starting_processes: &process_control::StartingProcessRegistry,
+    quitting: &std::sync::atomic::AtomicBool,
+) -> Result<RuntimeProcess, String> {
+    let rescue_launch = RuntimeLaunchSpec {
+        profile: DEFAULT_PROFILE.into(),
+        dsh_home: launch.dsh_home.clone(),
+        startup_policy: RuntimeStartupPolicy::Safe,
+    };
+    let rows = match recovery_rows(
+        image,
+        &rescue_launch,
+        embedded_patch_file,
+        token,
+        starting_processes,
+        quitting,
+    ) {
+        Ok(rows) => rows,
+        Err(error) => {
+            eprintln!(
+                "Rescue Web config inventory failed; using private-home hard rescue: {error}"
+            );
+            return hard_rescue_profile(
+                image,
+                embedded_patch_file,
+                ready_file,
+                dir,
+                generation,
+                token,
+                starting_processes,
+                quitting,
+            );
+        }
+    };
+    let rescue = safe_mode::plan(&rows, diagnostic);
+    let isolated_plugins = rescue.isolated_plugin_ids();
+    let suspected_plugins = rescue.suspected_plugins.clone();
+    let rescue_patch = rescue.patch()?;
+    let rescue_patch_file = dir.join("rescue-web.patch.yml");
+    let mut patches = vec![embedded_patch_file];
+    if !rescue_patch.is_empty() {
+        fs::write(&rescue_patch_file, rescue_patch)
+            .map_err(|error| format!("无法写入救援模式插件隔离 patch: {error}"))?;
+        patches.push(rescue_patch_file.as_path());
+    }
+
+    let _ = fs::remove_file(ready_file);
+    let mut process = launch_attempt(
+        image,
+        DEFAULT_PROFILE,
+        &patches,
+        rescue_launch.dsh_home.as_deref(),
+        ready_file,
+        dir,
+        "rescue-web",
+        generation,
+        token,
+        starting_processes,
+        quitting,
+    )
+    .map_err(|error| {
+        format!(
+            "Harness Web 救援模式启动失败: {}\n{}",
+            error.message,
+            public_diagnostic(&error.diagnostic)
+        )
+    })?;
+    process.safe_mode = true;
+    process.recovery_source = "rescue-web".into();
+    process.isolated_plugins = isolated_plugins;
+    process.suspected_plugins = suspected_plugins;
     Ok(process)
 }
 
@@ -146,9 +235,11 @@ pub fn start_blocking(
     if force_safe_mode || launch.startup_policy == RuntimeStartupPolicy::Safe {
         return work_dir_guard.retain_result(safe_profile(
             &image,
+            &launch,
             &patch_file,
             &ready_file,
             &dir,
+            None,
             &generation,
             &token,
             &starting_processes,
@@ -187,7 +278,7 @@ pub fn start_blocking(
     // the shipped web profile. Other profiles may compose a very different
     // application tree; reusing web-centric quarantine attribution against
     // them can disable unrelated rows. They still get selected-profile startup
-    // followed by the fail-open safe web profile.
+    // followed by Rescue Web.
     if launch.profile != DEFAULT_PROFILE {
         let _ = fs::remove_file(&ready_file);
         return match launch_selected("profile", &ready_file) {
@@ -197,14 +288,16 @@ pub fn start_blocking(
             }
             Err(failure) => {
                 eprintln!(
-                    "Selected profile {:?} failed in Auto mode; falling back to safe web profile: {}",
+                    "Selected profile {:?} failed in Auto mode; falling back to Rescue Web: {}",
                     launch.profile, failure.message
                 );
                 work_dir_guard.retain_result(safe_profile(
                     &image,
+                    &launch,
                     &patch_file,
                     &ready_file,
                     &dir,
+                    Some(&failure.diagnostic),
                     &generation,
                     &token,
                     &starting_processes,
@@ -281,14 +374,14 @@ pub fn start_blocking(
             ) {
                 Ok(rows) => rows,
                 Err(error) => {
-                    eprintln!(
-                        "Plugin recovery config discovery failed; using safe profile: {error}"
-                    );
+                    eprintln!("Plugin recovery config discovery failed; using Rescue Web: {error}");
                     return work_dir_guard.retain_result(safe_profile(
                         &image,
+                        &launch,
                         &patch_file,
                         &ready_file,
                         &dir,
+                        Some(&first_failure.diagnostic),
                         &generation,
                         &token,
                         &starting_processes,
@@ -300,9 +393,11 @@ pub fn start_blocking(
             if selected.is_empty() {
                 return work_dir_guard.retain_result(safe_profile(
                     &image,
+                    &launch,
                     &patch_file,
                     &ready_file,
                     &dir,
+                    Some(&first_failure.diagnostic),
                     &generation,
                     &token,
                     &starting_processes,
@@ -354,9 +449,11 @@ pub fn start_blocking(
                     );
                     work_dir_guard.retain_result(safe_profile(
                         &image,
+                        &launch,
                         &patch_file,
                         &ready_file,
                         &dir,
+                        Some(&first_failure.diagnostic),
                         &generation,
                         &token,
                         &starting_processes,
