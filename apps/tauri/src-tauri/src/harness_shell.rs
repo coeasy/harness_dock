@@ -152,6 +152,34 @@ const LIFECYCLE_SCRIPT: &str = r#"
   };
   installFirstPaint();
 
+  // Preserve only the plugin/package identifier from recognized client Loader
+  // failures. Full exception text may contain local paths, URLs or secrets and
+  // therefore never crosses the WebView -> Host diagnostic boundary.
+  const reportedLoaderPlugins = new Set();
+  const loaderPluginIdentifier = (value) => {
+    const text = String(value ?? '');
+    const packaged = text.match(/failed to import loader entry\s+[^\s(]+\s+\(([@A-Za-z0-9_./-]+)\)/i);
+    if (packaged?.[1]) return packaged[1];
+    const entry = text.match(/failed to import loader entry\s+([@A-Za-z0-9_./-]+)/i);
+    return entry?.[1] || '';
+  };
+  const reportLoaderFailure = (value) => {
+    const plugin = loaderPluginIdentifier(value);
+    if (!plugin || reportedLoaderPlugins.has(plugin)) return;
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (typeof invoke !== 'function') return;
+    reportedLoaderPlugins.add(plugin);
+    void Promise.resolve(invoke('report_client_plugin_failure', { plugin })).catch(() => {
+      reportedLoaderPlugins.delete(plugin);
+    });
+  };
+  window.addEventListener('error', (event) => {
+    reportLoaderFailure(event?.error?.stack || event?.message || '');
+  }, true);
+  window.addEventListener('unhandledrejection', (event) => {
+    reportLoaderFailure(event?.reason?.stack || event?.reason || '');
+  }, true);
+
   let host = null;
   let surface = null;
   let status = null;
@@ -235,6 +263,18 @@ const LIFECYCLE_SCRIPT: &str = r#"
     });
   };
 
+  const observeStartup = (records) => {
+    for (const record of records) {
+      if (record.type === 'characterData') {
+        reportLoaderFailure(record.target?.textContent || '');
+      }
+      for (const node of record.addedNodes || []) {
+        reportLoaderFailure(node?.textContent || '');
+      }
+    }
+    settleStartupPaint();
+  };
+
   const beginStartupHandoff = () => {
     const node = ensure();
     const body = document.body;
@@ -242,8 +282,9 @@ const LIFECYCLE_SCRIPT: &str = r#"
     if (status) status.textContent = '正在载入 Harness Web…';
     node.dataset.mode = 'startup';
     node.classList.add('show');
-    startupObserver = new MutationObserver(settleStartupPaint);
+    startupObserver = new MutationObserver(observeStartup);
     startupObserver.observe(body, { childList: true, subtree: true, characterData: true });
+    reportLoaderFailure(body.textContent || '');
     settleStartupPaint();
   };
 
