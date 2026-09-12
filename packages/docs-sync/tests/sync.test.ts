@@ -32,6 +32,10 @@ function mockFetchImpl(): typeof fetch {
           ref: 'refs/tags/dsh-v0.1.1-rc.2',
           object: { sha: 'b150a551b8d465e31e418e1b2eaf5e79bbb7d28e', type: 'commit' },
         },
+        {
+          ref: 'refs/tags/dsh-v0.1.1-rc.3',
+          object: { sha: 'c350a551b8d465e31e418e1b2eaf5e79bbb7d333', type: 'commit' },
+        },
       ])
     }
     if (url === 'https://registry.npmjs.org/@deepseek-ai/dsh') {
@@ -86,6 +90,26 @@ describe('syncDsh', () => {
     expect(result.origin.npmIntegrity).toBe('sha512-abc')
     expect(result.written).toBe(false)
   })
+
+  it('allows an explicit immutable Git-only prerelease without borrowing older npm provenance', async () => {
+    const result = await syncDsh({
+      pin: '0.1.1-rc.3',
+      fetchImpl: mockFetchImpl(),
+      dryRun: true,
+    })
+
+    expect(result.origin.dshVersion).toBe('0.1.1-rc.3')
+    expect(result.origin.gitTag).toBe('dsh-v0.1.1-rc.3')
+    expect(result.origin.gitCommit).toBe('c350a551b8d465e31e418e1b2eaf5e79bbb7d333')
+    expect(result.origin.npmIntegrity).toBe('')
+    expect(result.origin.npmTarball).toBe('')
+  })
+
+  it('rejects an explicit pin that is not an immutable upstream Git tag', async () => {
+    await expect(
+      syncDsh({ pin: '0.1.1-rc.9', fetchImpl: mockFetchImpl(), dryRun: true }),
+    ).rejects.toThrow(/not an upstream dsh Git tag/)
+  })
 })
 
 describe('syncDsh capability summary output', () => {
@@ -135,7 +159,7 @@ describe('syncDsh capability summary output', () => {
         npmIntegrity: 'sha512-abc',
         npmTarball: 'https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.1-rc.2.tgz',
         docsHash: hashDocs({ 'docs/user/guide/index.zh.md': GUIDE_MD }),
-        clientVersion: '0.2.0',
+        clientVersion: resolveClientVersion(),
         now: '2026-01-01T00:00:00.000Z',
       })
       writeFileSync(tempPaths(dir).origin, `${JSON.stringify(expectedOrigin, null, 2)}\n`, 'utf8')
