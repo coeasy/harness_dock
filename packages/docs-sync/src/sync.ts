@@ -10,6 +10,7 @@ import { buildOrigin, diffOrigin } from './origin.ts'
 import { inspectPublishedPackage } from './tarball.ts'
 import type { Origin } from './types.ts'
 import {
+  compareVersions,
   intersectVersions,
   pickLatestVersion,
   rejectFloatingDistTag,
@@ -67,41 +68,51 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
   const originPath = options.paths?.origin ?? ORIGIN_PATH
   const matrixPath = options.paths?.matrix ?? MATRIX_PATH
   const summaryPath = options.paths?.summary ?? SUMMARY_PATH
+  const current = await readOriginFile(originPath).catch(() => null)
 
   const [gitTags, npmVersions] = await Promise.all([
     listDshGitTags(fetchImpl),
     listNpmVersions(fetchImpl),
   ])
-  const intersection = intersectVersions(
-    gitTags.map((t) => t.version),
-    npmVersions,
-  )
+  const gitVersions = gitTags.map((tag) => tag.version)
+  const intersection = intersectVersions(gitVersions, npmVersions)
 
-  // Automatic sync stays conservative: only select an upstream version that is
-  // available from both the immutable dsh Git tag and the public npm umbrella
-  // package. An explicit pin is different: release engineering may need to
-  // follow a newer immutable Git prerelease before npm catches up. In that case
-  // the Git tag/commit is authoritative and npm provenance is intentionally
-  // empty instead of borrowing metadata from an older package.
+  // Automatic sync remains conservative about adopting a new Git-only release:
+  // it normally advances only to a version that exists on both immutable Git and
+  // npm. However, it must never downgrade an already-recorded immutable Git-only
+  // pin merely because npm is lagging. Therefore a current origin version that
+  // still resolves to a real upstream Git tag is retained when it is newer than
+  // the latest git∩npm version. Once npm catches up, the same version is enriched
+  // with npm provenance; once a newer git∩npm release appears, normal sync may
+  // advance to it.
+  const currentGitVersion =
+    current && gitVersions.includes(current.dshVersion) ? current.dshVersion : null
+  const latestSharedVersion = intersection.length > 0 ? pickLatestVersion(intersection) : null
+
   let version: string
   if (pin) {
-    if (!gitTags.some((tag) => tag.version === pin)) {
+    if (!gitVersions.includes(pin)) {
       throw new Error(
-        `Pin ${pin} is not an upstream dsh Git tag. Available: ${gitTags
-          .map((tag) => tag.version)
-          .sort()
-          .join(', ')}`,
+        `Pin ${pin} is not an upstream dsh Git tag. Available: ${gitVersions.sort().join(', ')}`,
       )
     }
     version = pin
+  } else if (
+    currentGitVersion &&
+    (!latestSharedVersion || compareVersions(currentGitVersion, latestSharedVersion) > 0)
+  ) {
+    version = currentGitVersion
+  } else if (latestSharedVersion) {
+    version = latestSharedVersion
+  } else if (currentGitVersion) {
+    version = currentGitVersion
   } else {
-    if (intersection.length === 0) {
-      throw new Error('No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh')
-    }
-    version = pickLatestVersion(intersection)
+    throw new Error(
+      'No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh, and no current immutable Git pin can be retained',
+    )
   }
 
-  const tag = gitTags.find((t) => t.version === version)
+  const tag = gitTags.find((entry) => entry.version === version)
   const gitTag = tag?.tag
   const gitCommit = tag?.sha
   if (!gitTag || !gitCommit) {
@@ -140,7 +151,6 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     dumpConfig: '',
   })
 
-  const current = await readOriginFile(originPath).catch(() => null)
   const diff = current ? diffOrigin(current, origin) : { changed: true, fields: ['*'] }
 
   if (options.check) {
