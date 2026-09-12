@@ -143,7 +143,7 @@ const LIFECYCLE_SCRIPT: &str = r#"
     writable: false
   });
 
-  const DARK = '#050b14';
+  const DARK = '#07101d';
   const installFirstPaint = () => {
     const root = document.documentElement;
     if (!root) return;
