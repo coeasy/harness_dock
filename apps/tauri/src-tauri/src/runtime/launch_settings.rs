@@ -181,6 +181,20 @@ pub fn load_runtime_launch_settings(app: &AppHandle) -> RuntimeLaunchSettings {
     }
 }
 
+/// Leaving Rescue Web is an explicit user action. If Rescue Web was selected
+/// as the persisted startup policy, restore it to Auto before the normal
+/// restart; otherwise a successful repair would immediately re-enter rescue on
+/// the next generation or next application launch. Direct/Auto preferences are
+/// preserved because neither one forces plugin isolation.
+pub fn restore_normal_startup_policy(app: &AppHandle) -> Result<RuntimeLaunchSettings, String> {
+    let mut settings = load_runtime_launch_settings(app);
+    if settings.startup_policy == RuntimeStartupPolicy::Safe {
+        settings.startup_policy = RuntimeStartupPolicy::Auto;
+        save_runtime_launch_settings(app, &settings)?;
+    }
+    Ok(settings)
+}
+
 pub fn resolve_runtime_launch_spec(app: &AppHandle) -> RuntimeLaunchSpec {
     let settings = load_runtime_launch_settings(app);
     RuntimeLaunchSpec {
