@@ -14,7 +14,7 @@ export function versionToGitTag(version: string): string {
 export function rejectFloatingDistTag(pin: string): string {
   if (FLOATING_TAGS.has(pin.trim().toLowerCase())) {
     throw new Error(
-      `Refusing npm dist-tag pin "${pin}". Use an exact version (git tag ∩ npm), never latest/next.`,
+      `Refusing floating dist-tag pin "${pin}". Use an exact immutable upstream dsh version, never latest/next.`,
     )
   }
   return pin
