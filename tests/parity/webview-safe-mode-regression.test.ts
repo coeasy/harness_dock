@@ -98,7 +98,8 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     const state = read('apps/tauri/src-tauri/src/state.rs')
     const window = read('apps/tauri/src-tauri/src/harness_window/window.rs')
     const permissions = read('apps/tauri/src-tauri/permissions/harnessdock.toml')
-    const capability = read('apps/tauri/src-tauri/capabilities/harness-shell.json')
+    const harnessCapability = read('apps/tauri/src-tauri/capabilities/harness-shell.json')
+    const diagnosticsCapability = read('apps/tauri/src-tauri/capabilities/shell-settings.json')
 
     expect(lifecycle).toContain('failed to import loader entry')
     expect(lifecycle).toContain("invoke('report_client_plugin_failure', { plugin })")
@@ -113,7 +114,9 @@ describe('older WebView compatibility and Rescue Web mode', () => {
     expect(window).toContain('client_plugin_failures.lock()')
     expect(permissions).toContain('identifier = "client-plugin-diagnostics"')
     expect(permissions).toContain('commands.allow = ["report_client_plugin_failure"]')
-    expect(capability).toContain('"client-plugin-diagnostics"')
+    expect(harnessCapability).toContain('"client-plugin-diagnostics"')
+    expect(diagnosticsCapability).toContain('"runtime-status"')
+    expect(diagnosticsCapability).not.toContain('"runtime-maintenance"')
   })
 
   it('makes Rescue Web diagnosis and restore actions visible to the user', () => {
