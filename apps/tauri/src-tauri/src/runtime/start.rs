@@ -78,11 +78,21 @@ pub fn safe_profile(
 ) -> Result<RuntimeProcess, String> {
     let safe_home = dir.join("safe-dsh-home");
     fs::create_dir_all(&safe_home).map_err(|error| format!("无法创建安全 DSH_HOME: {error}"))?;
+
+    // Safe mode is intentionally stronger than merely switching DSH_HOME. The
+    // official web profile still contains optional browser-only UI rows, so a
+    // broken client import would otherwise reproduce the same failure against
+    // the private home. Apply only the reviewed safe-mode deny-list; the normal
+    // automatic quarantine policy continues to leave all official rows alone.
+    let safe_patch_file = dir.join("safe-mode.patch.yml");
+    fs::write(&safe_patch_file, safe_mode::patch())
+        .map_err(|error| format!("无法写入安全模式插件隔离 patch: {error}"))?;
+
     let _ = fs::remove_file(ready_file);
     let mut process = launch_attempt(
         image,
         DEFAULT_PROFILE,
-        &[embedded_patch_file],
+        &[embedded_patch_file, safe_patch_file.as_path()],
         Some(&safe_home),
         ready_file,
         dir,
@@ -101,6 +111,7 @@ pub fn safe_profile(
     })?;
     process.safe_mode = true;
     process.recovery_source = "safe-profile".into();
+    process.isolated_plugins = safe_mode::isolated_plugin_ids();
     Ok(process)
 }
 
