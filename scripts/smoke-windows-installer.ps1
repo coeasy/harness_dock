@@ -20,6 +20,9 @@ $traceDir = Join-Path $tempRoot 'harnessdock-logs'
 $installDir = Join-Path $tempRoot 'HarnessDockInstallerSmoke'
 $neutralCwd = Join-Path $tempRoot 'HarnessDockInstallerSmokeNeutralCwd'
 $profileWriterLock = $null
+$profileWriterHome = $null
+$previousDshHome = $null
+$hadDshHome = Test-Path Env:DSH_HOME
 $lockCreatedBySmoke = $false
 
 function New-HarnessWebSession {
@@ -157,18 +160,18 @@ if (-not $app) {
 }
 
 if ($BlockProfileWriter) {
-    $effectiveDshHome = if (-not [string]::IsNullOrWhiteSpace($env:DSH_HOME)) {
-        [IO.Path]::GetFullPath($env:DSH_HOME)
-    }
-    else {
-        Join-Path $env:USERPROFILE '.dsh'
-    }
-    $profileDir = Join-Path $effectiveDshHome 'profiles'
+    # Use a fresh, explicitly inherited home for this fault-injection run.
+    # The previous normal smoke may legitimately leave upstream profile
+    # metadata behind, and a hosted runner can also carry a user DSH_HOME.
+    # Neither should decide whether this gate exercises the real writer lock.
+    $profileWriterHome = Join-Path $tempRoot 'HarnessDockProfileLockSmoke'
+    Remove-Item $profileWriterHome -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $profileWriterHome -Force | Out-Null
+    $previousDshHome = $env:DSH_HOME
+    $env:DSH_HOME = $profileWriterHome
+    $profileDir = Join-Path $profileWriterHome 'profiles'
     New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
     $profileWriterLock = Join-Path $profileDir 'node_modules.lock'
-    if (Test-Path -LiteralPath $profileWriterLock) {
-        throw "Profile writer lock already exists before smoke injection: $profileWriterLock"
-    }
     # Upstream @deepseek-ai/dsh-atomic-write acquires this exact sibling using
     # exclusive `wx` creation and deliberately never removes a contended lock.
     # Any existing file therefore reproduces the real writer-lock timeout.
@@ -312,5 +315,14 @@ finally {
     }
     if ($lockCreatedBySmoke -and $profileWriterLock) {
         Remove-Item -LiteralPath $profileWriterLock -Force -ErrorAction SilentlyContinue
+    }
+    if ($hadDshHome) {
+        $env:DSH_HOME = $previousDshHome
+    }
+    else {
+        Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
+    }
+    if ($profileWriterHome) {
+        Remove-Item $profileWriterHome -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

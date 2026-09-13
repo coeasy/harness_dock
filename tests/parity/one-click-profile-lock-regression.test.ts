@@ -25,6 +25,8 @@ describe('profile writer-lock packaged startup gates', () => {
       'Reinstall exact one-click artifact and prove private Rescue under profile writer-lock contention',
     )
     expect(smoke).toContain('[switch]$BlockProfileWriter')
+    expect(smoke).toContain("HarnessDockProfileLockSmoke")
+    expect(smoke).toContain('$env:DSH_HOME = $profileWriterHome')
     expect(smoke).toContain("Join-Path $profileDir 'node_modules.lock'")
     expect(smoke).toContain('Assert-PrivateRescueWasExercised')
     expect(smoke).toContain("-Filter 'rescue-dsh-home'")
