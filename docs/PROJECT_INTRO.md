@@ -14,14 +14,14 @@
 
 ## 当前版本
 
-HarnessDock 当前产品版本为 **v0.1.5**，当前内置 Runtime 精确锁定：
+HarnessDock 当前产品基础版本为 **v0.1.5**，当前候选为 **v0.1.5-rc.2**，内置 Runtime 精确锁定：
 
 ```text
-dsh-v0.1.5-rc.1
-183f08e9c6dde7e36cd2318eaee70b0da08fb35e
+dsh-v0.1.5-rc.2
+fb2c4b9e698e30edb738bca4cf0618587db7d203
 ```
 
-HarnessDock 客户端基础版本与 dsh 基础版本保持 `0.1.5` 一致，当前候选后缀为 `rc.1`；版本记录了 `dsh 0.1.5-rc.1` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
+HarnessDock 客户端基础版本与 dsh 基础版本保持 `0.1.5` 一致，当前候选后缀为 `rc.2`；版本记录 `dsh 0.1.5-rc.2` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
 
 ## 项目定位
 
@@ -36,7 +36,8 @@ HarnessDock 是 DeepSeek Harness 的 Tauri 原生 Native Host。它不 fork 或�
 - `@dsh/plugin-harness-shell`：独立可发布外壳，提供菜单、最小化、最大化/还原、关闭、刷新 Web、重启 Runtime、隔离插件、Gateway 与诊断入口。
 - Runtime/Surface/Gateway/Update：通过 generation、lease、Host Kernel、Reconciler 和 Actor 状态机统一管理并发与恢复。
 - Shell fail-open：可选 Shell 注入失败时恢复系统原生窗口控件，Harness Web 仍可使用。
-- Runtime 隔离：第三方插件故障进入有界恢复/隔离路径，不让插件异常直接结束主客户端。
+- Runtime 隔离：第三方插件故障进入有界恢复/隔离路径；Safe / Rescue Web 从进程启动起使用 generation-private `DSH_HOME`，不 compose/heal 用户 profile。
+- Profile lock 恢复：Normal/Quarantine 明确命中 `atomic-write` / `profiles/node_modules.lock` writer-lock 竞争时直接切 private Rescue，不盲目删除用户 lock。
 - WebView origin 限制：桌面 Harness Web 只允许当前 RuntimeLease 对应的 `127.0.0.1` origin。
 - 发布可复现：Release manifest、origin、Runtime tag/commit、版本号和 candidate SHA 都进入发布门禁。
 
@@ -52,7 +53,9 @@ Tauri setup
   -> optional Harness Shell
 ```
 
-Runtime 或 WebView 首次加载失败时进入 Recovery；Tray、Updater、原生菜单或 Shell 等可选组件初始化失败采用 fail-open，不得阻止 Harness Web 启动。
+Runtime 或 WebView 首次加载失败时进入有界恢复；如果用户 profile writer lock 阻塞正常 Runtime，Auto 直接启动 private Rescue Runtime 并继续打开官方 Web。Tray、Updater、原生菜单或 Shell 等可选组件初始化失败采用 fail-open，不得阻止 Harness Web 启动。
+
+RuntimeActor 拒绝并发启动 generation，Runtime restart 保持严格 stop-before-start；Windows 使用 Job Object、Unix 使用独立 process group 管理子进程，Runtime 停止时清理其 work-dir（包括 private `rescue-dsh-home`）。
 
 ## 外壳操作
 
@@ -77,11 +80,13 @@ pnpm tauri:dev
 
 ## 发布
 
-当前 v0.1.5-rc.1 使用候选发布通道，目标 tag：`v0.1.5-rc.1`。
+当前 `v0.1.5-rc.2` 使用候选发布通道，目标 tag：`v0.1.5-rc.2`。稳定 `v0.1.5` 保持不可变；`rc.2` 仅在发布合同允许并且新的 exact main SHA 重新通过全部门禁后才允许重建。
 
 `.github/workflows/tauri-candidate.yml` 构建和验证 Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG 与 app archive、Android APK/AAB、iOS Simulator，以及四个平台 Full Runtime bundle。
 
-`.github/workflows/release.yml` 只接受**同一个 main SHA**上的绿色 `ci` 与 `tauri-candidate`，并发布 15 个不可变 rc 资产及 `SHA256SUMS`。当前 rc 不启用操作系统代码签名、Apple notarization 或 Tauri `latest.json/.sig` 自动更新资产；未配置正式签名通道前采用 GitHub Release 手动下载安装。
+Windows 在 PR 合并前的 one-click 门禁以及合并后的 packaged-startup 门禁中，都必须分别验证正常安装启动和人为占用用户 `profiles/node_modules.lock` 时的 private Rescue 启动，并证明认证 Harness Web 可用且正常退出后无安装目录残留进程。
+
+`.github/workflows/release.yml` 只接受**同一个 main SHA**上的绿色 candidate 和 required same-SHA workflows（包括 `ci` 与 Windows packaged-startup），随后组装完整候选资产、重新验证 sealed Runtime identity、校验 `SHA256SUMS` 并发布 GitHub prerelease。当前 rc 不启用操作系统代码签名、Apple notarization 或 Tauri `latest.json/.sig` 自动更新资产；未配置正式签名通道前采用 GitHub Release 手动下载安装。
 
 ## 独立 Harness Shell
 
@@ -103,4 +108,3 @@ pnpm --filter @dsh/plugin-harness-shell build
 ## License
 
 MIT。DeepSeek Harness 与其它第三方依赖遵循各自许可证和商标规则。
-

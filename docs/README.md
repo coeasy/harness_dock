@@ -2,9 +2,9 @@
 
 ## 当前活动版本
 
-HarnessDock 当前候选版本：**v0.1.5-rc.1**（基础版本 `0.1.5`）。
+HarnessDock 当前候选版本：**v0.1.5-rc.2**（基础版本 `0.1.5`）。
 
-当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.5-rc.1`**，commit `183f08e9c6dde7e36cd2318eaee70b0da08fb35e`。
+当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.5-rc.2`**，commit `fb2c4b9e698e30edb738bca4cf0618587db7d203`。
 
 桌面产品不再使用 Electron。唯一桌面宿主为 `apps/tauri`，正常启动链路是：
 
@@ -25,41 +25,50 @@ Tauri Native Host
 
 - HarnessDock 客户端基础版本必须与 pinned dsh 的**基础 SemVer**一致；
 - 上游 `-rc.* / -beta.* / -alpha.*` 后缀同时用于 Runtime provenance 和候选发布标签；
-- 例如 `dsh-v0.1.5-rc.1 -> HarnessDock v0.1.5-rc.1`；
+- 例如 `dsh-v0.1.5-rc.2 -> HarnessDock v0.1.5-rc.2`；
 - Release gate 会检查 root/workspace/Tauri/Rust/Shell/origin/manifest 版本一致，并检查 HarnessDock 与 dsh 基础 SemVer 一致；
 - Runtime `version + gitTag + gitCommit` 必须在 `release-manifest.json` 与 `origin.json` 完全一致。
 
 详见 [`VERSIONING.md`](./VERSIONING.md)。
 
-## 当前使用文档
+## 当前权威文档
 
 1. [`../README.md`](../README.md)  
-   用户入口、平台支持、安装使用、核心能力、发布门禁。
+   用户入口、平台支持、安装使用、当前 Rescue Web 行为与发布门禁。
 2. [`PROJECT_INTRO.md`](./PROJECT_INTRO.md)  
-   项目定位、架构边界、开发和发布说明。
-3. [`ARCHITECTURE_REVIEW.md`](./ARCHITECTURE_REVIEW.md)  
-   架构审查报告：顶层架构、Rust 模块清单、核心实现细节、设计亮点、技术债清单。
-4. [`OPTIMIZATION_PLAN.md`](./OPTIMIZATION_PLAN.md)  
-   优化改进方案：四阶段路线图（P0 稳定性 → P1 健壮性 → P2 异步化+测试 → P3 生态完善），16 项技术债逐项方案。
-5. [`../apps/tauri/README.md`](../apps/tauri/README.md)  
-   Tauri Native Host、Runtime、WebView、Shell、Gateway 与构建说明。
-6. [`VERSIONING.md`](./VERSIONING.md)  
+   当前项目定位、架构边界、Runtime 生命周期和发布说明。
+3. [`../apps/tauri/README.md`](../apps/tauri/README.md)  
+   当前 Tauri Native Host、Runtime、WebView、Shell、Gateway 与构建/门禁说明。
+4. [`VERSIONING.md`](./VERSIONING.md)  
    HarnessDock 与 DeepSeek Harness/dsh 的版本对齐政策。
-7. [`../.github/release-notes/v0.1.5-rc.1.md`](../.github/release-notes/v0.1.5-rc.1.md)
+5. [`../.github/release-notes/v0.1.5-rc.2.md`](../.github/release-notes/v0.1.5-rc.2.md)  
    当前候选版发布说明。
+6. [`../release-manifest.json`](../release-manifest.json) 与 [`../packages/docs-sync/origin.json`](../packages/docs-sync/origin.json)  
+   发布身份、上游 Runtime provenance、目标平台与 same-SHA 发布合同的机器权威来源。
+
+## 历史审查与规划基线
+
+以下文档仍有架构演进参考价值，但它们是**带日期/版本的历史快照，不定义当前实现或当前发布状态**：
+
+- [`ARCHITECTURE_REVIEW.md`](./ARCHITECTURE_REVIEW.md) — 2026-09-05 / v0.1.2 架构审查快照；其中模块行数、状态和技术债结论可能已被后续提交改变。
+- [`OPTIMIZATION_PLAN.md`](./OPTIMIZATION_PLAN.md) — 2026-09-05 / v0.1.2 优化规划基线；其中 P0/P1 项不得在未核对当前代码的情况下视为仍未完成。
+
+如果这些历史快照与当前代码、根 README、PROJECT_INTRO、VERSIONING、`release-manifest.json` 或当前 release notes 冲突，以后者和当前代码为准。
 
 ## 当前架构不变量
 
 - 桌面：Full Runtime，首启零下载。
 - 移动：Remote Gateway only，不在 Android/iOS 内启动 Node/dsh。
 - 正常启动：Runtime ready 后直接显示 Harness Web，不先打开设置页。
+- Safe / Rescue Web：固定官方 `web` profile，从进程启动起使用 generation-private `DSH_HOME`；不得 compose/heal 用户 profile，也不得因用户 `profiles/node_modules.lock` 被占用而失去救援能力。
+- Normal / Direct：仍按用户配置使用正常 `DSH_HOME`；writer-lock 明确失败时由 Auto 直接切 private Rescue，不盲删用户 lock。
 - Shell：独立、可选、fail-open；Shell 故障必须回退原生窗口控件。
 - WebView：只允许当前 RuntimeLease 对应的 `127.0.0.1` origin。
 - 生命周期：Runtime/Gateway/Surface/Update 通过 Host Kernel、Reconciler 和 Actor 状态管理，避免孤儿逻辑与重复并发操作。
 - 插件：异常进入隔离/恢复流程，不让第三方插件故障终止主客户端。
-- 发布：只接受同一 `main` SHA 的绿色 CI 与 candidate 资产。
+- 发布：只接受同一 `main` SHA 的绿色 CI、candidate 与 packaged-startup 资产；Windows 必须同时通过正常启动和 profile writer-lock private Rescue 实测。
 
-## 历史架构设计文档
+## 其他历史架构设计文档
 
 仓库中保留了一组文件名含 `v0.2.0` / `v0.2.x` 的设计稿，例如：
 
@@ -79,4 +88,3 @@ Tauri Native Host
 - 历史 `v0.2.1` / `v0.2.6` / `v0.2.7` / `v0.2.8` / `v0.2.9` 方案
 
 历史文档中的 Electron、Host-only 默认安装包、first-run Node/dsh download、Host Bridge v1 等路径不得重新成为当前主路径。
-

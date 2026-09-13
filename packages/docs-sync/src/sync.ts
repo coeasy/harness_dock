@@ -10,10 +10,10 @@ import { buildOrigin, diffOrigin } from './origin.ts'
 import { inspectPublishedPackage } from './tarball.ts'
 import type { Origin } from './types.ts'
 import {
+  compareVersions,
   intersectVersions,
   pickLatestVersion,
   rejectFloatingDistTag,
-  versionToGitTag,
 } from './versions.ts'
 
 const DEFAULT_CLIENT_VERSION = '0.2.0'
@@ -68,39 +68,69 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
   const originPath = options.paths?.origin ?? ORIGIN_PATH
   const matrixPath = options.paths?.matrix ?? MATRIX_PATH
   const summaryPath = options.paths?.summary ?? SUMMARY_PATH
+  const current = await readOriginFile(originPath).catch(() => null)
 
   const [gitTags, npmVersions] = await Promise.all([
     listDshGitTags(fetchImpl),
     listNpmVersions(fetchImpl),
   ])
-  const intersection = intersectVersions(
-    gitTags.map((t) => t.version),
-    npmVersions,
-  )
-  if (intersection.length === 0) {
-    throw new Error('No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh')
-  }
+  const gitVersions = gitTags.map((tag) => tag.version)
+  const intersection = intersectVersions(gitVersions, npmVersions)
 
-  const version = pin ?? pickLatestVersion(intersection)
-  if (!intersection.includes(version)) {
+  // Automatic sync remains conservative about adopting a new Git-only release:
+  // it normally advances only to a version that exists on both immutable Git and
+  // npm. However, it must never downgrade an already-recorded immutable Git-only
+  // pin merely because npm is lagging. Therefore a current origin version that
+  // still resolves to a real upstream Git tag is retained when it is newer than
+  // the latest git∩npm version. Once npm catches up, the same version is enriched
+  // with npm provenance; once a newer git∩npm release appears, normal sync may
+  // advance to it.
+  const currentGitVersion =
+    current && gitVersions.includes(current.dshVersion) ? current.dshVersion : null
+  const latestSharedVersion = intersection.length > 0 ? pickLatestVersion(intersection) : null
+
+  let version: string
+  if (pin) {
+    if (!gitVersions.includes(pin)) {
+      throw new Error(
+        `Pin ${pin} is not an upstream dsh Git tag. Available: ${gitVersions.sort().join(', ')}`,
+      )
+    }
+    version = pin
+  } else if (
+    currentGitVersion &&
+    (!latestSharedVersion || compareVersions(currentGitVersion, latestSharedVersion) > 0)
+  ) {
+    version = currentGitVersion
+  } else if (latestSharedVersion) {
+    version = latestSharedVersion
+  } else if (currentGitVersion) {
+    version = currentGitVersion
+  } else {
     throw new Error(
-      `Pin ${version} is not in git tag ∩ npm. Available: ${intersection.sort().join(', ')}`,
+      'No version exists on both git tags (dsh-v*) and npm @deepseek-ai/dsh, and no current immutable Git pin can be retained',
     )
   }
 
-  const tag = gitTags.find((t) => t.version === version)
-  const gitTag = tag?.tag ?? versionToGitTag(version)
+  const tag = gitTags.find((entry) => entry.version === version)
+  const gitTag = tag?.tag
   const gitCommit = tag?.sha
-  if (!gitCommit) {
-    throw new Error(`Missing git commit for ${gitTag}`)
+  if (!gitTag || !gitCommit) {
+    throw new Error(`Missing immutable git provenance for dsh-v${version}`)
   }
 
-  const npmMeta = await fetchNpmPackageMeta(version, fetchImpl)
-  const tarball = inspectPublishedPackage(npmMeta)
-  if (!tarball.ok) {
-    throw new Error(
-      `Refusing ${version}: ${tarball.reason}. Tag exists but the npm artifact is unusable.`,
-    )
+  let npmIntegrity = ''
+  let npmTarball = ''
+  if (npmVersions.includes(version)) {
+    const npmMeta = await fetchNpmPackageMeta(version, fetchImpl)
+    const tarball = inspectPublishedPackage(npmMeta)
+    if (!tarball.ok) {
+      throw new Error(
+        `Refusing ${version}: ${tarball.reason}. Tag exists but the npm artifact is unusable.`,
+      )
+    }
+    npmIntegrity = tarball.integrity
+    npmTarball = tarball.tarball
   }
 
   const docs = await fetchGuideDocs(gitTag, fetchImpl)
@@ -109,8 +139,8 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     dshVersion: version,
     gitTag,
     gitCommit,
-    npmIntegrity: tarball.integrity,
-    npmTarball: tarball.tarball,
+    npmIntegrity,
+    npmTarball,
     docsHash: hashDocs(docs),
     clientVersion,
   })
@@ -121,7 +151,6 @@ export async function syncDsh(options: SyncOptions = {}): Promise<SyncResult> {
     dumpConfig: '',
   })
 
-  const current = await readOriginFile(originPath).catch(() => null)
   const diff = current ? diffOrigin(current, origin) : { changed: true, fields: ['*'] }
 
   if (options.check) {

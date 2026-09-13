@@ -55,10 +55,10 @@ Android / iOS 不在设备中启动 Node/dsh，只作为 Remote Gateway 客户�
 | 配置 | 说明 |
 | --- | --- |
 | Profile | 对应官方 `dsh --profile <name>`，默认 `web` |
-| DSH_HOME | 可选绝对路径；留空沿用 dsh 的系统环境/默认目录 |
+| DSH_HOME | 可选绝对路径；Normal/Direct 使用该目录，留空沿用 dsh 的系统环境/默认目录 |
 | Auto | 先启动所选 profile；`web` 保持正常插件恢复；非 web 失败时转 Rescue Web |
 | Direct | 仅启动所选 profile 一次，失败原样返回，适合诊断自定义 profile |
-| Safe / Rescue Web | 固定官方 `web`，本 generation 隔离外部/用户插件；配置清单损坏时才回退私有 `DSH_HOME` |
+| Safe / Rescue Web | 固定官方 `web`，从进程启动起使用 generation-private `DSH_HOME`，不 compose/heal 用户 profile |
 
 Profile 名称直接遵循 DeepSeek Harness 的 profile 目录语义：
 
@@ -104,17 +104,20 @@ HarnessDock 支持官方 profile 名称以及用户创建的自定义 profile。
   -> Diagnostics 告知用户问题插件
 
 需要救援
-  -> Rescue Web 使用官方 web profile
-  -> 按配置来源隔离全部第三方/用户插件（仅当前 generation）
-  -> 保留可用的 DSH_HOME / 模型与基础设置
-  -> 配置清单损坏时才使用 private-home hard rescue
-  -> 用户修复插件
+  -> Rescue Web 固定官方 web profile
+  -> 从进程启动起使用 generation-private DSH_HOME
+  -> 不 compose/heal 用户 profile，也不争用用户 profiles/node_modules.lock
+  -> 用户 patch 仅做无副作用诊断/归因读取
+  -> 官方 DeepSeek Web + HarnessDock embedded/compat/shell integration 继续可用
+  -> 用户修复插件或等待原 profile writer 结束
   -> 恢复全部插件并正常重启
   -> Safe -> Auto
   -> 正常模式重新验证
 ```
 
-正常自动 quarantine 仍保持保守，不会因为名称伪装而把用户来源插件当成官方插件，也不会 blanket-disable 官方 DeepSeek Web 行。Rescue Web 的隔离来自权威配置来源 provenance，而不是仅根据 package name 判断。
+正常自动 quarantine 仍保持保守，不会因为名称伪装而把用户来源插件当成官方插件，也不会 blanket-disable 官方 DeepSeek Web 行。Normal/Quarantine 的插件归因仍使用配置来源 provenance；Rescue Web 的实际隔离边界来自 generation-private `DSH_HOME`，用户 patch 只用于无副作用诊断，不参与 Rescue Runtime 的 profile compose。
+
+当正常或 quarantine 启动明确命中 upstream `atomic-write` / `profiles/node_modules.lock` writer-lock 竞争时，HarnessDock 会直接切换 private Rescue，而不是继续对同一个用户 home 运行 dump-config 或恢复尝试；客户端也不会盲目删除可能仍由其它 dsh writer 持有的用户 lock。
 
 浏览器侧插件故障上报不再拥有独立 direct Tauri IPC。上报只允许传递规范化插件标识符，原始堆栈、URL、本地路径或可能含 token 的错误文本不会作为诊断 payload 穿过 WebView → Host 边界。
 
@@ -190,9 +193,9 @@ chmod +x HarnessDock-0.1.5-linux-x64.AppImage
 2. 为 Windows / Linux / macOS 分别生成 sealed Runtime；
 3. 执行普通 CI、Host Protocol、Runtime/Surface/Gateway/Update actor 测试；
 4. 执行 Windows/macOS/Linux Rust 与 Android/iOS smoke；
-5. 执行 Windows clean one-click 构建、安装和 Harness Web startup proof，以及 macOS/Linux POSIX one-click Runtime/Rust gates；
+5. 执行 Windows clean one-click 构建、安装和正常 Harness Web startup proof，并再次注入用户 `profiles/node_modules.lock` 验证 private Rescue；macOS/Linux 执行 POSIX one-click Runtime/Rust gates；
 6. main 上由 `tauri-candidate` 构建所有目标资产；
-7. Windows 执行同 SHA installed packaged-startup gate；
+7. Windows 对同一 candidate SHA 再执行 packaged normal startup + writer-lock private Rescue 双重安装包门禁；
 8. 只有同一个 main SHA 上所有 required workflows 绿色，`release` 才允许组装资产、重新验证 sealed Runtime identity、校验 SHA-256 并发布 GitHub prerelease。
 
 当前 Runtime 精确固定到上游 `dsh-v0.1.5-rc.2`。如果 npm 上 `@deepseek-ai/dsh` 的 umbrella 包落后于该 Git tag，HarnessDock 仍以不可变的上游 Git tag/commit 构建 Runtime，而不会伪造不存在的 npm tarball/integrity。

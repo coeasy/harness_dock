@@ -18,10 +18,9 @@ pub enum RuntimeStartupPolicy {
     /// Start the selected profile exactly once. Useful for diagnosing custom
     /// profiles because HarnessDock does not mask the first startup failure.
     Direct,
-    /// Start the shipped Web application while isolating all external/user
-    /// plugin rows for this Runtime generation. The effective DSH_HOME is kept
-    /// when its config can be inventoried so model/settings state remains
-    /// available; an unreadable config falls back to a private rescue home.
+    /// Start the shipped Web application in a generation-private DSH_HOME.
+    /// Rescue never composes the user's normal profile, so plugin state,
+    /// profile healing, caches and writer locks cannot block the fallback Web.
     Safe,
 }
 

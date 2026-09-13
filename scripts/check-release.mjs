@@ -82,6 +82,26 @@ if (origin.clientVersion !== clientVersion) {
   )
 }
 
+// npm provenance is optional for an immutable Git-only upstream prerelease.
+// When npm has not caught up, both fields must be empty. If npm provenance is
+// present it must be self-consistent and refer to the exact same dsh version;
+// borrowing an older tarball/integrity would make origin.json non-reproducible.
+const npmIntegrity = typeof origin.npmIntegrity === 'string' ? origin.npmIntegrity.trim() : ''
+const npmTarball = typeof origin.npmTarball === 'string' ? origin.npmTarball.trim() : ''
+if (Boolean(npmIntegrity) !== Boolean(npmTarball)) {
+  errors.push('origin.json npmIntegrity and npmTarball must either both be set or both be empty')
+}
+if (npmTarball) {
+  const tarballVersion = npmTarball.match(/\/dsh-([^/]+)\.tgz(?:[?#].*)?$/)?.[1]
+  if (!tarballVersion) {
+    errors.push(`origin.json.npmTarball is not a recognized @deepseek-ai/dsh tarball URL: ${npmTarball}`)
+  } else if (tarballVersion !== dshVersion) {
+    errors.push(
+      `origin.json npm tarball version (${tarballVersion}) != dshVersion (${dshVersion}); use empty npm provenance for Git-only pins`,
+    )
+  }
+}
+
 // Desktop local builds and release candidates must describe the same native
 // host target. Release CI may add wrappers such as DMG around the canonical app,
 // but platform, arch, Runtime, runner, and Tauri bundle policy cannot drift.
