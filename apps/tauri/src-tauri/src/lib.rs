@@ -48,6 +48,8 @@ mod runtime;
 #[cfg(not(mobile))]
 mod runtime_actor;
 #[cfg(not(mobile))]
+mod runtime_recovery_policy;
+#[cfg(not(mobile))]
 mod runtime_supervisor;
 #[cfg(not(mobile))]
 mod runtime_supervisor_integration;
