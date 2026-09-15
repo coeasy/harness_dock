@@ -17,6 +17,8 @@ mod diagnostic_ipc;
 #[cfg(not(mobile))]
 mod diagnostic_platform;
 #[cfg(not(mobile))]
+mod diagnostic_report_v2;
+#[cfg(not(mobile))]
 mod diagnostic_runtime_v2;
 #[cfg(not(mobile))]
 mod diagnostic_service;
@@ -37,6 +39,10 @@ mod host_protocol;
 mod lease;
 #[cfg(not(mobile))]
 mod lifecycle;
+#[cfg(not(mobile))]
+mod lifecycle_integration;
+#[cfg(not(mobile))]
+mod lifecycle_release_gate;
 mod net;
 mod platform;
 #[cfg(not(mobile))]
