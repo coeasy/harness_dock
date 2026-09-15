@@ -3,28 +3,48 @@
 //! Keeps Tauri command transport thin while delegating collection and export
 //! decisions to diagnostics services.
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::{diagnostic_command, diagnostic_export, diagnostic_platform::DiagnosticSnapshot};
 
-#[tauri::command]
-pub fn diagnostics_snapshot() -> diagnostic_command::DiagnosticsResponse {
-    diagnostic_command::response(DiagnosticSnapshot::default())
+fn collect_snapshot(app: &AppHandle) -> DiagnosticSnapshot {
+    let state = app.state::<crate::AppState>();
+
+    let runtime = state
+        .runtime_supervisor
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let startup = state
+        .startup_orchestrator
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let shutdown = state
+        .shutdown_manager
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    crate::diagnostic_service::snapshot(&runtime, &startup, &shutdown)
 }
 
 #[tauri::command]
-pub fn diagnostics_export() -> diagnostic_export::DiagnosticBundle {
-    diagnostic_export::DiagnosticBundle::new(DiagnosticSnapshot::default())
+pub fn diagnostics_snapshot(app: AppHandle) -> diagnostic_command::DiagnosticsResponse {
+    diagnostic_command::response(collect_snapshot(&app))
 }
 
-pub fn _keep_app_handle(_: Option<AppHandle>) {}
+#[tauri::command]
+pub fn diagnostics_export(app: AppHandle) -> diagnostic_export::DiagnosticBundle {
+    diagnostic_export::DiagnosticBundle::new(collect_snapshot(&app))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn snapshot_command_returns_ok() {
-        assert!(diagnostics_snapshot().ok);
+    fn snapshot_export_path_exists() {
+        let snapshot = DiagnosticSnapshot::default();
+        assert!(diagnostic_export::DiagnosticBundle::new(snapshot)
+            .filename()
+            .contains("harnessdock-diagnostic"));
     }
 }
