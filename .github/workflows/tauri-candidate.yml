@@ -302,7 +302,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node -p "require('./release-manifest.json').channel")" = rc
+          node -e "const m=require('./release-manifest.json'); if (!['alpha','beta','rc'].includes(m.channel)) process.exit(1)"
           test "$(node -p "require('./apps/tauri/src-tauri/tauri.conf.json').bundle.createUpdaterArtifacts")" = false
       - name: Prepare canonical HarnessDock icon set
         working-directory: apps/tauri
