@@ -9,6 +9,16 @@ mod desktop;
 #[cfg(not(mobile))]
 mod diagnostic;
 #[cfg(not(mobile))]
+mod diagnostic_command;
+#[cfg(not(mobile))]
+mod diagnostic_export;
+#[cfg(not(mobile))]
+mod diagnostic_ipc;
+#[cfg(not(mobile))]
+mod diagnostic_platform;
+#[cfg(not(mobile))]
+mod diagnostic_service;
+#[cfg(not(mobile))]
 mod error;
 mod gateway;
 #[cfg(not(mobile))]
@@ -40,17 +50,23 @@ mod runtime_actor;
 #[cfg(not(mobile))]
 mod runtime_supervisor;
 #[cfg(not(mobile))]
+mod runtime_supervisor_integration;
+#[cfg(not(mobile))]
 mod service;
 #[cfg(not(mobile))]
 mod single_instance;
 #[cfg(not(mobile))]
 mod startup;
 #[cfg(not(mobile))]
+mod startup_integration;
+#[cfg(not(mobile))]
 mod startup_orchestrator;
 #[cfg(not(mobile))]
 mod startup_trace;
 #[cfg(not(mobile))]
 mod state;
+#[cfg(not(mobile))]
+mod shutdown_integration;
 #[cfg(not(mobile))]
 mod shutdown_manager;
 #[cfg(not(mobile))]
