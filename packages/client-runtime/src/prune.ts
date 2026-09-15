@@ -25,13 +25,14 @@ const KEEP_ARCHES = new Set(['x64', 'arm64'])
  * they are @img/sharp / @img/sharp-libvips variants for a different platform
  * than the one the runtime will actually run on.
  *
+ * HarnessDock's Linux runtime is explicitly built for glibc (`npm --libc=glibc`),
+ * so Linux keeps `linux-<arch>` but prunes `linuxmusl-<arch>`. Keeping musl
+ * binaries makes AppImage linuxdeploy try to resolve libc.musl-x86_64.so.1 on
+ * a glibc runner and is also unnecessary download/installation weight.
+ *
  * Kept:
  *  - `@img/sharp-wasm32` (universal fallback)
- *  - `@img/sharp-<platform>-<arch>` and `@img/sharp-libvips-<platform>-<arch>`
- *    for the host platform (linux keeps both `linux` and `linuxmusl`).
- *
- * Everything else is untouched: only the @img/sharp and @img/sharp-libvips
- * prefixes are ever considered for deletion.
+ *  - the exact host platform/arch pair.
  */
 export function planRuntimePrune(
   packageNames: string[],
@@ -40,16 +41,9 @@ export function planRuntimePrune(
 ): string[] {
   const keep = new Set<string>([WASM_FALLBACK])
   if (KEEP_ARCHES.has(arch)) {
-    const keepPlatforms =
-      platform === 'win32'
-        ? ['win32']
-        : platform === 'darwin'
-          ? ['darwin']
-          : ['linux', 'linuxmusl']
-    for (const p of keepPlatforms) {
-      keep.add(`${SHARP_PREFIX}${p}-${arch}`)
-      keep.add(`${SHARP_LIBVIPS_PREFIX}${p}-${arch}`)
-    }
+    const keepPlatform = platform === 'win32' ? 'win32' : platform === 'darwin' ? 'darwin' : 'linux'
+    keep.add(`${SHARP_PREFIX}${keepPlatform}-${arch}`)
+    keep.add(`${SHARP_LIBVIPS_PREFIX}${keepPlatform}-${arch}`)
   }
   return packageNames.filter((name) => {
     const isSharpVariant =
@@ -62,7 +56,8 @@ export function planRuntimePrune(
  * Which `prebuilds/<variant>` subdirectory names (e.g. `win32-x64`) are dead
  * weight for a runtime that only ever runs on the host platform/arch. Used for
  * packages like node-pty that ship every platform's native prebuild.
- * Keeps exactly `${platform}-${arch}` (plus `linuxmusl-${arch}` on Linux).
+ *
+ * Linux is a glibc-only target in HarnessDock, so `linuxmusl-<arch>` is pruned.
  */
 export function planPrebuildPrune(
   prebuildNames: string[],
@@ -70,8 +65,28 @@ export function planPrebuildPrune(
   arch: string,
 ): string[] {
   const keep = new Set<string>([`${platform}-${arch}`])
-  if (platform === 'linux') keep.add(`linuxmusl-${arch}`)
   return prebuildNames.filter((name) => !keep.has(name))
+}
+
+/**
+ * @koromix/koffi-linux-* packages contain both glibc (`linux_<arch>`) and musl
+ * (`musl_<arch>`) native addons. HarnessDock Linux releases target glibc only,
+ * so keep exactly the glibc folder and remove the musl/cross-arch variants.
+ */
+export function planKoffiVariantPrune(dirNames: string[], arch: string): string[] {
+  const keep = `linux_${arch}`
+  return dirNames.filter((name) => name !== keep)
+}
+
+/**
+ * The dsh Linux system addon ships glibc and musl implementations below its
+ * `bin` directory. HarnessDock Linux releases target glibc, and linuxdeploy
+ * cannot inspect the musl ELF with the runner's glibc `ldd`, so remove only
+ * the unused musl directory while retaining the glibc implementation and
+ * the root-level landlock helper.
+ */
+export function planSystemAddonVariantPrune(dirNames: string[]): string[] {
+  return dirNames.filter((name) => name === 'musl')
 }
 
 /**
@@ -142,8 +157,9 @@ export function planRuntimeDocFilesToPrune(fileNames: string[]): string[] {
 
 /**
  * Orchestrates the runtime size pruning after a bundled runtime is prepared:
- *  - @img/sharp / sharp-libvips variants for other platforms (planRuntimePrune);
- *  - non-host `prebuilds/<variant>` subdirectories (planPrebuildPrune);
+ *  - @img/sharp / sharp-libvips variants for other platforms/libcs;
+ *  - non-host `prebuilds/<variant>` subdirectories;
+ *  - Koffi musl/cross-arch variants from Linux glibc releases;
  *  - dev/debug files `.map` / `.pdb` / `.d.ts` under node_modules;
  *  - SDK dev/example dirs (`test` / `tests` / `__tests__` / `examples` /
  *    `coverage` / `.yarn`) at package top level (planSdkDirsToPrune);
@@ -187,7 +203,16 @@ export async function pruneBundledRuntime(
 
   const remove = async (target: string): Promise<void> => {
     removedBytes += await sizeOf(target)
-    await rmImpl(target, { recursive: true, force: true })
+    // Windows Defender/indexers can briefly retain directory handles after the
+    // recursive scan. fs.rm supports bounded retries for transient ENOTEMPTY /
+    // EBUSY / EPERM failures; use them in production as well as CI so runtime
+    // packaging does not silently stop pruning after one short-lived lock.
+    await rmImpl(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
     removedCount += 1
   }
 
@@ -200,7 +225,7 @@ export async function pruneBundledRuntime(
       .filter((e) => e.isDirectory())
       .map((e) => path.join(e.parentPath, e.name))
 
-    // 1. @img/sharp cross-platform variants (top-level scoped packages).
+    // 1. @img/sharp cross-platform / cross-libc variants.
     const imgDir = path.join(nodeModules, '@img')
     let imgNames: string[] = []
     try {
@@ -214,7 +239,7 @@ export async function pruneBundledRuntime(
       await remove(path.join(imgDir, name))
     }
 
-    // 2. Non-host prebuilds/<variant> subdirectories (e.g. node-pty).
+    // 2. Non-host/cross-libc prebuilds/<variant> subdirectories (e.g. node-pty).
     const prebuildDirs = dirs.filter((dir) => path.basename(path.dirname(dir)) === 'prebuilds')
     for (const variant of prebuildDirs) {
       const variantName = path.basename(variant)
@@ -223,13 +248,53 @@ export async function pruneBundledRuntime(
       }
     }
 
-    // 3. Dev/debug files (.map / .pdb / .d.ts).
+    // 3. Koffi's Linux package contains glibc and musl native addons side by
+    //    side. Release Linux is glibc-only, so remove musl/cross-arch folders.
+    if (platform === 'linux') {
+      const koffiDir = path.join(nodeModules, '@koromix', `koffi-linux-${arch}`)
+      let koffiVariants: string[] = []
+      try {
+        const koffiEntries = await readdirImpl(koffiDir, { withFileTypes: true })
+        koffiVariants = koffiEntries.filter((e) => e.isDirectory()).map((e) => e.name)
+      } catch {
+        koffiVariants = []
+      }
+      for (const variant of planKoffiVariantPrune(koffiVariants, arch)) {
+        await remove(path.join(koffiDir, variant))
+      }
+    }
+
+    // 4. The Linux system addon includes a musl ELF beside the glibc addon;
+    //    HarnessDock's Linux release is glibc-only, and linuxdeploy's ldd
+    //    cannot inspect that musl binary on the glibc build runner.
+    if (platform === 'linux') {
+      const systemAddonBin = path.join(
+        nodeModules,
+        '@deepseek-ai',
+        `node-addon-system-linux-${arch}`,
+        'bin',
+      )
+      let systemAddonVariants: string[] = []
+      try {
+        const systemAddonEntries = await readdirImpl(systemAddonBin, { withFileTypes: true })
+        systemAddonVariants = systemAddonEntries
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+      } catch {
+        systemAddonVariants = []
+      }
+      for (const variant of planSystemAddonVariantPrune(systemAddonVariants)) {
+        await remove(path.join(systemAddonBin, variant))
+      }
+    }
+
+    // 5. Dev/debug files (.map / .pdb / .d.ts).
     const devFiles = files.filter((file) => planDevFilesToPrune([path.basename(file)]).length > 0)
     for (const file of devFiles) {
       await remove(file)
     }
 
-    // 4. SDK dev/example dirs (test / tests / __tests__ / examples / coverage
+    // 6. SDK dev/example dirs (test / tests / __tests__ / examples / coverage
     //    / .yarn) at package top level — not under @types/* or src.
     const sdkDirs = dirs.filter((dir) => {
       const rel = path.relative(nodeModules, dir)
@@ -239,7 +304,7 @@ export async function pruneBundledRuntime(
       await remove(dir)
     }
 
-    // 5. Doc/declaration files: *.md except license/notice/changelog, plus
+    // 7. Doc/declaration files: *.md except license/notice/changelog, plus
     //    .d.mts / .d.cts declaration modules.
     const docFiles = files.filter(
       (file) => planRuntimeDocFilesToPrune([path.basename(file)]).length > 0,

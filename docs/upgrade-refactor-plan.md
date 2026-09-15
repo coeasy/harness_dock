@@ -1,7 +1,9 @@
-# HarnessDock 升级重构方案
+# HarnessDock 升级重构方案（历史文档）
 
 > ⚠️ **本文档已归档**：Phase D/E/F 已全部落地，剩余项（签名、channel）已并入
 > [`docs/upgrade-refactor-plan-v2.md`](./upgrade-refactor-plan-v2.md)（Phase G–K）。请以 v2 为准。
+
+> v0.2.0 已改为 Tauri-only；本文中的 Electron 构建、更新和 E2E 描述不再适用于当前代码。
 
 > 状态：规划稿（基于 2026-08-27 仓库现状梳理）
 > 范围：全仓（apps/desktop、apps/vscode、packages/*、scripts、CI）

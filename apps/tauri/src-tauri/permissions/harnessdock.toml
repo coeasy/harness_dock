@@ -1,0 +1,84 @@
+[[permission]]
+identifier = "platform-info"
+description = "Allows the bundled launcher to inspect its HarnessDock platform profile."
+commands.allow = ["platform_info"]
+
+[[permission]]
+identifier = "gateway-health"
+description = "Allows the bundled launcher to probe a user-supplied HarnessDock Gateway origin."
+commands.allow = ["gateway_health"]
+
+[[permission]]
+identifier = "gateway-pair"
+description = "Allows the bundled launcher to exchange an explicit one-time pairing code for a Gateway connection."
+commands.allow = ["pair_gateway"]
+
+[[permission]]
+identifier = "gateway-host"
+description = "Legacy local control adapter for the owned Native GatewayActor; remote Harness Web never receives it."
+commands.allow = ["gateway_host_status", "gateway_host_start", "gateway_host_create_pairing", "gateway_host_revoke", "gateway_host_revoke_all", "gateway_host_stop"]
+
+[[permission]]
+identifier = "host-protocol"
+description = "Allows an eligible surface to use the typed Host Protocol. Authority is re-derived from real WebView identity and current RuntimeLease by the Capability Broker."
+commands.allow = ["host_execute", "host_snapshot"]
+
+[[permission]]
+identifier = "harness-window"
+description = "Legacy local control primitives for the managed Harness WebView; remote Harness Web receives only harness-shell plus Host Protocol."
+commands.allow = ["harness_open", "harness_close", "harness_minimize", "harness_toggle_maximize", "harness_window_state", "control_show", "harness_reload_web", "harness_restart_web", "harness_safe_mode_restart", "harness_clear_quarantine_restart", "shell_settings_show"]
+
+[[permission]]
+identifier = "runtime-status"
+description = "Allows the bundled local control surface to read local Runtime state during migration."
+commands.allow = ["runtime_status", "public_runtime_status"]
+
+[[permission]]
+identifier = "runtime-start"
+description = "Allows the bundled local control surface to start the packaged Runtime during migration."
+commands.allow = ["runtime_start"]
+
+[[permission]]
+identifier = "runtime-stop"
+description = "Allows the bundled local control surface to stop its owned Runtime during migration."
+commands.allow = ["runtime_stop"]
+
+[[permission]]
+identifier = "runtime-maintenance"
+description = "Allows trusted local control surfaces to clear persisted plugin quarantine state."
+commands.allow = ["runtime_clear_plugin_quarantine"]
+
+[[permission]]
+identifier = "runtime-launch-settings"
+description = "Allows only the local Diagnostics surface to read and persist validated dsh profile/DSH_HOME launch preferences."
+commands.allow = ["runtime_launch_settings_get", "runtime_launch_settings_set"]
+
+[[permission]]
+identifier = "update-check"
+description = "Allows a trusted local window to check the official project release feed."
+commands.allow = ["update_check"]
+
+[[permission]]
+identifier = "update-install"
+description = "Allows a trusted local desktop surface to install only a signed HarnessDock update."
+commands.allow = ["update_install"]
+
+[[permission]]
+identifier = "harness-shell"
+description = "Allows remote Harness Web only minimum native window primitives. Business operations cross Host Protocol and Capability Broker."
+commands.allow = ["harness_minimize", "harness_toggle_maximize", "harness_window_state", "harness_shell_close"]
+
+[[permission]]
+identifier = "shell-settings"
+description = "Allows the local on-demand Diagnostics window only to destroy itself; state and business operations use Host Protocol."
+commands.allow = ["diagnostics_close"]
+
+[[permission]]
+identifier = "splash-status"
+description = "Allows the bundled launcher to update its desktop startup animation."
+commands.allow = ["splash_status"]
+
+[[permission]]
+identifier = "startup-recovery-status"
+description = "Allows the bundled launcher to read a native startup recovery error created before its page finished loading."
+commands.allow = ["startup_recovery_status"]

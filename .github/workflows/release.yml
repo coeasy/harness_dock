@@ -1,0 +1,252 @@
+name: release
+
+on:
+  workflow_run:
+    workflows:
+      - tauri-candidate
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Exact release contract tag (leave empty to use release-manifest.json)'
+        type: string
+        required: false
+      candidate_run_id:
+        description: 'Successful tauri-candidate run id built from this exact main SHA'
+        type: string
+        required: true
+
+concurrency:
+  group: release-${{ github.event.workflow_run.id || inputs.release_tag || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+      tag: ${{ steps.gate.outputs.tag }}
+      sha: ${{ steps.gate.outputs.sha }}
+      candidate_run_id: ${{ steps.gate.outputs.candidate_run_id }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.candidate_run_id }}
+      RELEASE_TAG_INPUT: ${{ inputs.release_tag || '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Validate release and platform contract
+        run: node scripts/check-release.mjs
+
+      - name: Validate exact same-SHA green candidate gates
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          candidate_sha="$(git rev-parse HEAD)"
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          if [ "$candidate_sha" != "$main_sha" ]; then
+            if [ "$GITHUB_EVENT_NAME" = 'workflow_run' ]; then
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping stale automatic candidate: candidate=${candidate_sha} main=${main_sha}"
+              exit 0
+            fi
+            echo "candidate is stale: candidate=$candidate_sha main=$main_sha" >&2
+            exit 1
+          fi
+
+          expected_tag="$(node scripts/release/contract.mjs tag)"
+          release_tag="${RELEASE_TAG_INPUT:-$expected_tag}"
+          test "$release_tag" = "$expected_tag" || {
+            echo "release tag mismatch: contract=$expected_tag requested=$release_tag" >&2
+            exit 1
+          }
+          notes_path="$(node scripts/release/contract.mjs notes)"
+          test -s "$notes_path" || { echo "release notes missing: $notes_path" >&2; exit 1; }
+
+          candidate_workflow="$(node scripts/release/contract.mjs candidate-workflow)"
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
+          run_sha="$(printf '%s' "$run_json" | jq -r '.head_sha')"
+          run_branch="$(printf '%s' "$run_json" | jq -r '.head_branch')"
+          run_status="$(printf '%s' "$run_json" | jq -r '.status')"
+          run_conclusion="$(printf '%s' "$run_json" | jq -r '.conclusion')"
+          run_path="$(printf '%s' "$run_json" | jq -r '.path')"
+
+          test "$run_sha" = "$candidate_sha" || {
+            echo "candidate SHA mismatch: checkout=$candidate_sha candidate=$run_sha" >&2
+            exit 1
+          }
+          test "$run_branch" = main || {
+            echo "candidate was not built from main: $run_branch" >&2
+            exit 1
+          }
+          test "$run_status" = completed && test "$run_conclusion" = success || {
+            echo "candidate is not green: status=$run_status conclusion=$run_conclusion" >&2
+            exit 1
+          }
+          test "$run_path" = "$candidate_workflow" || {
+            echo "unexpected candidate workflow: expected=$candidate_workflow actual=$run_path" >&2
+            exit 1
+          }
+
+          existing_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" --jq '.object.sha' 2>/dev/null || true)"
+          replaceable="$(node scripts/release/contract.mjs replaceable)"
+          if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$candidate_sha" ] && [ "$replaceable" != true ]; then
+            if [ "$GITHUB_EVENT_NAME" != 'workflow_run' ]; then
+              echo "immutable release tag $release_tag already points to $existing_tag_sha; refusing manual publish for $candidate_sha" >&2
+              exit 1
+            fi
+
+            release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" 2>/dev/null || true)"
+            test -n "$release_json" || {
+              echo "immutable tag $release_tag points to $existing_tag_sha without a managed GitHub release" >&2
+              exit 1
+            }
+            release_draft="$(printf '%s' "$release_json" | jq -r '.draft')"
+            release_prerelease="$(printf '%s' "$release_json" | jq -r '.prerelease')"
+            expected_prerelease="$(node scripts/release/contract.mjs github-prerelease)"
+            test "$release_draft" = false || {
+              echo "existing immutable release $release_tag is unexpectedly a draft" >&2
+              exit 1
+            }
+            test "$release_prerelease" = "$expected_prerelease" || {
+              echo "existing immutable release classification mismatch: prerelease=$release_prerelease expected=$expected_prerelease" >&2
+              exit 1
+            }
+
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+            echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+            echo "candidate_run_id=$CANDIDATE_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping publish for post-release maintenance SHA ${candidate_sha}: immutable ${release_tag} remains at ${existing_tag_sha}"
+            exit 0
+          fi
+
+          mapfile -t required_workflows < <(node scripts/release/contract.mjs required-workflows)
+          deadline=$((SECONDS + 900))
+          for workflow_path in "${required_workflows[@]}"; do
+            while true; do
+              runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${candidate_sha}&per_page=100")"
+              success_id="$(printf '%s' "$runs_json" | jq -r --arg sha "$candidate_sha" --arg path "$workflow_path" \
+                '.workflow_runs[] | select(.head_sha == $sha and .path == $path and .status == "completed" and .conclusion == "success") | .id' | head -1)"
+              if [ -n "$success_id" ]; then
+                echo "same-SHA gate passed: $workflow_path run=$success_id"
+                break
+              fi
+
+              failure="$(printf '%s' "$runs_json" | jq -r --arg sha "$candidate_sha" --arg path "$workflow_path" \
+                '.workflow_runs[] | select(.head_sha == $sha and .path == $path and .status == "completed" and (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "cancelled")) | "\(.id):\(.conclusion)"' | head -1)"
+              if [ -n "$failure" ]; then
+                echo "same-SHA release gate failed: workflow=$workflow_path run=$failure" >&2
+                exit 1
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "timed out waiting for same-SHA release gate: $workflow_path @ $candidate_sha" >&2
+                exit 1
+              fi
+              echo "Waiting for same-SHA release gate $workflow_path @ $candidate_sha..."
+              sleep 15
+            done
+          done
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+          echo "candidate_run_id=$CANDIDATE_RUN_ID" >> "$GITHUB_OUTPUT"
+
+  assemble:
+    needs: validate
+    if: needs.validate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN_ID: ${{ needs.validate.outputs.candidate_run_id }}
+      RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install pinned workspace verifier
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Download exact candidate artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf release-input release-assets
+          mkdir -p release-input
+          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-input
+
+      - name: Assemble release assets from platform contract
+        run: node scripts/release/assemble.mjs release-input release-assets
+
+      - name: Verify exact asset set and SHA-256 payloads
+        run: node scripts/release/verify-assets.mjs release-assets
+
+      - name: Upload immutable release bundle for publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: harnessdock-release-assets-${{ needs.validate.outputs.sha }}
+          path: release-assets/*
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [validate, assemble]
+    if: needs.validate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+      RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Download already-verified release bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: harnessdock-release-assets-${{ needs.validate.outputs.sha }}
+          path: release-assets
+
+      - name: Re-verify artifact handoff before repository write
+        run: node scripts/release/verify-assets.mjs release-assets
+
+      - name: Publish guarded GitHub Release transaction
+        run: node scripts/release/publish-github.mjs release-assets

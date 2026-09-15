@@ -1,125 +1,119 @@
 #!/usr/bin/env node
 /**
- * Lightweight boot-duration report from the desktop boot log (scheme F2).
+ * Best-effort report for native Tauri startup traces.
  *
- * Finds the "boot start" and "boot ok" / "boot FAILED" lines, which carry
- * `[ISO]` timestamps, and prints the wall-clock difference:
+ * Trace lines are emitted by `startup_trace.rs` and intentionally contain only
+ * elapsed milliseconds plus a stable phase name:
  *
- *   boot duration: 5165 ms
+ *   [+0ms] phase=process_started
+ *   [+124ms] phase=runtime_start
+ *   [+1682ms] phase=runtime_ready
+ *   [+1715ms] phase=webview_requested
  *
- * Log resolution order (first existing file wins):
- *   1. CLI argument:        node scripts/perf-report.mjs <logFile>
- *   2. env DSH_BOOT_LOG:    DSH_BOOT_LOG=<logFile> node scripts/perf-report.mjs
- *   3. default temp dir:    <os.tmpdir()>/harnessdock-logs/boot-YYYY-MM-DD.log
- *   4. newest boot-*.log found under os.tmpdir()/harnessdock-logs or the app
- *      log dirs (%LOCALAPPDATA%/<app>/logs, %APPDATA%/<app>/logs).
+ * Resolution order:
+ *   1. CLI argument
+ *   2. HARNESSDOCK_STARTUP_TRACE
+ *   3. legacy DSH_BOOT_LOG override
+ *   4. newest startup-*.log under <os.tmpdir()>/harnessdock-logs
  *
- * Best-effort by design: if no log is found, or the log lacks both markers,
- * a hint is printed and the exit code is 0 (never fails a pipeline).
+ * Missing or incomplete traces never fail a pipeline.
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-const TS_RE = /\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]/
+const TRACE_RE = /^\[\+(\d+)ms\]\s+phase=([a-z0-9_-]+)\s*$/i
+const TRACE_DIR = path.join(os.tmpdir(), 'harnessdock-logs')
 
-const APP_LOG_DIRS = ['HarnessDock', 'harnessdock', 'com.dsh.client', 'dsh']
-  .flatMap((app) => {
-    const dirs = []
-    const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
-    const roaming = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming')
-    dirs.push(path.join(local, app, 'logs'))
-    dirs.push(path.join(roaming, app, 'logs'))
-    return dirs
-  })
-
-function todayName() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-async function newestBootLog(dir) {
+async function newestStartupLog(dir) {
   let entries
   try {
     entries = await readdir(dir)
   } catch {
     return null
   }
-  const boots = []
+  const traces = []
   for (const name of entries) {
-    if (!/^boot-.*\.log$/i.test(name)) continue
+    if (!/^startup-.*\.log$/i.test(name)) continue
     const full = path.join(dir, name)
     try {
       const info = await stat(full)
-      if (info.isFile()) boots.push({ full, mtimeMs: info.mtimeMs })
+      if (info.isFile()) traces.push({ full, mtimeMs: info.mtimeMs })
     } catch {
-      // skip unreadable
+      // Ignore unreadable best-effort traces.
     }
   }
-  if (boots.length === 0) return null
-  boots.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  return boots[0].full
+  traces.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  return traces[0]?.full ?? null
 }
 
-async function resolveLogFile() {
-  const cli = process.argv[2]
-  const envLog = process.env.DSH_BOOT_LOG
-  const explicit = []
-  if (cli) explicit.push(cli)
-  if (envLog) explicit.push(envLog)
-  explicit.push(path.join(os.tmpdir(), 'harnessdock-logs', `boot-${todayName()}.log`))
-  for (const candidate of explicit) {
-    if (!candidate) continue
-    try {
-      if ((await stat(candidate)).isFile()) return candidate
-    } catch {
-      // keep looking
-    }
+async function existingFile(candidate) {
+  if (!candidate) return null
+  try {
+    return (await stat(candidate)).isFile() ? candidate : null
+  } catch {
+    return null
   }
-  const scanDirs = [path.join(os.tmpdir(), 'harnessdock-logs'), ...APP_LOG_DIRS]
-  for (const dir of scanDirs) {
-    const found = await newestBootLog(dir)
+}
+
+async function resolveTraceFile() {
+  for (const candidate of [
+    process.argv[2],
+    process.env.HARNESSDOCK_STARTUP_TRACE,
+    process.env.DSH_BOOT_LOG,
+  ]) {
+    const found = await existingFile(candidate)
     if (found) return found
   }
-  return null
+  return newestStartupLog(TRACE_DIR)
 }
 
-const logFile = await resolveLogFile()
-if (!logFile) {
+const traceFile = await resolveTraceFile()
+if (!traceFile) {
   console.log(
-    '[perf:report] no boot log found — nothing to report (best-effort).\n' +
-      `Expected at ${path.join(os.tmpdir(), 'harnessdock-logs', `boot-${todayName()}.log`)} ` +
-      'or via DSH_BOOT_LOG / CLI arg.',
+    '[perf:report] no native startup trace found — nothing to report (best-effort).\n' +
+      `Expected startup-*.log under ${TRACE_DIR} or an explicit CLI/HARNESSDOCK_STARTUP_TRACE path.`,
   )
   process.exit(0)
 }
 
-const lines = (await readFile(logFile, 'utf8')).split(/\r?\n/)
-let startTs = null
-let endTs = null
-for (const line of lines) {
-  const match = TS_RE.exec(line)
+const phases = new Map()
+for (const line of (await readFile(traceFile, 'utf8')).split(/\r?\n/)) {
+  const match = TRACE_RE.exec(line)
   if (!match) continue
-  const iso = match[1]
-  if (!startTs && /\bboot start\b/i.test(line)) {
-    startTs = iso
-  }
-  if (/\bboot (ok|FAILED)\b/i.test(line)) {
-    endTs = iso
-  }
+  const elapsedMs = Number(match[1])
+  const phase = match[2].toLowerCase()
+  if (!Number.isFinite(elapsedMs) || phases.has(phase)) continue
+  phases.set(phase, elapsedMs)
 }
 
-if (!startTs || !endTs) {
+if (phases.size === 0) {
   console.log(
-    `[perf:report] ${logFile} has no matching "boot start" + "boot ok"/"boot FAILED" ` +
-      'lines — nothing to report (best-effort).',
+    `[perf:report] ${traceFile} has no native startup phase markers — nothing to report (best-effort).`,
   )
   process.exit(0)
 }
 
-const durationMs = Date.parse(endTs) - Date.parse(startTs)
-console.log(`boot duration: ${durationMs} ms`)
-console.log(`  log: ${logFile}`)
-console.log(`  start: ${startTs}`)
-console.log(`  end:   ${endTs}`)
+const preferredTerminal = [
+  'primary_visible',
+  'recovery',
+  'webview_requested',
+  'runtime_ready',
+  'runtime_start',
+  'process_started',
+].find((phase) => phases.has(phase))
+const terminalMs = phases.get(preferredTerminal) ?? Math.max(...phases.values())
+
+console.log(`startup duration: ${terminalMs} ms`)
+console.log(`  terminal: ${preferredTerminal ?? 'latest_phase'}`)
+console.log(`  trace: ${traceFile}`)
+
+const ordered = [...phases.entries()].sort((a, b) => a[1] - b[1])
+let previous = 0
+for (const [phase, elapsedMs] of ordered) {
+  console.log(`  ${phase}: +${elapsedMs} ms (delta ${elapsedMs - previous} ms)`)
+  previous = elapsedMs
+}
+
 process.exit(0)

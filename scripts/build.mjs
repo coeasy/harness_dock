@@ -1,42 +1,45 @@
 #!/usr/bin/env node
 /**
- * One-click desktop client build script.
+ * HarnessDock desktop build orchestrator.
  *
- * Usage:
- *   node scripts/build.mjs                                  # current OS, thin
- *   node scripts/build.mjs --os win --scenario both         # Windows thin + full
- *   node scripts/build.mjs --os mac --scenario full         # macOS full (bundled runtime)
- *   node scripts/build.mjs --os all --scenario both         # everything this host can build
- *   node scripts/build.mjs --skip-install --skip-tests      # fast rebuild
- *
- * Scenarios:
- *   thin — small download, fetches the pinned dsh runtime via npx on first run.
- *   full — bundles node.exe + dsh runtime into the package, works offline.
- *
- * Every Windows build produces a Portable single-file exe (standalone,
- * no installation required) alongside the NSIS installer and zip.
+ * Shared responsibilities stay here; platform/architecture differences live in
+ * build-targets.mjs. The installed desktop client always consumes its own sealed
+ * Node+dsh Runtime. System Node/pnpm/Rust/Tauri are build-time tools only.
  */
-
+import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import { parseArgs } from 'node:util'
+import { resolveDesktopBuildTarget, tauriBundleArgument } from './build-targets.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-// thin 和 full 分别输出到 release/thin 与 release/full，避免
-// electron-builder 清空共享目录时把另一种场景的产物破坏掉。
-const releaseRoots = [
-  path.join(repoRoot, 'apps', 'desktop', 'release', 'full'),
-  path.join(repoRoot, 'apps', 'desktop', 'release', 'thin'),
-]
+const rootPackage = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
+const versions = JSON.parse(readFileSync(path.join(repoRoot, 'scripts', 'versions.json'), 'utf8'))
+const target = resolveDesktopBuildTarget()
+const packageManager = String(rootPackage.packageManager ?? '')
+const pnpmMatch = /^pnpm@([^\s]+)$/.exec(packageManager)
+if (!pnpmMatch) throw new Error(`package.json packageManager must pin pnpm exactly; got ${packageManager || 'missing'}`)
+const expectedPnpmVersion = pnpmMatch[1]
+const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+const cargoCommand = process.platform === 'win32' ? 'cargo.exe' : 'cargo'
+const tauriCliVersion = String(versions.tauriCli ?? '')
+if (!/^\d+\.\d+\.\d+$/.test(tauriCliVersion)) {
+  throw new Error(`scripts/versions.json must pin tauriCli exactly; got ${tauriCliVersion || 'missing'}`)
+}
+const localTauriRoot = path.join(repoRoot, '.local-tools', `tauri-cli-${tauriCliVersion}`)
+const localTauriBin = path.join(localTauriRoot, 'bin')
+const tauriAppRoot = path.join(repoRoot, 'apps', 'tauri')
 
 const { values } = parseArgs({
   options: {
-    os: { type: 'string', short: 'o' },
-    scenario: { type: 'string', short: 's' },
     'skip-install': { type: 'boolean' },
     'skip-tests': { type: 'boolean' },
+    'skip-runtime': { type: 'boolean' },
+    'skip-runtime-prepare': { type: 'boolean' },
+    'force-runtime': { type: 'boolean' },
+    'source-runtime': { type: 'boolean' },
+    'check-only': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 })
@@ -44,60 +47,33 @@ const { values } = parseArgs({
 if (values.help) {
   console.log(`Usage: node scripts/build.mjs [options]
 
+Target selected from the host OS/arch:
+  ${target.id}: runtime=${target.runtimeKey}, bundles=${target.bundles.join(',')}
+
 Options:
-  -o, --os <os>         win | mac | linux | all | current (default: current)
-  -s, --scenario <s>    thin | full | both (default: thin)
-      --skip-install    skip pnpm install
-      --skip-tests      skip unit tests
-  -h, --help            show this help
+      --skip-install          skip pnpm install (caller must provide exact workspace state)
+      --skip-tests            skip unit tests
+      --skip-runtime-prepare  do not download/rebuild Runtime; still require full Runtime smoke
+      --force-runtime         redownload/rebuild the exact sealed Runtime
+      --source-runtime        explicitly build Runtime from the pinned upstream tag+commit
+      --check-only            stop after plugins + Rust host + Runtime/Harness Web gates
+  -h, --help                  show this help
 
-Platform rules (match GitHub release runners):
-  win    — buildable on Windows hosts (NSIS + portable exe + zip)
-  mac    — only on macOS hosts (dmg + zip, x64 & arm64)
-  linux  — only on Linux hosts (AppImage + deb)
-`)
+Deprecated:
+      --skip-runtime          rejected because packaging without Runtime verification is unsafe
+
+Platform packaging policy:
+  Windows x64 : NSIS only
+  Linux x64   : DEB + AppImage
+  macOS x64   : .app only (DMG remains release-workflow owned)
+  macOS arm64 : .app only (DMG remains release-workflow owned)
+
+Normal local builds prefer an exact published sealed Runtime with a trusted
+SHA-256 digest. If no trusted matching bundle is available, the build falls back
+to the exact pinned upstream tag+commit and feeds its official dsh/vendor packs
+through the same sealed Runtime builder and verification path. Use
+--source-runtime to skip release lookup and force that pinned source path.`)
   process.exit(0)
-}
-
-const hostPlatform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux'
-
-const osArg = values.os ?? 'current'
-const scenarioArg = values.scenario ?? 'thin'
-
-const OS_KEYS = ['win', 'mac', 'linux']
-const SCENARIOS = ['thin', 'full']
-
-if (!['all', 'current', ...OS_KEYS].includes(osArg)) {
-  fail(`Unknown --os "${osArg}". Valid: ${['all', 'current', ...OS_KEYS].join(' | ')}`)
-}
-if (![...SCENARIOS, 'both'].includes(scenarioArg)) {
-  fail(`Unknown --scenario "${scenarioArg}". Valid: ${[...SCENARIOS, 'both'].join(' | ')}`)
-}
-
-const osList = osArg === 'all' ? OS_KEYS : osArg === 'current' ? [hostPlatform] : [osArg]
-const scenarios = scenarioArg === 'both' ? SCENARIOS : [scenarioArg]
-
-// Cross-OS build matrix: only win artifacts build off-host reliably (NSIS/portable/zip).
-const nativeOnly = { mac: 'macOS', linux: 'Linux' }
-for (const os of osList) {
-  if (nativeOnly[os] && os !== hostPlatform) {
-    fail(`--os ${os} must run on a ${nativeOnly[os]} host (current host: ${hostPlatform}). Use GitHub Actions release workflow for cross-OS builds.`)
-  }
-}
-
-console.log(`\n=== DeepSeek Harness desktop build ===`)
-console.log(`host: ${hostPlatform} | os: ${osList.join(', ')} | scenario: ${scenarios.join(', ')}\n`)
-
-function run(command, args, label) {
-  console.log(`\n> ${label}`)
-  const result = spawnSync(command, args, {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-  })
-  if (result.status !== 0) {
-    fail(`${label} failed with exit code ${result.status}`)
-  }
 }
 
 function fail(message) {
@@ -105,81 +81,193 @@ function fail(message) {
   process.exit(1)
 }
 
-function pnpm(args, label) {
-  run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args, label)
+if (values['skip-runtime']) {
+  fail('--skip-runtime is no longer supported; use --skip-runtime-prepare to reuse an existing Runtime while still enforcing integrity and Harness Web smoke')
+}
+if (values['skip-runtime-prepare'] && values['force-runtime']) {
+  fail('--skip-runtime-prepare cannot be combined with --force-runtime')
+}
+if (values['skip-runtime-prepare'] && values['source-runtime']) {
+  fail('--skip-runtime-prepare cannot be combined with --source-runtime')
 }
 
-// Friendly early failure when invoked directly without pnpm on PATH
-// (build.bat / build.sh normally guarantee pnpm via bootstrap.mjs).
-const pnpmCheck = spawnSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--version'], {
-  cwd: repoRoot,
-  shell: process.platform === 'win32',
-  encoding: 'utf8',
-})
-if (pnpmCheck.status !== 0) {
-  fail(
-    'pnpm not found on PATH. Either run via scripts/build.bat (Windows) or '
-    + 'scripts/build.sh (macOS/Linux), which provision pnpm automatically, '
-    + 'or manually install pnpm 10 first: corepack enable && corepack prepare pnpm@10.12.0 --activate',
+function commandResult(command, args = ['--version'], extraPath = null) {
+  const env = { ...process.env }
+  if (extraPath) env.PATH = `${extraPath}${path.delimiter}${env.PATH ?? ''}`
+  return spawnSync(command, args, {
+    cwd: repoRoot,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+    env,
+  })
+}
+
+function commandWorks(command, args = ['--version'], extraPath = null) {
+  return commandResult(command, args, extraPath).status === 0
+}
+
+function tauriVersion(extraPath = null) {
+  const result = commandResult(cargoCommand, ['tauri', '--version'], extraPath)
+  if (result.status !== 0) return null
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim()
+  const match = /(?:tauri-cli\s+)?(\d+\.\d+\.\d+)/i.exec(output)
+  return match?.[1] ?? null
+}
+
+function runStatus(command, args, label, options = {}) {
+  console.log(`\n> ${label}`)
+  const result = spawnSync(command, args, {
+    cwd: options.cwd ?? repoRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env: { ...process.env, ...(options.env ?? {}) },
+  })
+  if (result.error) console.error(`[build] ${label}: ${result.error.message}`)
+  return result.status ?? 1
+}
+
+function run(command, args, label, options = {}) {
+  const status = runStatus(command, args, label, options)
+  if (status !== 0) fail(`${label} failed with exit code ${status}`)
+}
+
+function prependPath(directory) {
+  process.env.PATH = `${directory}${path.delimiter}${process.env.PATH ?? ''}`
+}
+
+function ensureCargo() {
+  if (!commandWorks(cargoCommand, ['--version'])) {
+    fail('Rust/Cargo was not found on PATH. Install the pinned rust-toolchain.toml toolchain and the Tauri 2 system prerequisites for this platform.')
+  }
+}
+
+function ensureTauriCli() {
+  ensureCargo()
+
+  const globalVersion = tauriVersion()
+  if (globalVersion === tauriCliVersion) {
+    console.log(`[build] using tauri-cli ${tauriCliVersion} from PATH`)
+    return
+  }
+  if (globalVersion) {
+    console.log(`[build] ignoring tauri-cli ${globalVersion} from PATH; exact ${tauriCliVersion} is required`)
+  }
+
+  const localBinary = path.join(localTauriBin, process.platform === 'win32' ? 'cargo-tauri.exe' : 'cargo-tauri')
+  if (existsSync(localBinary) && tauriVersion(localTauriBin) === tauriCliVersion) {
+    prependPath(localTauriBin)
+    console.log(`[build] using cached local tauri-cli ${tauriCliVersion}`)
+    return
+  }
+
+  console.log(`[build] installing isolated tauri-cli ${tauriCliVersion} under ${localTauriRoot}`)
+  run(
+    cargoCommand,
+    ['install', 'tauri-cli', '--version', tauriCliVersion, '--locked', '--root', localTauriRoot, '--force'],
+    `install tauri-cli ${tauriCliVersion}`,
+  )
+  prependPath(localTauriBin)
+  const installedVersion = tauriVersion()
+  if (installedVersion !== tauriCliVersion) {
+    fail(`tauri-cli ${tauriCliVersion} was installed but cargo tauri reports ${installedVersion ?? 'unavailable'}`)
+  }
+}
+
+function runtimePrepareArgs(force = false) {
+  const args = ['scripts/prepare-local-runtime.mjs']
+  if (force) args.push('--force')
+  if (values['source-runtime']) {
+    args.push('--source-only')
+  }
+  // The user-facing local build must remain usable from a clean clone before a
+  // matching release Runtime exists. prepare-local-runtime already verifies a
+  // trusted published bundle first, then falls back to the exact pinned source
+  // checkout and the same sealed Runtime builder/identity checks.
+  return args
+}
+
+function verifyRuntime() {
+  const smokeArgs = [
+    '--filter', '@dsh/client-runtime', 'smoke-runtime', '--',
+    '--runtime-dir', 'apps/tauri/src-tauri/resources/dsh-runtime',
+    '--plugin', 'packages/plugin-embedded-client/lib/index.js',
+  ]
+  const firstSmoke = runStatus(
+    pnpmCommand,
+    smokeArgs,
+    `verify ${target.runtimeKey} sealed Runtime + Harness Web readiness`,
+  )
+  if (firstSmoke === 0) return
+
+  if (values['skip-runtime-prepare']) {
+    fail('existing Runtime failed verification and --skip-runtime-prepare forbids repair')
+  }
+
+  console.warn('[build] Runtime verification failed; refreshing the same target Runtime once and re-verifying.')
+  run(
+    process.execPath,
+    runtimePrepareArgs(true),
+    `force-refresh ${target.runtimeKey} sealed Runtime after verification failure`,
+  )
+  run(
+    pnpmCommand,
+    smokeArgs,
+    `verify refreshed ${target.runtimeKey} sealed Runtime + Harness Web readiness`,
   )
 }
 
+console.log(`[build] target=${target.id} runtime=${target.runtimeKey} packaging=${target.artifactKind}`)
+run(process.execPath, ['scripts/node-version-check.cjs'], 'check build-time Node version')
+
+const pnpmVersion = commandResult(pnpmCommand, ['--version'])
+const actualPnpmVersion = pnpmVersion.status === 0 ? String(pnpmVersion.stdout ?? '').trim() : null
+if (actualPnpmVersion !== expectedPnpmVersion) {
+  fail(
+    `pnpm ${actualPnpmVersion ?? 'not found'} does not match packageManager pnpm@${expectedPnpmVersion}; run scripts/bootstrap.mjs or use scripts/build.bat / scripts/build.sh`,
+  )
+}
+console.log(`[build] using exact pnpm ${actualPnpmVersion}`)
+
 if (!values['skip-install']) {
-  pnpm(['install', '--frozen-lockfile'], 'pnpm install')
+  run(pnpmCommand, ['install', '--frozen-lockfile', '--prefer-offline'], 'pnpm install')
+}
+if (!values['skip-tests']) run(pnpmCommand, ['test'], 'unit tests')
+
+run(pnpmCommand, ['--filter', '@dsh/plugin-embedded-client', 'build'], 'build embedded client plugin')
+run(pnpmCommand, ['--filter', '@dsh/plugin-harness-shell', 'build'], 'build independent Harness Shell plugin')
+
+// Rust compilation is a fast deterministic host gate and must not wait behind
+// Runtime downloads/source/network smoke. It also does not require tauri-cli.
+ensureCargo()
+run(pnpmCommand, ['--filter', '@dsh/tauri', 'tauri:check'], `check ${target.id} Tauri Rust host`)
+
+if (!values['skip-runtime-prepare']) {
+  run(
+    process.execPath,
+    runtimePrepareArgs(Boolean(values['force-runtime'])),
+    values['source-runtime']
+      ? `build ${target.runtimeKey} sealed Runtime from pinned upstream source`
+      : `prepare ${target.runtimeKey} sealed Runtime from trusted release or pinned source fallback`,
+  )
+}
+verifyRuntime()
+
+if (values['check-only']) {
+  console.log(`\n[build] CHECK PASSED for ${target.id}: plugins + Rust host + ${target.runtimeKey} Runtime/Harness Web`)
+  process.exit(0)
 }
 
-if (!values['skip-tests']) {
-  pnpm(['test'], 'unit tests')
-}
+// Tauri CLI is a packaging dependency, not a Rust-check or Runtime dependency.
+ensureTauriCli()
+const bundleArgument = tauriBundleArgument(target)
+console.log(`[build] ${target.id} packaging policy: ${bundleArgument}`)
+run(
+  cargoCommand,
+  ['tauri', 'build', '--bundles', bundleArgument],
+  `build ${target.id} Tauri ${target.artifactKind}`,
+  { cwd: tauriAppRoot },
+)
 
-const jobs = []
-for (const os of osList) {
-  for (const scenario of scenarios) {
-    const script = scenario === 'full' ? `pack:desktop:${os}:full` : `pack:desktop:${os}`
-    jobs.push({ os, scenario, script })
-  }
-}
-
-for (const job of jobs) {
-  pnpm([job.script], `pack ${job.os} (${job.scenario})`)
-}
-
-// Best-effort size-budget gate (scheme D4): after all pack jobs, run
-// `pnpm check:size` against the produced artifacts. The gate never blocks the
-// build — a non-zero exit (missing artifacts or a budget overrun) only warns.
-if (jobs.length > 0) {
-  console.log(`\n> size budget gate (best-effort)`)
-  const checkSize = spawnSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['check:size'], {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-  })
-  if (checkSize.status !== 0) {
-    console.warn(
-      `\n[build] WARN: pnpm check:size exited with code ${checkSize.status} — ` +
-        `size budget gate is best-effort and does not block the build.`,
-    )
-  }
-}
-
-// Summarize artifacts produced by this run.
-console.log(`\n=== Artifacts ===`)
-const artifactExt = /\.(exe|dmg|zip|AppImage|deb|blockmap|snap)$/i
-let found = 0
-for (const releaseDir of releaseRoots) {
-  if (!existsSync(releaseDir)) continue
-  const files = readdirSync(releaseDir)
-    .map((name) => {
-      const full = path.join(releaseDir, name)
-      return { name, size: statSync(full).isFile() ? statSync(full).size : 0 }
-    })
-    .filter((f) => artifactExt.test(f.name))
-    .sort((a, b) => b.size - a.size)
-  for (const f of files) {
-    found += 1
-    console.log(`  ${path.relative(path.dirname(releaseDir), path.join(releaseDir, f.name))}  (${(f.size / 1024 / 1024).toFixed(1)} MB)`)
-  }
-}
-if (found === 0) console.log('  (none found)')
-
-console.log(`\n[build] done: ${jobs.map((j) => `${j.os}/${j.scenario}`).join(', ')}`)
+console.log(`\n[build] SUCCESS for ${target.id}`)
+console.log(`[build] Native bundle output: ${path.join(tauriAppRoot, 'src-tauri', 'target', 'release', 'bundle')}`)

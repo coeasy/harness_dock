@@ -1,99 +1,64 @@
 #!/usr/bin/env bash
-# ============================================================
-#  HarnessDock - one-click desktop build (macOS / Linux)
+# HarnessDock one-click local Tauri build for macOS/Linux.
 #
-#  Works on a BARE machine: no pre-installed Node / pnpm / dsh.
-#  If Node ^22.19 || >=24 is missing, a portable Node 22.19 is
-#  downloaded into .rundata/toolchain/ automatically.
-#
-#  Usage:
-#    ./build.sh                        # current OS, thin package
-#    ./build.sh mac full               # macOS full (offline bundled runtime)
-#    ./build.sh linux both             # thin + full (AppImage + deb)
-#    ./build.sh win full --skip-tests  # cross-build Windows artifacts
-#
-#  Scenarios:
-#    thin - small download, fetches pinned dsh via npx on first run
-#    full - bundles node + dsh runtime, works offline.
-#    Both scenarios emit standalone artifacts; Windows builds include
-#    a portable single-file exe (no installation required).
-#
-#  Notes:
-#    - mac artifacts require a macOS host, linux artifacts a Linux host.
-#    - Windows artifacts (NSIS/portable/zip) can build on any host.
-# ============================================================
+# Thin shim over scripts/build.mjs. System Node/pnpm/Rust are build tools only;
+# the packaged client runs the sealed Node+dsh Runtime embedded in the bundle.
+# Node resolution is deliberately local-first for developer builds:
+#   compatible system Node -> verified cached/downloaded portable Node.
+# pnpm follows the same policy: exact PATH version -> repository-local isolated
+# version under .local-tools. CI can force portable Node to prove bare-host fallback.
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# ---- Node version single source of truth: scripts/versions.json ----
-# node may not exist yet on a bare machine, so fall back to sed, then a default.
-NODE_VERSION=""
-NODE_VERSION="$(node -p "require(process.argv[1]).node" "$SCRIPT_DIR/versions.json" 2>/dev/null)" || true
-if [[ -z "$NODE_VERSION" ]]; then
-  NODE_VERSION="$(sed -n 's/.*"node"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/versions.json" | head -n1)" || true
-fi
-NODE_VERSION="${NODE_VERSION:-22.19.0}"
-TOOLCHAIN_DIR="$REPO_ROOT/.rundata/toolchain"
-
 cd "$REPO_ROOT"
 
-if [[ ! -f package.json ]]; then
-  echo "[build] ERROR: not a project root: $REPO_ROOT" >&2
-  exit 1
-fi
-
-# ------------------------------------------------------------
-# 1. Ensure a usable Node (>=22.19) - download portable if needed
-# ------------------------------------------------------------
-if node scripts/node-version-check.cjs 2>/dev/null; then
-  echo "[build] using system Node $(node -v)"
-else
-  case "$(uname -s)" in
-    Darwin) NODE_ARCH=$([[ "$(uname -m)" == "arm64" ]] && echo arm64 || echo x64)
-            NODE_DIST="node-v${NODE_VERSION}-darwin-${NODE_ARCH}"
-            NODE_EXT="tar.gz" ;;
-    Linux)  NODE_ARCH=$([[ "$(uname -m)" == "aarch64" ]] && echo arm64 || echo x64)
-            NODE_DIST="node-v${NODE_VERSION}-linux-${NODE_ARCH}"
-            NODE_EXT="tar.xz" ;;
-    *) echo "[build] ERROR: unsupported host for portable Node bootstrap" >&2; exit 1 ;;
-  esac
-
-  if [[ -x "$TOOLCHAIN_DIR/$NODE_DIST/bin/node" ]]; then
-    echo "[build] using bundled portable Node v$NODE_VERSION"
-    export PATH="$TOOLCHAIN_DIR/$NODE_DIST/bin:$PATH"
+node_ok=false
+if [[ "${HARNESSDOCK_FORCE_PORTABLE_NODE:-0}" == "1" ]]; then
+  echo "[build] HARNESSDOCK_FORCE_PORTABLE_NODE=1; bypassing system Node"
+elif command -v node >/dev/null 2>&1; then
+  if node scripts/node-version-check.cjs >/dev/null 2>&1; then
+    node_ok=true
+    echo "[build] Using compatible system Node $(node --version): $(command -v node)"
   else
-    echo "[build] Node >=22.19 not found. Downloading portable Node v$NODE_VERSION ..."
-    mkdir -p "$TOOLCHAIN_DIR"
-    curl -fL --progress-bar -o "$TOOLCHAIN_DIR/$NODE_DIST.$NODE_EXT" \
-      "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_DIST}.${NODE_EXT}"
-    tar -xf "$TOOLCHAIN_DIR/$NODE_DIST.$NODE_EXT" -C "$TOOLCHAIN_DIR"
-    export PATH="$TOOLCHAIN_DIR/$NODE_DIST/bin:$PATH"
-    node scripts/node-version-check.cjs
+    echo "[build] System Node $(node --version 2>/dev/null || printf 'unknown') is incompatible; falling back to verified portable Node"
   fi
-  echo "[build] portable Node $(node -v) ready"
+else
+  echo "[build] System Node not found; falling back to verified portable Node"
 fi
 
-# ------------------------------------------------------------
-# 2. Ensure pnpm + dependencies
-# ------------------------------------------------------------
-node scripts/bootstrap.mjs "$@"
+if [[ "$node_ok" != true ]]; then
+  command -v curl >/dev/null 2>&1 || { echo "[build] ERROR: curl is required to bootstrap portable Node" >&2; exit 1; }
+  command -v tar >/dev/null 2>&1 || { echo "[build] ERROR: tar is required to bootstrap portable Node" >&2; exit 1; }
+  bash scripts/bootstrap-node.sh
+  [[ -s .local-tools/node-home.txt ]] || { echo "[build] ERROR: bootstrap-node.sh did not write .local-tools/node-home.txt" >&2; exit 1; }
+  node_home="$(cat .local-tools/node-home.txt)"
+  [[ -x "$node_home/bin/node" ]] || { echo "[build] ERROR: portable Node missing: $node_home/bin/node" >&2; exit 1; }
+  export PATH="$node_home/bin:$PATH"
 
-# ------------------------------------------------------------
-# 3. Build
-# ------------------------------------------------------------
-OS_ARG="${1:-current}"
-SCENARIO="${2:-thin}"
-shift 2 2>/dev/null || true
-EXTRA_ARGS=("$@")
+  npm_command="$(command -v npm || true)"
+  [[ -n "$npm_command" ]] || { echo "[build] ERROR: portable npm is not available after activating $node_home/bin" >&2; exit 1; }
+  node scripts/verify-build-toolchain.mjs --node-home "$node_home" --npm-command "$npm_command"
+  echo "[build] Using verified portable Node $(node --version): $(command -v node)"
+fi
+
+node scripts/node-version-check.cjs
+node scripts/bootstrap.mjs
+
+if [[ -s .local-tools/pnpm-bin.txt ]]; then
+  pnpm_bin="$(cat .local-tools/pnpm-bin.txt)"
+  [[ -x "$pnpm_bin/pnpm" ]] || { echo "[build] ERROR: repository-local pnpm missing: $pnpm_bin/pnpm" >&2; exit 1; }
+  export PATH="$pnpm_bin:$PATH"
+
+  pnpm_command="$(command -v pnpm || true)"
+  [[ -n "$pnpm_command" ]] || { echo "[build] ERROR: repository-local pnpm is not available after activating $pnpm_bin" >&2; exit 1; }
+  node scripts/verify-build-toolchain.mjs --pnpm-bin "$pnpm_bin" --pnpm-command "$pnpm_command"
+  echo "[build] Using repository-local pnpm $(pnpm --version): $(command -v pnpm)"
+fi
+
+node scripts/build.mjs --skip-install "$@"
 
 echo
-echo "=== HarnessDock desktop build ==="
-echo "os=$OS_ARG scenario=$SCENARIO ${EXTRA_ARGS[*]:-}"
-echo
-
-# bootstrap already ensured dependencies; skip a second pnpm install
-node scripts/build.mjs --os "$OS_ARG" --scenario "$SCENARIO" "${EXTRA_ARGS[@]}" --skip-install
-
-echo
-echo "[build] Artifacts are in apps/desktop/release/thin and apps/desktop/release/full"
+echo "[build] SUCCESS"
+echo "[build] Native bundle output: $REPO_ROOT/apps/tauri/src-tauri/target/release/bundle"

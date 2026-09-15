@@ -42,14 +42,14 @@ describe('drainOutput', () => {
     expect(logs.join('').length).toBeGreaterThan(100 * 1024)
   })
 
-  it('truncates an overlong chunk to 2000 characters', async () => {
+  it('splits an overlong chunk without losing its nested diagnostics', async () => {
     const { child, stdout } = fakeChild()
     const logs: string[] = []
     drainOutput(child, (message) => logs.push(message))
     stdout.write(Buffer.alloc(5000, 0x62))
-    await until(() => logs.length === 1)
-    expect(logs[0]!.startsWith('[dsh] ')).toBe(true)
-    expect(logs[0]!.length).toBe(2000 + '[dsh] '.length)
+    await until(() => logs.length === 3)
+    expect(logs.every((line) => line.startsWith('[dsh] '))).toBe(true)
+    expect(logs.map((line) => line.slice('[dsh] '.length)).join('')).toHaveLength(5000)
   })
 
   it('attaches an empty consumer when no log is provided', () => {

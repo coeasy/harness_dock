@@ -1,0 +1,36 @@
+[package]
+name = "harnessdock-tauri"
+version = "0.1.5"
+description = "HarnessDock Tauri host for desktop, Android and iOS"
+authors = ["HarnessDock contributors"]
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+name = "harnessdock_tauri"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.5", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = "2.5"
+# Direct tokio dependency: timers keep lifecycle/watchdog waits off blocking
+# workers, while oneshot channels let Host Kernel callers await replies without
+# pinning one blocking-pool thread per queued command.
+tokio = { version = "1", features = ["sync", "time"] }
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "=2.4.4" }
+tauri-plugin-updater = { version = "=2.10.1", default-features = false, features = ["rustls-tls"] }
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

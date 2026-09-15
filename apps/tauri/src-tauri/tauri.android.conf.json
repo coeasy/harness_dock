@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HarnessDock",
+        "visible": true
+      }
+    ]
+  },
+  "bundle": {
+    "android": { "minSdkVersion": 24 },
+    "resources": {}
+  }
+}

@@ -11,8 +11,8 @@ import { readOriginFile, type Origin } from '@dsh/docs-sync'
 import { backupOrigin, readPreviousOrigin } from './rollback.ts'
 
 /**
- * Shared host bootstrap orchestration (used by both the Electron desktop shell
- * and the VS Code / Cursor extension):
+ * Shared host bootstrap orchestration used by the Tauri desktop host and the
+ * VS Code / Cursor extension:
  *
  *   read origin → resolve runtime mode → backup last-known-good → construct
  *   DshRuntime → start (with rollback to last-known-good on failure) → ready.
@@ -33,16 +33,22 @@ export interface BootstrapOptions {
   versionOverride?: string
   /** path to the embedded-client plugin (cordis patch target) */
   pluginPath: string
+  /** optional host-provided bridge for legacy browser client module imports */
+  compatibilityPath?: string
+  /** optional independent dsh shell plugin path for compatible hosts */
+  shellPluginPath?: string
   /** whether we are running inside a packaged app */
   packaged: boolean
   /** bundled runtime root (resources/dsh-runtime) when present */
   bundledRoot?: string
-  /** host user-data dir; used for previous-origin backup + runtime cache */
+  /** host user-data dir; used for rollback, runtime cache and plugin quarantine */
   userDataDir?: string
   /** override for the runtime download cache dir (defaults to userDataDir/runtime-cache) */
   downloadCacheDir?: string
   /** override for the previous-origin backup path (defaults to userDataDir/previous-origin.json) */
   previousOriginPath?: string
+  /** override for host-owned plugin quarantine state */
+  pluginQuarantinePath?: string
   readyTimeoutMs?: number
   stopTimeoutMs?: number
   env?: NodeJS.ProcessEnv
@@ -87,6 +93,9 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
   const downloadCacheDir =
     options.downloadCacheDir ??
     (options.userDataDir ? path.join(options.userDataDir, 'runtime-cache') : undefined)
+  const pluginQuarantinePath =
+    options.pluginQuarantinePath ??
+    (options.userDataDir ? path.join(options.userDataDir, 'plugin-quarantine.json') : undefined)
 
   options.onBeforeStart?.({ origin, mode, bundledAvailable })
 
@@ -96,9 +105,12 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
       : new DshRuntime({
           origin: o,
           pluginPath: options.pluginPath,
+          compatibilityPath: options.compatibilityPath,
+          shellPluginPath: options.shellPluginPath,
           packaged: options.packaged,
           bundledRoot: options.bundledRoot,
           downloadCacheDir,
+          pluginQuarantinePath,
           readyTimeoutMs: options.readyTimeoutMs,
           stopTimeoutMs: options.stopTimeoutMs,
           log,
@@ -111,14 +123,15 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
   let rolledBack: { from: string; to: string } | null = null
   try {
     ready = await runtime.start()
-    // Record last-known-good AFTER a successful start: previous-origin.json must
-    // always hold the version that actually ran, otherwise a failing new version
-    // would overwrite the good one before it even boots (the rollback would find
-    // the failing version and never fire).
     if (previousOriginPath) {
       await backupOrigin(options.originPath, previousOriginPath, log)
     }
   } catch (startError) {
+    // A failed DshRuntime can still own a temporary work directory or a child
+    // process created just before readiness failed. Always tear it down before
+    // trying the last-known-good version so rollback cannot leak processes or
+    // accumulate stale temp trees.
+    await runtime.stop().catch(() => undefined)
     const previous =
       options.enableRollback === false
         ? null
@@ -134,10 +147,10 @@ export async function bootstrapRuntime(options: BootstrapOptions): Promise<Boots
         ready = await fallbackRuntime.start()
         runtime = fallbackRuntime
         rolledBack = { from: origin.dshVersion, to: previous.dshVersion }
-        // previous-origin.json already holds the fallback (last-known-good) version
         log?.(`bootstrap: rolled back to last-known-good dsh ${previous.dshVersion}`)
         options.onRollback?.(rolledBack)
       } catch (fallbackError) {
+        await fallbackRuntime.stop().catch(() => undefined)
         log?.(
           `bootstrap: rollback also failed: ${
             fallbackError instanceof Error ? fallbackError.message : String(fallbackError)

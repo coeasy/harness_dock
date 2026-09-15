@@ -1,6 +1,8 @@
+import { pathToFileURL } from 'node:url'
+
 export function buildLaunchArgs(input: { patchFile: string }): string[] {
-  // `--patch` is a top-level dsh option; the `web` subcommand itself rejects it
-  // (`web takes none of parent --patch`), so boot via `--profile web` instead.
+  // --patch is a top-level dsh option; the web subcommand itself rejects it
+  // (web takes none of parent --patch), so boot via --profile web instead.
   return [
     '--profile',
     'web',
@@ -14,8 +16,34 @@ export function buildLaunchArgs(input: { patchFile: string }): string[] {
   ]
 }
 
-export function renderEmbeddedPatch(pluginAbsolutePath: string): string {
-  // Windows 绝对路径在插件加载时会被当作 'd:' 协议，必须输出 file:// URL 形式
-  const posix = pluginAbsolutePath.replace(/\\/g, '/')
-  return `- insert:\n    - id: embedded-client\n      name: 'file:///${posix}'\n`
+export function renderEmbeddedPatch(
+  pluginAbsolutePath: string,
+  compatibilityAbsolutePath?: string,
+  shellPluginAbsolutePath?: string,
+): string {
+  // The include loader imports the entry as a URL. Windows paths must be
+  // percent-encoded (especially spaces in the default Program Files install
+  // directory), otherwise Node parses the URL but cannot import the module.
+  const pluginUrl = toFileUrl(pluginAbsolutePath).replaceAll("'", "''")
+  const compatibility = compatibilityAbsolutePath
+    ? `    - id: harnessdock-client-runtime-compat\n      name: '${toFileUrl(compatibilityAbsolutePath).replaceAll("'", "''")}'\n`
+    : ''
+  const shell = shellPluginAbsolutePath
+    ? `    - id: harness-shell\n      name: '${toFileUrl(shellPluginAbsolutePath).replaceAll("'", "''")}'\n`
+    : ''
+  return `- insert:\n    - id: embedded-client\n      name: '${pluginUrl}'\n${compatibility}${shell}`
+}
+
+function toFileUrl(filePath: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) {
+    const normalized = filePath.replaceAll('\\', '/')
+    const segments = normalized.split('/')
+    const encoded = segments
+      .map((segment, index) =>
+        index === 0 && /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment),
+      )
+      .join('/')
+    return `file:///${encoded}`
+  }
+  return pathToFileURL(filePath).href
 }

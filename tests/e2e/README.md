@@ -1,82 +1,51 @@
-# E2E smoke tests (Electron + mock dsh)
+# HarnessDock e2e smoke tests
 
-Playwright `_electron` smoke tests for the HarnessDock desktop shell (F1 of
-`docs/upgrade-refactor-plan.md`). They boot the real Electron shell against a
-**mock dsh** (a tiny HTTP server) so the full "start → ready → window → quit"
-chain is verified without ever downloading or running a real dsh runtime.
+Playwright 端到端冒烟测试，验证桌面客户端的核心启动路径。
 
-## Run
+## 背景
 
-```bash
-pnpm e2e            # from the repo root (recommended)
-# or
-pnpm --filter ./tests/e2e test
+Harness 页面运行在系统 WebView（Windows: WebView2 / macOS: WKWebView / Linux:
+WebKitGTK）中，不是普通 Chromium tab。Playwright 通过 WebView 的
+**Chrome DevTools Protocol (CDP)** 端点访问它。HarnessDock 在
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`（或平台等效环境变量）携带
+`--remote-debugging-port` 时开启 CDP。
+
+## 已验证的症状（回归保护）
+
+1. Shell bridge 注入成功（`window.__DSH_SHELL_BRIDGE__.apiVersion === 2`）
+2. 顶栏满宽（`.bar` `left === 0` 且 `width === innerWidth`，无左右空白）
+3. 设置面板不卡"连接中"，且页面无致命 console/exception 错误
+
+这三项分别对应历史上的三个回归：
+Chromium 113 WebView2 缺 `AbortSignal.any`/`Promise.withResolvers` 导致的
+连接卡死、shell 误改 `web/` 而非 `src/web/` 导致的左右空白。
+
+## 运行
+
+必须已有构建产物。PowerShell 示例：
+
+```powershell
+$env:HARNESS_DOCK_E2E_BIN = "apps\tauri\src-tauri\target\debug\harnessdock-tauri.exe"
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9333 --remote-allow-origins=*"
+pnpm --filter @dsh/e2e-tests e2e
 ```
 
-`pretest` runs `pnpm --filter @dsh/desktop bundle` first so the shell is always
-tested against a fresh `apps/desktop/dist/main.js`.
+环境变量：
 
-Requirements (all already present in this repo):
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `HARNESS_DOCK_E2E_BIN` | `target/debug/harnessdock-tauri.exe` | 待测客户端二进制；未显式设置时若默认路径不存在则跳过 |
+| `HARNESS_DOCK_E2E_CDP_PORT` | `9333` | CDP 端口 |
+| `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | 自动填充 | 已设置时沿用，否则注入 `--remote-debugging-port` |
 
-- Electron devDependency of `apps/desktop` (`node_modules/.pnpm/electron@…/…/electron.exe`),
-  resolved via `require('electron')` from the desktop package.
-- `@playwright/test` (workspace, `^1.55.0`, resolved to the same version as
-  `tests/parity`). No browser download is needed: Electron uses its own binary.
+## CI 集成
 
-## How the mock dsh works
+建议在 `windows-packaged-startup.yml` 或独立 workflow 中：
 
-`DshRuntime.start()` (from `@dsh/client-runtime`) resolves `DSH_RUNTIME=local`
-to the executable in `DSH_BIN`, then waits for either `dsh web: http://127.0.0.1:<port>`
-on stdout or a ready.json at `DSH_EMBEDDED_READY_FILE`.
+1. `pnpm build:desktop` 产出调试/打包二进制
+2. 设置上述两个环境变量
+3. 先启动客户端 → 等待 CDP 端口 → 再运行本套件
+4. `test.beforeAll` 会自动拉起客户端并等待 CDP；`afterAll` 关闭
 
-- `tests/e2e/mock-dsh.mjs` — plain Node ESM script: listens on
-  `127.0.0.1:<random port>`, prints `dsh web: …` to stdout, writes the ready
-  file, serves a tiny HTML page, exposes `GET /__mock/status`, keeps the event
-  loop alive, and shuts down on SIGTERM/SIGINT.
-- The harness writes a `mock-dsh.cmd` wrapper (`@node "<abs>\mock-dsh.mjs"`) and
-  points `DSH_BIN` at it. On Windows, `client-runtime` routes `.cmd` through
-  `cmd.exe` exactly like it would run a real dsh bin.
-
-## Environment / user-data isolation
-
-Overriding `APPDATA`/`HOME` **breaks Electron on Windows** — `app.getPath('userData')`
-throws ("Failed to get 'userData' path"), which makes `requestSingleInstanceLock()`
-fail and the app quit at boot. Instead the harness:
-
-- writes a per-test `package.json` (`name: dsh-e2e-<uuid>`) in a temp app dir,
-- launches `electron <app-dir>`, so userData resolves to the real
-  `%APPDATA%/dsh-e2e-<uuid>` (unique per test, removed on teardown).
-- Passing the **same app name** to two launches makes them share userData — this
-  is how the single-instance test works.
-
-Other env: `DSH_RUNTIME=local`, `DSH_BIN=<tmp>/mock-dsh.cmd`,
-`DSH_CUSTOM_TITLEBAR=0`, `DSH_TRAY=0`, `DSH_MOCK_PID_FILE=<tmp>/mock.pid`.
-
-## Test entry shim
-
-`apps/desktop/src/e2e-entry.mjs` is a **test-only** main-process entry (never
-shipped). The official `dist/main.js` is an esbuild ESM bundle that inlines the
-CommonJS `electron-updater` → `fs-extra` → `graceful-fs` chain; esbuild leaves
-those `require('fs')`-style calls as dynamic requires, which throw under
-Electron's ESM main process (no `require`). The entry installs a
-`globalThis.require` (via `node:module` `createRequire`) before importing the
-official bundle, which stays byte-for-byte the artifact of `pnpm bundle`.
-
-## Tests
-
-| File | Scenario | Notes |
-| --- | --- | --- |
-| `cold-start.spec.ts` | boot → main window loads the mock UI | asserts URL is the mock origin, title, rendered body, main process alive, mock status probe |
-| `crash-recovery.spec.ts` | renderer crash → auto-reload | crashes via `forcefullyCrashRenderer()`, asserts main process + dsh child survive and the mock receives a second HTML request (the auto-reload) |
-| `shutdown.spec.ts` | graceful quit → no orphans | drives `app.quit()` (before-quit → shutdown ladder → `app.exit(0)`), asserts exit code 0, mock HTTP down, mock pid dead, and zero processes whose command line contains `mock-dsh` |
-| `single-instance.spec.ts` | second launch shares userData → exits | spawns a second raw Electron with the same app name; it must exit 0 quickly while the first keeps its window and dsh |
-
-## Known limitations / edge cases
-
-- **`app.evaluate()` after a renderer crash** is unreliable with Playwright +
-  Electron (`Cannot find context with specified id`), so the crash test avoids it
-  and asserts recovery via process/dsh/mock liveness + the mock's request counter.
-- Serial execution only (`workers: 1`, `retries: 0`): each app owns its mock +
-  userData, and the single-instance lock is global per app name.
-- Windows-specific by design (the shell targets Windows; CIM process queries are
-  used for orphan checks).
+注意：测试是串行的（`workers: 1`），且每次只允许一个客户端实例
+（单实例锁）。若已有 HarnessDock 实例在运行，需要先关闭。

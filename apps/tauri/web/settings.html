@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" />
+  <title>插件诊断 · HarnessDock</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./settings.css" />
+</head>
+<body class="settings-page">
+  <main class="shell">
+    <section class="hero diagnostics-hero">
+      <div class="hero-heading">
+        <div>
+          <div class="brand">HarnessDock / DIAGNOSTICS</div>
+          <h1>诊断中心</h1>
+        </div>
+        <span id="overall-state" class="state-dot" data-state="checking">检查中</span>
+      </div>
+      <p class="muted">确认 Runtime 与 Harness Web 健康状态，快速定位插件问题并进入救援模式。</p>
+      <div class="hero-actions">
+        <button id="settings-close" class="secondary">关闭</button>
+        <button id="settings-quit" class="danger">退出客户端</button>
+      </div>
+    </section>
+
+    <section class="card overview-card" aria-label="当前状态">
+      <div class="overview-grid">
+        <div class="overview-item"><span class="overview-label">Harness Web</span><strong id="web-state">检查中</strong></div>
+        <div class="overview-item"><span class="overview-label">Runtime</span><strong id="runtime-state">checking</strong></div>
+        <div class="overview-item"><span class="overview-label">dsh 版本</span><strong id="runtime-version">读取中</strong></div>
+      </div>
+      <p id="web-detail" class="status">正在读取启动策略…</p>
+    </section>
+
+    <section class="card action-card">
+      <div class="card-heading">
+        <div>
+          <h2>dsh 启动配置</h2>
+          <p>沿用官方 <code>dsh --profile</code> 语义。运行时仍使用 HarnessDock 内置 sealed dsh，不允许设置替换可执行文件。</p>
+        </div>
+        <span class="badge" id="profile-badge">web / auto · 已保存</span>
+      </div>
+      <label for="runtime-profile">Profile</label>
+      <input id="runtime-profile" list="runtime-profile-presets" autocomplete="off" spellcheck="false" value="web" />
+      <datalist id="runtime-profile-presets">
+        <option value="web"></option>
+        <option value="acp"></option>
+        <option value="headless"></option>
+        <option value="sdk"></option>
+        <option value="sdk-minimal"></option>
+      </datalist>
+      <p class="field-help">可填写自定义 profile 名称；目录对应 <code>$DSH_HOME/profiles/&lt;name&gt;</code>。HarnessDock 桌面主 Surface 还要求该 profile 最终提供 <code>webServer + connection</code>，以通过受管 Web-ready 检查。</p>
+
+      <label for="runtime-dsh-home">DSH_HOME</label>
+      <input id="runtime-dsh-home" autocomplete="off" spellcheck="false" placeholder="留空：使用系统 DSH_HOME 或 ~/.dsh" />
+      <p class="field-help">救援模式会优先保留这个配置根目录和基础设置，只临时禁用其中识别到的第三方/用户插件；不会修改插件文件。</p>
+
+      <label for="runtime-startup-policy">启动策略</label>
+      <select id="runtime-startup-policy">
+        <option value="auto">Auto · profile → 自动插件恢复 → Rescue Web</option>
+        <option value="direct">Direct · 仅启动所选 profile，失败即报错</option>
+        <option value="safe">Rescue Web · 正常 web + 隔离全部第三方插件</option>
+      </select>
+      <p class="field-help">Rescue Web 固定启动官方 web 主应用，保留核心 Runtime/Connection/Session/UI，只隔离第三方和用户插件；配置树无法读取时才退到临时私有 DSH_HOME。</p>
+      <div class="actions">
+        <button id="runtime-settings-save" class="primary">保存启动配置</button>
+      </div>
+      <p id="runtime-settings-detail" class="status">这是下次启动配置；当前 Runtime generation 不会被热切换。</p>
+    </section>
+
+    <section class="card action-card" aria-label="插件救援与诊断">
+      <div class="card-heading">
+        <div>
+          <h2>插件救援</h2>
+          <p>救援模式会正常启动 Harness Web，同时阻止第三方插件进入当前 Runtime generation。</p>
+        </div>
+        <span class="badge" id="plugin-mode-badge">normal</span>
+      </div>
+      <p id="plugin-summary" class="status">正在读取插件隔离状态…</p>
+      <div class="actions">
+        <button id="rescue-start" class="primary">救援模式（隔离第三方插件）</button>
+        <button id="plugins-restore" class="secondary">恢复全部插件并正常重启</button>
+        <button id="runtime-refresh" class="secondary">刷新状态</button>
+      </div>
+      <details class="technical-details" open>
+        <summary>疑似故障插件</summary>
+        <pre id="suspected-plugin-list" class="status">暂无明确故障归因</pre>
+      </details>
+      <details class="technical-details">
+        <summary>当前已隔离插件</summary>
+        <pre id="isolated-plugin-list" class="status">无</pre>
+      </details>
+      <details class="technical-details">
+        <summary>查看 Runtime 技术诊断</summary>
+        <p id="runtime-detail" class="status"></p>
+      </details>
+    </section>
+
+    <section class="card action-card">
+      <div class="card-heading">
+        <div><h2>版本与更新</h2><p>只检查已发布版本；安装包仍由用户从 GitHub Release 手动下载。</p></div>
+        <span class="badge">manual</span>
+      </div>
+      <div class="actions"><button id="update-install" class="secondary">检查更新</button></div>
+      <p id="update-detail" class="status">点击后检查可用 Release。</p>
+    </section>
+
+    <section class="card compact-card">
+      <div class="card-heading">
+        <div><h2>使用提示</h2><p>救援模式不会删除插件。确认 Harness Web 正常后，可修复/升级疑似故障插件，再点击“恢复全部插件并正常重启”进行验证。</p></div>
+        <span class="badge">on demand</span>
+      </div>
+    </section>
+    <footer>HarnessDock v0.1.5 · Plugin Diagnostics</footer>
+  </main>
+  <script src="./settings.js" defer></script>
+</body>
+</html>

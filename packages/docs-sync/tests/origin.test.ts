@@ -22,8 +22,8 @@ describe('buildOrigin', () => {
 })
 
 describe('diffOrigin', () => {
-  it('reports when a newer exact version is available', () => {
-    const current = buildOrigin({
+  const base = () =>
+    buildOrigin({
       dshVersion: '0.1.1-rc.1',
       gitTag: 'dsh-v0.1.1-rc.1',
       gitCommit: 'aaa',
@@ -33,9 +33,20 @@ describe('diffOrigin', () => {
       clientVersion: '0.1.0',
       now: '2026-08-21T00:00:00.000Z',
     })
+
+  it('reports when a newer exact version is available', () => {
+    const current = base()
     const next = { ...current, dshVersion: '0.1.1-rc.2', gitTag: 'dsh-v0.1.1-rc.2' }
     const diff = diffOrigin(current, next)
     expect(diff.changed).toBe(true)
     expect(diff.fields).toContain('dshVersion')
+  })
+
+  it('reports clientVersion drift even when upstream provenance is unchanged', () => {
+    const current = base()
+    const next = { ...current, clientVersion: '0.1.1' }
+    const diff = diffOrigin(current, next)
+    expect(diff.changed).toBe(true)
+    expect(diff.fields).toContain('clientVersion')
   })
 })

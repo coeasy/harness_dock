@@ -4,13 +4,21 @@ export interface GuideCapability {
   source: string
 }
 
+export interface RuntimeBundleSpec {
+  url: string
+}
+
 export interface Origin {
   dshVersion: string
   gitTag: string
   gitCommit: string
   npmPackage: '@deepseek-ai/dsh'
+  /** Empty when the pinned upstream prerelease has not been published to npm. */
   npmIntegrity: string
+  /** Empty when runtime delivery uses HarnessDock source-built runtime bundles. */
   npmTarball: string
+  /** Platform runtime fallback used when the exact upstream dsh version is GitHub-only. */
+  runtimeBundles?: Record<string, RuntimeBundleSpec>
   docsHash: string
   syncedAt: string
   clientVersion: string

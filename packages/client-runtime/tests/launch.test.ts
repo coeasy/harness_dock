@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildLaunchArgs, renderEmbeddedPatch } from '../src/launch.ts'
 
@@ -22,10 +23,38 @@ describe('buildLaunchArgs', () => {
 })
 
 describe('renderEmbeddedPatch', () => {
-  it('inserts the plugin by absolute path', () => {
-    const yaml = renderEmbeddedPatch('D:/work/plugin-embedded-client/src/index.ts')
+  it('renders an encoded file URL for Windows install paths', () => {
+    const yaml = renderEmbeddedPatch('C:\\Program Files\\HarnessDock\\resources\\plugin-embedded-client\\index.js')
     expect(yaml).toContain('id: embedded-client')
-    expect(yaml).toContain('D:/work/plugin-embedded-client/src/index.ts')
+    expect(yaml).toContain('file:///C:/Program%20Files/HarnessDock/resources/plugin-embedded-client/index.js')
     expect(yaml).toContain('- insert:')
+  })
+
+  it('keeps ordinary POSIX paths importable', () => {
+    const yaml = renderEmbeddedPatch('/opt/harnessdock/plugin-embedded-client/index.js')
+    expect(yaml).toContain(pathToFileURL('/opt/harnessdock/plugin-embedded-client/index.js').href)
+  })
+
+  it('adds the legacy client-runtime compatibility row when provided', () => {
+    const yaml = renderEmbeddedPatch(
+      '/opt/harnessdock/plugin-embedded-client/index.js',
+      '/opt/harnessdock/dsh-client-runtime-compat/index.js',
+    )
+    expect(yaml).toContain('id: harnessdock-client-runtime-compat')
+    expect(yaml).toContain(
+      pathToFileURL('/opt/harnessdock/dsh-client-runtime-compat/index.js').href,
+    )
+  })
+
+  it('adds the independent Harness Shell row when provided', () => {
+    const yaml = renderEmbeddedPatch(
+      '/opt/harnessdock/plugin-embedded-client/index.js',
+      undefined,
+      '/opt/harnessdock/plugin-harness-shell/lib/index.js',
+    )
+    expect(yaml).toContain('id: harness-shell')
+    expect(yaml).toContain(
+      pathToFileURL('/opt/harnessdock/plugin-harness-shell/lib/index.js').href,
+    )
   })
 })
