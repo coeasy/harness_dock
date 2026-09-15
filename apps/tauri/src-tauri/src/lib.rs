@@ -68,6 +68,8 @@ mod startup_integration;
 #[cfg(not(mobile))]
 mod startup_orchestrator;
 #[cfg(not(mobile))]
+mod startup_runtime_binding;
+#[cfg(not(mobile))]
 mod startup_trace;
 #[cfg(not(mobile))]
 mod state;
