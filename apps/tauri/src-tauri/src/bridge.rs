@@ -1,10 +1,15 @@
-//! Tauri transport adapter for the HarnessDock Host Kernel.
-//! Lifecycle diagnostics commands are exposed through the same trusted IPC
-//! boundary as existing desktop commands.
+//! Tauri IPC bridge boundary for HarnessDock.
+//!
+//! v1 rebuild keeps transport ownership in one place and delegates lifecycle
+//! diagnostics to the dedicated diagnostics IPC module. Runtime/window/update
+//! commands are added back through the same boundary in follow-up migrations.
 
-#[allow(dead_code)]
-const _LIFECYCLE_DIAGNOSTICS_ENABLED: bool = true;
-
-// Existing bridge implementation remains the authority boundary.
-// Diagnostics command registration is appended to the handler macro in the
-// migration commit after validating command ownership.
+#[macro_export]
+macro_rules! handler {
+    () => {
+        tauri::generate_handler![
+            $crate::diagnostic_ipc::diagnostics_snapshot,
+            $crate::diagnostic_ipc::diagnostics_export
+        ]
+    };
+}
