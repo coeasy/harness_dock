@@ -90,6 +90,8 @@ export async function bootFlow(): Promise<void> {
       }
     },
     onRollback: (info) => {
+      appState.lifecycle.recovery_attempts += 1
+      appState.lifecycle.last_recovery_action = `rollback:${info.to}`
       void bootLog(`boot: rolled back to last-known-good dsh ${info.to}`)
       try {
         new Notification({
@@ -107,6 +109,7 @@ export async function bootFlow(): Promise<void> {
   appState.dshVersion = result.ready.dshVersion
   appState.mode = result.mode
   appState.bundledAvailable = result.bundledAvailable
+  appState.lifecycle.startup_path = result.mode
   await bootLog(`dsh web ready at ${result.ready.url} (pid ${result.ready.pid})`)
   updateSplash(t('splash.loadingInterface'))
   await createWindow(result.ready.url)

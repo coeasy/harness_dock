@@ -38,12 +38,16 @@ let quitting = false
  * sequence is capped at 15s; afterwards app.exit() runs unconditionally.
  */
 export function beginShutdown(event?: Electron.Event): void {
-  const runtime = appState.runtime
-  if (!runtime) return
   if (quitting) {
     // Second before-quit round: let the OS take the window down.
     return
   }
+  const runtime = appState.runtime
+  if (!runtime) {
+    appState.lifecycle.shutdown_action = 'no-runtime'
+    return
+  }
+  appState.lifecycle.shutdown_action = 'wait'
   if (event) event.preventDefault()
   quitting = true
   appState.runtime = undefined
@@ -53,12 +57,14 @@ export function beginShutdown(event?: Electron.Event): void {
   scheduleClosingHint()
 
   const hardExit = (reason: string) => {
+    if (reason === 'clean exit') appState.lifecycle.shutdown_action = 'clean-exit'
     void bootLog(`quit: ${reason}; calling app.exit(0)`)
     app.exit(0)
   }
   // Watchdog = the final guarantee. Even if stop() itself never settles,
   // force-kill the recorded dsh tree before leaving.
   const watchdog = setTimeout(() => {
+    appState.lifecycle.shutdown_action = 'force-kill-watchdog'
     void forceKillTree(appState.dshPid).finally(() => hardExit('shutdown watchdog expired (15s)'))
   }, 15_000)
   watchdog.unref()
@@ -69,6 +75,7 @@ export function beginShutdown(event?: Electron.Event): void {
       clearTimeout(watchdog)
       const outcome = runtime.lastStopOutcome
       if (!outcome?.clean) {
+        appState.lifecycle.shutdown_action = 'force-kill'
         const survivors = outcome?.ladder?.survivors?.join(', ') ?? 'unknown'
         await bootLog(`quit: stop() left survivors (${survivors}); force-killing tree ${appState.dshPid}`)
         await forceKillTree(appState.dshPid)
@@ -79,6 +86,7 @@ export function beginShutdown(event?: Electron.Event): void {
     })
     .catch(async (error) => {
       clearTimeout(watchdog)
+      appState.lifecycle.shutdown_action = 'force-kill-after-error'
       await forceKillTree(appState.dshPid)
       hardExit(`stop() threw: ${error instanceof Error ? error.message : String(error)}`)
     })

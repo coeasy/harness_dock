@@ -11,7 +11,8 @@
  *   2. Bundle the Electron main/preload (pnpm bundle, at apps/desktop).
  *   3. Run electron-builder with the scenario config and OS targets.
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -70,6 +71,58 @@ const TARGETS = {
 }
 const config = scenario === 'full' ? 'electron-builder.full.yml' : 'electron-builder.yml'
 
+/**
+ * NSIS still resolves a few app-builder-lib template includes through an
+ * absolute path. On Windows those paths fail at the legacy MAX_PATH boundary
+ * when the checkout itself is nested deeply (common in CI/workspace folders).
+ * Map the repository to a short drive for the electron-builder subprocess so
+ * its generated NSIS script stays below that boundary. The mapping is scoped
+ * to this process and is always removed in the caller's finally block.
+ */
+function prepareBuilderRoot() {
+  if (process.platform !== 'win32' || repoRoot.length + 160 <= 240) {
+    return { desktopRoot, cleanup: () => undefined }
+  }
+
+  const used = new Set(
+    String(spawnSync('subst.exe', [], { encoding: 'utf8' }).stdout ?? '')
+      .split(/\r?\n/)
+      .map((line) => /^([A-Z]):\\/i.exec(line)?.[1]?.toUpperCase())
+      .filter(Boolean),
+  )
+  const drive = ['X', 'Y', 'Z', 'W', 'V', 'U'].find((candidate) => !used.has(candidate))
+  if (!drive) {
+    console.warn('[pack] no free drive letter for short-path build; using the checkout path')
+    return { desktopRoot, cleanup: () => undefined }
+  }
+
+  const mapped = `${drive}:`
+  const result = spawnSync('subst.exe', [mapped, repoRoot], { stdio: 'ignore' })
+  if (result.status !== 0) {
+    console.warn(`[pack] failed to map ${mapped} for short-path build; using the checkout path`)
+    return { desktopRoot, cleanup: () => undefined }
+  }
+
+  console.log(`[pack] deep checkout detected; building from ${mapped} to keep NSIS paths short`)
+  const rootBuilderTemplate = path.join(
+    `${mapped}\\`,
+    'node_modules',
+    'app-builder-lib',
+    'templates',
+    'nsis',
+    'include',
+    'allowOnlyOneInstallerInstance.nsh',
+  )
+  return {
+    desktopRoot: path.join(`${mapped}\\`, 'apps', 'desktop'),
+    repoRoot: `${mapped}\\`,
+    useRootBuilder: existsSync(rootBuilderTemplate),
+    cleanup: () => {
+      spawnSync('subst.exe', [mapped, '/D'], { stdio: 'ignore' })
+    },
+  }
+}
+
 // Auto-update feed (Phase A): bake app-update.yml only when a GitHub upstream
 // is configured at build time. electron-builder throws on undefined ${env.*}
 // macros, so we inject via CLI overrides instead of the yml. DSH_PACK_OUTPUT
@@ -115,11 +168,28 @@ try {
   // 2. bundle the Electron main/preload
   await run('pnpm', ['bundle'], desktopRoot)
   // 3. electron-builder with scenario config + OS targets
-  await run(
-    'pnpm',
-    ['exec', 'electron-builder', ...TARGETS[os], '--config', config, '--publish', 'never', ...extraArgs],
-    desktopRoot,
-  )
+  if (
+    process.platform === 'win32' &&
+    repoRoot.length + 160 > 240 &&
+    !existsSync(path.join(repoRoot, 'node_modules', 'app-builder-lib', 'templates', 'nsis', 'include', 'allowOnlyOneInstallerInstance.nsh'))
+  ) {
+    await run('pnpm', ['install', '--frozen-lockfile', '--config.node-linker=hoisted'], repoRoot)
+  }
+  const builderRoot = prepareBuilderRoot()
+  try {
+    const builderCwd = builderRoot.desktopRoot
+    const builderCommand = builderRoot.useRootBuilder ? 'node' : 'pnpm'
+    const builderArgs = builderRoot.useRootBuilder
+      ? [path.join(builderRoot.repoRoot, 'node_modules', 'electron-builder', 'cli.js'), ...TARGETS[os]]
+      : ['exec', 'electron-builder', ...TARGETS[os]]
+    await run(
+      builderCommand,
+      [...builderArgs, '--config', config, '--publish', 'never', ...extraArgs],
+      builderCwd,
+    )
+  } finally {
+    builderRoot.cleanup()
+  }
   console.log(`[pack] done: os=${os} scenario=${scenario}`)
 } catch (error) {
   console.error(`[pack] FAILED: ${error instanceof Error ? error.message : String(error)}`)

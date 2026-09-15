@@ -18,6 +18,24 @@ import { diagnosticsPreloadPath } from '../paths.ts'
 
 export type DiagnosticsSection = 'info' | 'versions' | 'log'
 
+/** Stable lifecycle facts exported with diagnostic reports. */
+export interface RuntimeLifecycleDiagnostics {
+  startup_path: string | null
+  recovery_attempts: number
+  last_recovery_action: string | null
+  shutdown_action: string | null
+}
+
+/** Versioned, machine-readable report written into an exported diagnostics bundle. */
+export interface DiagnosticReportV2 {
+  report_version: 2
+  app_version: string
+  dsh_version: string
+  mode: string
+  lifecycle: RuntimeLifecycleDiagnostics
+  generated_at: string
+}
+
 export interface DiagnosticsInfo {
   dshVersion: string
   pinnedVersion: string
@@ -32,6 +50,19 @@ export interface DiagnosticsInfo {
   platform: NodeJS.Platform
   electron: string
   generatedAt: string
+  appVersion: string
+  lifecycle: RuntimeLifecycleDiagnostics
+}
+
+export function toDiagnosticReport(info: DiagnosticsInfo): DiagnosticReportV2 {
+  return {
+    report_version: 2,
+    app_version: info.appVersion,
+    dsh_version: info.dshVersion,
+    mode: info.mode,
+    lifecycle: { ...info.lifecycle },
+    generated_at: info.generatedAt,
+  }
 }
 
 // ---------- pure helpers ----------

@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cacheSizeBytes, computeKeepSet, selectOldVersions, tailLines } from '../src/diagnostics/diagnostics.ts'
+import {
+  cacheSizeBytes,
+  computeKeepSet,
+  selectOldVersions,
+  tailLines,
+  toDiagnosticReport,
+} from '../src/diagnostics/diagnostics.ts'
 
 const temps: string[] = []
 afterEach(async () => {
@@ -72,5 +78,43 @@ describe('cacheSizeBytes', () => {
 
     expect(await cacheSizeBytes(dir)).toBe(31)
     expect(await cacheSizeBytes(path.join(dir, 'missing'))).toBe(0)
+  })
+})
+
+describe('DiagnosticReportV2', () => {
+  it('preserves the versioned lifecycle snapshot without aliasing it', () => {
+    const lifecycle = {
+      startup_path: 'bundled',
+      recovery_attempts: 1,
+      last_recovery_action: 'rollback:0.1.0',
+      shutdown_action: 'clean-exit',
+    }
+    const report = toDiagnosticReport({
+      dshVersion: '0.1.0',
+      pinnedVersion: '0.1.0',
+      overrideVersion: null,
+      mode: 'bundled',
+      bundledAvailable: true,
+      cacheDir: 'runtime-cache',
+      cacheSizeBytes: 0,
+      seedVersion: '0.1.0',
+      cachedVersions: [],
+      dshPid: 42,
+      platform: 'win32',
+      electron: '37.10.3',
+      generatedAt: '2026-09-15T00:00:00.000Z',
+      appVersion: '0.1.0',
+      lifecycle,
+    })
+
+    expect(report).toEqual({
+      report_version: 2,
+      app_version: '0.1.0',
+      dsh_version: '0.1.0',
+      mode: 'bundled',
+      lifecycle,
+      generated_at: '2026-09-15T00:00:00.000Z',
+    })
+    expect(report.lifecycle).not.toBe(lifecycle)
   })
 })

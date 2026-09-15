@@ -21,6 +21,7 @@ import {
   computeKeepSet,
   selectOldVersions,
   tailLines,
+  toDiagnosticReport,
   type DiagnosticsInfo,
 } from './diagnostics.ts'
 
@@ -94,6 +95,8 @@ async function getInfo(): Promise<DiagnosticsInfo> {
     platform: process.platform,
     electron: process.versions.electron,
     generatedAt: new Date().toISOString(),
+    appVersion: app.getVersion(),
+    lifecycle: { ...appState.lifecycle },
   }
 }
 
@@ -160,6 +163,11 @@ async function exportDiagnostics(): Promise<{ ok: boolean; zipPath?: string; err
     await writeFile(path.join(tmp, 'origin.json'), originRaw, 'utf8')
     await copyFile(getLogFile(), path.join(tmp, 'boot.log')).catch(() => undefined)
     await writeFile(path.join(tmp, 'versions-info.json'), `${JSON.stringify(info, null, 2)}\n`, 'utf8')
+    await writeFile(
+      path.join(tmp, 'diagnostic-report-v2.json'),
+      `${JSON.stringify(toDiagnosticReport(info), null, 2)}\n`,
+      'utf8',
+    )
 
     const stamp = new Date()
       .toISOString()

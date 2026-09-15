@@ -1,5 +1,6 @@
 import type { BrowserWindow, Tray } from 'electron'
 import type { DshRuntime, RuntimeMode } from '@dsh/client-runtime'
+import type { RuntimeLifecycleDiagnostics } from './diagnostics/diagnostics.ts'
 
 /**
  * Mutable state shared between the boot flow, the shutdown ladder, and the
@@ -16,6 +17,8 @@ export const appState: {
   dshVersion: string | undefined
   mode: RuntimeMode | undefined
   bundledAvailable: boolean | undefined
+  /** Lifecycle facts shared by the boot path, shutdown ladder, and diagnostics. */
+  lifecycle: RuntimeLifecycleDiagnostics
 } = {
   runtime: undefined,
   mainWindow: undefined,
@@ -25,4 +28,10 @@ export const appState: {
   dshVersion: undefined,
   mode: undefined,
   bundledAvailable: undefined,
+  lifecycle: {
+    startup_path: null,
+    recovery_attempts: 0,
+    last_recovery_action: null,
+    shutdown_action: null,
+  },
 }
