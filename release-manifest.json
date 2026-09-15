@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "product": "HarnessDock",
-  "version": "0.1.5",
-  "channel": "rc",
+  "version": "0.1.6",
+  "channel": "alpha",
   "publication": {
     "tagTemplate": "v{version}-{prerelease}",
     "githubPrerelease": true,
@@ -15,14 +15,14 @@
   },
   "shell": {
     "package": "@dsh/plugin-harness-shell",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "apiVersion": 1
   },
-  "prerelease": "rc.2",
+  "prerelease": "alpha.1",
   "runtime": {
-    "version": "0.1.5-rc.2",
-    "gitTag": "dsh-v0.1.5-rc.2",
-    "gitCommit": "fb2c4b9e698e30edb738bca4cf0618587db7d203"
+    "version": "0.1.6-alpha.1",
+    "gitTag": "dsh-v0.1.6-alpha.1",
+    "gitCommit": "0a15e36e7f82b6ed45af6fa9759f29b40dcd965d"
   },
   "targets": {
     "windows-x64": {

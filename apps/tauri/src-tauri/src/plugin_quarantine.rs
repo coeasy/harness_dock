@@ -233,14 +233,14 @@ mod tests {
         let file = root.join("plugin-quarantine.json");
         write(
             &file,
-            "0.1.5-rc.2",
+            "0.1.6-alpha.1",
             SCOPE,
             vec!["bad-a".into()],
             vec!["bad-a".into()],
             "diagnostic-match",
         )
         .unwrap();
-        assert!(read(&file, "0.1.5-rc.2", "profile=web\ndsh_home=/tmp/dsh-b").is_none());
+        assert!(read(&file, "0.1.6-alpha.1", "profile=web\ndsh_home=/tmp/dsh-b").is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -264,7 +264,7 @@ mod tests {
             reason: "diagnostic-match".into(),
         };
         fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        assert!(read(&file, "0.1.5-rc.2", SCOPE).is_none());
+        assert!(read(&file, "0.1.6-alpha.1", SCOPE).is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
