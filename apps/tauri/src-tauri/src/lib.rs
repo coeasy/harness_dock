@@ -60,6 +60,8 @@ mod single_instance;
 #[cfg(not(mobile))]
 mod startup;
 #[cfg(not(mobile))]
+mod startup_fast_path;
+#[cfg(not(mobile))]
 mod startup_integration;
 #[cfg(not(mobile))]
 mod startup_orchestrator;
