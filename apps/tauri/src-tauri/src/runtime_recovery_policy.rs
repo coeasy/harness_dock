@@ -46,13 +46,7 @@ mod tests {
     #[test]
     fn policy_escalates_after_retries() {
         let policy = RuntimeRecoveryPolicy::default();
-        assert_eq!(
-            policy.decide(3, 0),
-            RecoveryDecision::RestartRuntime
-        );
-        assert_eq!(
-            policy.decide(3, 2),
-            RecoveryDecision::EnterRecoveryUi
-        );
+        assert_eq!(policy.decide(3, 0), RecoveryDecision::RestartRuntime);
+        assert_eq!(policy.decide(3, 2), RecoveryDecision::EnterRecoveryUi);
     }
 }

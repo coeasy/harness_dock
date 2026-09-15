@@ -44,6 +44,8 @@ mod lifecycle_integration;
 #[cfg(not(mobile))]
 mod lifecycle_release_gate;
 mod net;
+#[cfg(not(mobile))]
+mod performance_metrics;
 mod platform;
 #[cfg(not(mobile))]
 mod plugin_quarantine;
@@ -64,6 +66,12 @@ mod runtime_supervisor_integration;
 #[cfg(not(mobile))]
 mod service;
 #[cfg(not(mobile))]
+mod shutdown_integration;
+#[cfg(not(mobile))]
+mod shutdown_manager;
+#[cfg(not(mobile))]
+mod shutdown_timeout_policy;
+#[cfg(not(mobile))]
 mod single_instance;
 #[cfg(not(mobile))]
 mod startup;
@@ -79,14 +87,6 @@ mod startup_runtime_binding;
 mod startup_trace;
 #[cfg(not(mobile))]
 mod state;
-#[cfg(not(mobile))]
-mod shutdown_integration;
-#[cfg(not(mobile))]
-mod shutdown_manager;
-#[cfg(not(mobile))]
-mod shutdown_timeout_policy;
-#[cfg(not(mobile))]
-mod performance_metrics;
 #[cfg(not(mobile))]
 mod supervisor;
 #[cfg(not(mobile))]

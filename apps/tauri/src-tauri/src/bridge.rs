@@ -110,17 +110,23 @@ pub fn host_snapshot(
     app: AppHandle,
     window: WebviewWindow<tauri::Wry>,
 ) -> Result<crate::host_protocol::HostSnapshot, String> {
-    let subject = trusted_subject(&app, &window, match window.label() {
-        "harness" => crate::host_protocol::SubjectKind::HarnessWeb,
-        "settings" => crate::host_protocol::SubjectKind::Diagnostics,
-        "control" => crate::host_protocol::SubjectKind::DesktopShell,
-        _ => return Err("Host snapshot 不允许此 WebView 读取。".into()),
-    })?;
+    let subject = trusted_subject(
+        &app,
+        &window,
+        match window.label() {
+            "harness" => crate::host_protocol::SubjectKind::HarnessWeb,
+            "settings" => crate::host_protocol::SubjectKind::Diagnostics,
+            "control" => crate::host_protocol::SubjectKind::DesktopShell,
+            _ => return Err("Host snapshot 不允许此 WebView 读取。".into()),
+        },
+    )?;
     let state = app.state::<crate::AppState>();
     let snapshot = crate::service::snapshot::ReadOnlySnapshot::collect(&state);
     let public = crate::host_kernel::public_state(&app);
     let surface = match subject {
-        crate::host_protocol::SubjectKind::Diagnostics => crate::surface_actor::SurfaceKind::Diagnostics,
+        crate::host_protocol::SubjectKind::Diagnostics => {
+            crate::surface_actor::SurfaceKind::Diagnostics
+        }
         crate::host_protocol::SubjectKind::HarnessWeb => crate::surface_actor::SurfaceKind::Harness,
         _ => crate::surface_actor::SurfaceKind::Recovery,
     };
@@ -152,9 +158,7 @@ pub fn host_snapshot(
 }
 
 #[tauri::command]
-pub fn public_runtime_status(
-    state: State<'_, crate::AppState>,
-) -> crate::runtime::RuntimeStatus {
+pub fn public_runtime_status(state: State<'_, crate::AppState>) -> crate::runtime::RuntimeStatus {
     let mut status = crate::runtime::status_snapshot(&*state);
     let failures = state
         .client_plugin_failures
@@ -181,5 +185,7 @@ pub fn diagnostics_close(window: WebviewWindow<tauri::Wry>) -> Result<(), String
     if window.label() != "settings" {
         return Err("只有诊断 WebView 可以关闭诊断窗口。".into());
     }
-    window.close().map_err(|error| format!("无法关闭诊断窗口: {error}"))
+    window
+        .close()
+        .map_err(|error| format!("无法关闭诊断窗口: {error}"))
 }

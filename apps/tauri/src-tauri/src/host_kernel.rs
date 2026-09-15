@@ -118,10 +118,7 @@ pub(crate) fn rejected_response(
     protocol_failure(request_id, code, message, false)
 }
 
-pub(crate) fn invalid_response(
-    request_id: String,
-    error: HostError,
-) -> ResponseEnvelope {
+pub(crate) fn invalid_response(request_id: String, error: HostError) -> ResponseEnvelope {
     ResponseEnvelope {
         protocol_version: HOST_PROTOCOL_VERSION,
         request_id,

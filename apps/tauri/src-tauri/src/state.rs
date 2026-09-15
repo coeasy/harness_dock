@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    gateway_host, host_kernel, performance_metrics, process, runtime_actor,
-    runtime_supervisor, shutdown_manager, startup_orchestrator, surface_actor, update_actor,
+    gateway_host, host_kernel, performance_metrics, process, runtime_actor, runtime_supervisor,
+    shutdown_manager, startup_orchestrator, surface_actor, update_actor,
 };
 
 pub(crate) struct AppState {

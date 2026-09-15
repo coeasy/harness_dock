@@ -11,7 +11,10 @@ pub struct DiagnosticReportV2 {
 }
 
 impl DiagnosticReportV2 {
-    pub fn with_lifecycle(version: impl Into<String>, lifecycle: RuntimeLifecycleDiagnostics) -> Self {
+    pub fn with_lifecycle(
+        version: impl Into<String>,
+        lifecycle: RuntimeLifecycleDiagnostics,
+    ) -> Self {
         Self {
             app_version: version.into(),
             lifecycle,
@@ -25,10 +28,8 @@ mod tests {
 
     #[test]
     fn report_contains_lifecycle_data() {
-        let report = DiagnosticReportV2::with_lifecycle(
-            "test",
-            RuntimeLifecycleDiagnostics::fast_start(),
-        );
+        let report =
+            DiagnosticReportV2::with_lifecycle("test", RuntimeLifecycleDiagnostics::fast_start());
         assert_eq!(report.app_version, "test");
     }
 }

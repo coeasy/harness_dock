@@ -26,13 +26,7 @@ mod tests {
 
     #[test]
     fn integration_requires_all_lifecycle_parts() {
-        assert_eq!(
-            release_ready(true, true, true, true),
-            LifecycleGate::Pass
-        );
-        assert_eq!(
-            release_ready(true, true, true, false),
-            LifecycleGate::Block
-        );
+        assert_eq!(release_ready(true, true, true, true), LifecycleGate::Pass);
+        assert_eq!(release_ready(true, true, true, false), LifecycleGate::Block);
     }
 }

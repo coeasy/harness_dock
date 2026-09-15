@@ -3,10 +3,8 @@
 //! Converts internal lifecycle actors into a stable diagnostic snapshot.
 
 use crate::{
-    diagnostic_platform::DiagnosticSnapshot,
-    runtime_supervisor::RuntimeSupervisor,
-    shutdown_manager::ShutdownManager,
-    startup_orchestrator::StartupOrchestrator,
+    diagnostic_platform::DiagnosticSnapshot, runtime_supervisor::RuntimeSupervisor,
+    shutdown_manager::ShutdownManager, startup_orchestrator::StartupOrchestrator,
 };
 
 pub fn snapshot(

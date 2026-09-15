@@ -33,10 +33,8 @@ pub fn recovery_decision(
     supervisor: &RuntimeSupervisor,
     restart_attempts: u32,
 ) -> RecoveryDecision {
-    RuntimeRecoveryPolicy::default().decide(
-        supervisor.health().consecutive_failures,
-        restart_attempts,
-    )
+    RuntimeRecoveryPolicy::default()
+        .decide(supervisor.health().consecutive_failures, restart_attempts)
 }
 
 pub fn should_recover(supervisor: &RuntimeSupervisor) -> bool {
