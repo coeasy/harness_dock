@@ -17,6 +17,8 @@ mod diagnostic_ipc;
 #[cfg(not(mobile))]
 mod diagnostic_platform;
 #[cfg(not(mobile))]
+mod diagnostic_runtime_v2;
+#[cfg(not(mobile))]
 mod diagnostic_service;
 #[cfg(not(mobile))]
 mod error;
