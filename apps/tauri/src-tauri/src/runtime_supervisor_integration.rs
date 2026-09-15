@@ -3,6 +3,7 @@
 //! Keeps RuntimeActor as the source of truth and provides policy hooks for
 //! recovery, health monitoring and future upgrade orchestration.
 
+use crate::runtime_recovery_policy::{RecoveryAction, RuntimeRecoveryPolicy};
 use crate::runtime_supervisor::{RuntimeSupervisor, SupervisorState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,8 +19,7 @@ pub enum RuntimeEvent {
 
 pub fn apply_event(supervisor: &mut RuntimeSupervisor, event: RuntimeEvent) {
     match event {
-        RuntimeEvent::Started => supervisor.start_monitoring(),
-        RuntimeEvent::Ready => supervisor.start_monitoring(),
+        RuntimeEvent::Started | RuntimeEvent::Ready => supervisor.start_monitoring(),
         RuntimeEvent::HealthFailure | RuntimeEvent::ProcessExited => {
             supervisor.mark_failure();
         }
@@ -29,9 +29,22 @@ pub fn apply_event(supervisor: &mut RuntimeSupervisor, event: RuntimeEvent) {
     }
 }
 
+pub fn recovery_action(
+    supervisor: &RuntimeSupervisor,
+    restart_attempts: u32,
+) -> RecoveryAction {
+    let policy = RuntimeRecoveryPolicy::default();
+    policy.decide(
+        supervisor.health().consecutive_failures,
+        restart_attempts,
+    )
+}
+
 pub fn should_recover(supervisor: &RuntimeSupervisor) -> bool {
-    supervisor.health().consecutive_failures >= 3
-        || supervisor.state() == SupervisorState::Recovering
+    matches!(
+        recovery_action(supervisor, 0),
+        RecoveryAction::RestartRuntime | RecoveryAction::EnterRecoveryUi
+    ) || supervisor.state() == SupervisorState::Recovering
 }
 
 #[cfg(test)]
