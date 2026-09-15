@@ -74,6 +74,8 @@ mod shutdown_integration;
 #[cfg(not(mobile))]
 mod shutdown_manager;
 #[cfg(not(mobile))]
+mod shutdown_timeout_policy;
+#[cfg(not(mobile))]
 mod performance_metrics;
 #[cfg(not(mobile))]
 mod supervisor;
