@@ -38,15 +38,23 @@ mod runtime;
 #[cfg(not(mobile))]
 mod runtime_actor;
 #[cfg(not(mobile))]
+mod runtime_supervisor;
+#[cfg(not(mobile))]
 mod service;
 #[cfg(not(mobile))]
 mod single_instance;
 #[cfg(not(mobile))]
 mod startup;
 #[cfg(not(mobile))]
+mod startup_orchestrator;
+#[cfg(not(mobile))]
 mod startup_trace;
 #[cfg(not(mobile))]
 mod state;
+#[cfg(not(mobile))]
+mod shutdown_manager;
+#[cfg(not(mobile))]
+mod performance_metrics;
 #[cfg(not(mobile))]
 mod supervisor;
 #[cfg(not(mobile))]
