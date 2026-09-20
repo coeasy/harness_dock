@@ -46,9 +46,7 @@ pub fn launch_attempt(
     ) {
         Ok(ready) => ready,
         Err(error) => {
-            registration.terminate_tree();
-            process_control::stop_child_tree(&mut child);
-            registration.complete();
+            process_control::stop_registered_child(&mut child, &registration);
             return Err(error);
         }
     };
@@ -262,6 +260,7 @@ pub fn start_blocking(
         if let Some(quarantine) = plugin_quarantine::read(
             &quarantine_state_path,
             &image.origin.dsh_version,
+            &image.image_identity,
             &quarantine_scope,
         ) {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
@@ -421,6 +420,7 @@ pub fn start_blocking(
                     let quarantine = plugin_quarantine::write(
                         &quarantine_state_path,
                         &image.origin.dsh_version,
+                        &image.image_identity,
                         &quarantine_scope,
                         isolated.clone(),
                         suspected.clone(),

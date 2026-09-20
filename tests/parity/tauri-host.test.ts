@@ -54,7 +54,7 @@ describe('Tauri host contract', () => {
     expect(tauri.version).toBe(root.version)
     expect(releaseManifest.version).toBe(root.version)
     expect(releaseManifest.channel).toBe('alpha')
-    expect(releaseManifest.prerelease).toBe('alpha.1')
+    expect(releaseManifest.prerelease).toBe('alpha.2')
     expect(releaseManifest.shell.version).toBe(root.version)
     expect(shellManifest.version).toBe(root.version)
     expect(cargo).toContain(`version = "${root.version}"`)
@@ -213,7 +213,7 @@ describe('Tauri host contract', () => {
     expect(runtime).toContain('platform::configure_child_command')
   })
 
-  it('publishes the full unsigned alpha.1 asset set as a guarded replaceable prerelease', () => {
+  it('publishes the full unsigned alpha.2 asset set as a guarded replaceable prerelease', () => {
     const candidate = read('.github/workflows/tauri-candidate.yml')
     const release = read('.github/workflows/release.yml')
     const releaseManifest = readJson('release-manifest.json')
@@ -228,7 +228,7 @@ describe('Tauri host contract', () => {
 
     expect(releaseManifest.schemaVersion).toBe(2)
     expect(releaseManifest.channel).toBe('alpha')
-    expect(releaseManifest.prerelease).toBe('alpha.1')
+    expect(releaseManifest.prerelease).toBe('alpha.2')
     expect(releaseManifest.publication).toMatchObject({
       tagTemplate: 'v{version}-{prerelease}',
       githubPrerelease: true,

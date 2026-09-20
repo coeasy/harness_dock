@@ -2,9 +2,9 @@
 
 ## 当前活动版本
 
-HarnessDock 当前候选版本：**v0.1.6-alpha.1**（基础版本 `0.1.6`）。
+HarnessDock 当前候选版本：**v0.1.6-alpha.2**（基础版本 `0.1.6`）。
 
-当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.6-alpha.1`**，commit `0a15e36e7f82b6ed45af6fa9759f29b40dcd965d`。
+当前锁定的 DeepSeek Harness Runtime：**`dsh-v0.1.6-alpha.2`**，commit `ddefc45fbc7f8e46dd73185e68295696d1297887`。
 
 桌面产品不再使用 Electron。唯一桌面宿主为 `apps/tauri`，正常启动链路是：
 
@@ -25,7 +25,7 @@ Tauri Native Host
 
 - HarnessDock 客户端基础版本必须与 pinned dsh 的**基础 SemVer**一致；
 - 上游 `-rc.* / -beta.* / -alpha.*` 后缀同时用于 Runtime provenance 和候选发布标签；
-- 例如 `dsh-v0.1.6-alpha.1 -> HarnessDock v0.1.6-alpha.1`；
+- 例如 `dsh-v0.1.6-alpha.2 -> HarnessDock v0.1.6-alpha.2`；
 - Release gate 会检查 root/workspace/Tauri/Rust/Shell/origin/manifest 版本一致，并检查 HarnessDock 与 dsh 基础 SemVer 一致；
 - Runtime `version + gitTag + gitCommit` 必须在 `release-manifest.json` 与 `origin.json` 完全一致。
 
@@ -41,7 +41,7 @@ Tauri Native Host
    当前 Tauri Native Host、Runtime、WebView、Shell、Gateway 与构建/门禁说明。
 4. [`VERSIONING.md`](./VERSIONING.md)  
    HarnessDock 与 DeepSeek Harness/dsh 的版本对齐政策。
-5. [`../.github/release-notes/v0.1.6-alpha.1.md`](../.github/release-notes/v0.1.6-alpha.1.md)
+5. [`../.github/release-notes/v0.1.6-alpha.2.md`](../.github/release-notes/v0.1.6-alpha.2.md)
    当前候选版发布说明。
 6. [`../release-manifest.json`](../release-manifest.json) 与 [`../packages/docs-sync/origin.json`](../packages/docs-sync/origin.json)  
    发布身份、上游 Runtime provenance、目标平台与 same-SHA 发布合同的机器权威来源。

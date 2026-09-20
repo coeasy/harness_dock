@@ -3,12 +3,17 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallerPath,
     [int]$TimeoutSeconds = 120,
-    [switch]$BlockProfileWriter
+    [switch]$BlockProfileWriter,
+    [switch]$InjectPluginFailure
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+if ($BlockProfileWriter -and $InjectPluginFailure) {
+    throw 'BlockProfileWriter and InjectPluginFailure are separate lifecycle scenarios'
+}
 
 $InstallerPath = [IO.Path]::GetFullPath($InstallerPath)
 if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
@@ -20,7 +25,7 @@ $traceDir = Join-Path $tempRoot 'harnessdock-logs'
 $installDir = Join-Path $tempRoot 'HarnessDockInstallerSmoke'
 $neutralCwd = Join-Path $tempRoot 'HarnessDockInstallerSmokeNeutralCwd'
 $profileWriterLock = $null
-$profileWriterHome = $null
+$scenarioHome = $null
 $previousDshHome = $null
 $hadDshHome = Test-Path Env:DSH_HOME
 $lockCreatedBySmoke = $false
@@ -79,6 +84,52 @@ function Get-InstalledProcessSnapshot([string]$Root) {
     )
 }
 
+function Get-NodeProcessSnapshot {
+    return @(
+        Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { $_.Name -ieq 'node.exe' } |
+            Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine
+    )
+}
+
+function Get-NodePidBaseline {
+    $baseline = @{}
+    foreach ($process in @(Get-NodeProcessSnapshot)) {
+        $baseline[[string][int]$process.ProcessId] = $true
+    }
+    return $baseline
+}
+
+function Get-NodeDelta($Baseline) {
+    return @(
+        Get-NodeProcessSnapshot |
+            Where-Object { -not $Baseline.ContainsKey([string][int]$_.ProcessId) }
+    )
+}
+
+function Wait-ObservedNodeProcessesGone($Processes, [int]$TimeoutSeconds = 10) {
+    $expected = @{}
+    foreach ($process in @($Processes)) {
+        $expected[[string][int]$process.ProcessId] = $true
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $remaining = @(
+            Get-NodeProcessSnapshot |
+                Where-Object { $expected.ContainsKey([string][int]$_.ProcessId) }
+        )
+        if ($remaining.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+
+    $remaining = @(
+        Get-NodeProcessSnapshot |
+            Where-Object { $expected.ContainsKey([string][int]$_.ProcessId) }
+    )
+    Write-ProcessSnapshot $remaining '[smoke] leaked observed node:'
+    throw "HarnessDock graceful exit left $($remaining.Count) observed node.exe process(es)"
+}
+
 function Write-ProcessSnapshot($Processes, [string]$Prefix) {
     foreach ($process in @($Processes)) {
         Write-Host "$Prefix pid=$($process.ProcessId) ppid=$($process.ParentProcessId) name=$($process.Name) path=$($process.ExecutablePath)"
@@ -98,6 +149,22 @@ function Wait-InstalledProcessesGone([string]$Root, [int]$TimeoutSeconds = 10) {
     $remaining = @(Get-InstalledProcessSnapshot $Root)
     Write-ProcessSnapshot $remaining '[smoke] leaked process:'
     throw "HarnessDock graceful exit left $($remaining.Count) process(es) running from $Root"
+}
+
+function Assert-PluginQuarantineWasExercised([string]$TempRoot, [string]$PluginId) {
+    $workDirs = @(Get-ChildItem $TempRoot -Directory -Filter 'harnessdock-tauri-*' -ErrorAction SilentlyContinue)
+    $patches = @(
+        $workDirs |
+            ForEach-Object { Get-ChildItem $_.FullName -File -Filter 'plugin-recovery.patch.yml' -ErrorAction SilentlyContinue }
+    )
+    foreach ($patch in $patches) {
+        $raw = Get-Content $patch.FullName -Raw -ErrorAction SilentlyContinue
+        if ($raw -match [regex]::Escape($PluginId) -and $raw -match '(?m)^\s*disabled:\s*true\s*$') {
+            Write-Host "[smoke] observed automatic plugin quarantine in $($patch.FullName)"
+            return
+        }
+    }
+    throw "Plugin failure smoke reached Harness Web without a disabled quarantine patch for $PluginId"
 }
 
 function Assert-PrivateRescueWasExercised([string]$TempRoot) {
@@ -159,26 +226,42 @@ if (-not $app) {
     throw "Installed harnessdock-tauri.exe not found under $installDir"
 }
 
-if ($BlockProfileWriter) {
-    # Use a fresh, explicitly inherited home for this fault-injection run.
-    # The previous normal smoke may legitimately leave upstream profile
-    # metadata behind, and a hosted runner can also carry a user DSH_HOME.
-    # Neither should decide whether this gate exercises the real writer lock.
-    $profileWriterHome = Join-Path $tempRoot 'HarnessDockProfileLockSmoke'
-    Remove-Item $profileWriterHome -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Path $profileWriterHome -Force | Out-Null
+if ($BlockProfileWriter -or $InjectPluginFailure) {
+    # Fault-injection runs use a fresh, explicitly inherited home so neither
+    # the hosted runner nor a previous scenario can decide recovery behavior.
+    $scenarioHome = Join-Path $tempRoot 'HarnessDockProfileLockSmoke'
+    Remove-Item $scenarioHome -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $scenarioHome -Force | Out-Null
     $previousDshHome = $env:DSH_HOME
-    $env:DSH_HOME = $profileWriterHome
-    $profileDir = Join-Path $profileWriterHome 'profiles'
-    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-    $profileWriterLock = Join-Path $profileDir 'node_modules.lock'
-    # Upstream @deepseek-ai/dsh-atomic-write acquires this exact sibling using
-    # exclusive `wx` creation and deliberately never removes a contended lock.
-    # Any existing file therefore reproduces the real writer-lock timeout.
-    Set-Content -LiteralPath $profileWriterLock -Value "$PID`n" -NoNewline
-    $lockCreatedBySmoke = $true
-    Write-Host "[smoke] Injected profile writer contention at $profileWriterLock"
+    $env:DSH_HOME = $scenarioHome
+
+    if ($BlockProfileWriter) {
+        $profileDir = Join-Path $scenarioHome 'profiles'
+        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+        $profileWriterLock = Join-Path $profileDir 'node_modules.lock'
+        # Upstream @deepseek-ai/dsh-atomic-write acquires this exact sibling using
+        # exclusive `wx` creation and deliberately never removes a contended lock.
+        Set-Content -LiteralPath $profileWriterLock -Value "$PID`n" -NoNewline
+        $lockCreatedBySmoke = $true
+        Write-Host "[smoke] Injected profile writer contention at $profileWriterLock"
+    }
+
+    if ($InjectPluginFailure) {
+        $brokenPluginId = 'harnessdock-smoke-broken-plugin'
+        $missingPluginPath = Join-Path $scenarioHome 'missing-harnessdock-smoke-plugin.js'
+        $missingPluginUri = ([System.Uri]$missingPluginPath).AbsoluteUri
+        $patchPath = Join-Path $scenarioHome 'cordis.patch.yml'
+        @"
+- insert:
+    - id: $brokenPluginId
+      name: '$missingPluginUri'
+"@ | Set-Content -LiteralPath $patchPath -Encoding utf8
+        Write-Host "[smoke] Injected broken plugin $brokenPluginId through $patchPath"
+    }
 }
+
+$nodeBaseline = Get-NodePidBaseline
+Write-Host "[smoke] baseline node.exe process count: $($nodeBaseline.Count)"
 
 Write-Host "[smoke] Launching installed client from neutral cwd: $neutralCwd"
 $hostProcess = Start-Process -FilePath $app.FullName -WorkingDirectory $neutralCwd -PassThru
@@ -202,8 +285,8 @@ try {
             $content = Get-Content $trace.FullName -Raw
             $hasRecovery = $content -match 'phase=recovery'
             $hasVisible = $content -match 'phase=primary_visible'
-            if ($hasRecovery -and -not $hasVisible) {
-                throw 'Installed client entered recovery before Harness Web became primary.'
+            if ($hasRecovery -and -not $hasVisible -and -not ($BlockProfileWriter -or $InjectPluginFailure)) {
+                throw 'Installed client entered unexpected recovery before Harness Web became primary.'
             }
         }
 
@@ -273,6 +356,10 @@ try {
     if ($BlockProfileWriter) {
         Assert-PrivateRescueWasExercised $tempRoot
     }
+    if ($InjectPluginFailure) {
+        Assert-PluginQuarantineWasExercised $tempRoot $brokenPluginId
+        Write-Host 'PASS: broken third-party plugin was quarantined and Harness Web recovered'
+    }
 
     # Prove this test is observing the packaged Runtime rather than merely the
     # GUI process. At least one bundled node.exe must be alive under installDir
@@ -282,6 +369,11 @@ try {
     $runtimeNodes = @($managedBeforeExit | Where-Object { $_.Name -ieq 'node.exe' })
     if ($runtimeNodes.Count -eq 0) {
         throw 'Packaged Harness Web became ready without an observable bundled node.exe Runtime process'
+    }
+    $nodeDeltaBeforeExit = @(Get-NodeDelta $nodeBaseline)
+    Write-ProcessSnapshot $nodeDeltaBeforeExit '[smoke] post-baseline node before exit:'
+    if ($nodeDeltaBeforeExit.Count -eq 0) {
+        throw 'Packaged Harness Web became ready without any post-baseline node.exe process'
     }
 
     # CloseMainWindow sends the normal window-close request. HarnessDock must
@@ -299,7 +391,8 @@ try {
     }
 
     Wait-InstalledProcessesGone $installDir 10
-    Write-Host 'PASS: graceful HarnessDock exit left zero installed Runtime/Node/Host processes'
+    Wait-ObservedNodeProcessesGone $nodeDeltaBeforeExit 10
+    Write-Host 'PASS: graceful HarnessDock exit left zero installed Runtime/Node/Host processes and zero observed post-baseline Node processes'
 }
 finally {
     Close-HarnessWebSession $webSession
@@ -322,7 +415,7 @@ finally {
     else {
         Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue
     }
-    if ($profileWriterHome) {
-        Remove-Item $profileWriterHome -Recurse -Force -ErrorAction SilentlyContinue
+    if ($scenarioHome) {
+        Remove-Item $scenarioHome -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

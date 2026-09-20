@@ -14,14 +14,14 @@
 
 ## 当前版本
 
-HarnessDock 当前产品基础版本为 **v0.1.6**，当前候选为 **v0.1.6-alpha.1**，内置 Runtime 精确锁定：
+HarnessDock 当前产品基础版本为 **v0.1.6**，当前候选为 **v0.1.6-alpha.2**，内置 Runtime 精确锁定：
 
 ```text
-dsh-v0.1.6-alpha.1
-0a15e36e7f82b6ed45af6fa9759f29b40dcd965d
+dsh-v0.1.6-alpha.2
+ddefc45fbc7f8e46dd73185e68295696d1297887
 ```
 
-HarnessDock 客户端基础版本与 dsh 基础版本保持 `0.1.6` 一致，当前候选后缀为 `alpha.1`；版本记录 `dsh 0.1.6-alpha.1` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
+HarnessDock 客户端基础版本与 dsh 基础版本保持 `0.1.6` 一致，当前候选后缀为 `alpha.2`；版本记录 `dsh 0.1.6-alpha.2` 的完整 Runtime provenance。完整规则见 [`VERSIONING.md`](./VERSIONING.md)。
 
 ## 项目定位
 
@@ -80,7 +80,7 @@ pnpm tauri:dev
 
 ## 发布
 
-当前 `v0.1.6-alpha.1` 使用候选发布通道，目标 tag：`v0.1.6-alpha.1`。稳定 `v0.1.5` 保持不可变；`alpha.1` 仅在发布合同允许并且新的 exact main SHA 重新通过全部门禁后才允许重建。
+当前 `v0.1.6-alpha.2` 使用候选发布通道，目标 tag：`v0.1.6-alpha.2`。稳定 `v0.1.5` 保持不可变；`alpha.2` 仅在发布合同允许并且新的 exact main SHA 重新通过全部门禁后才允许重建。
 
 `.github/workflows/tauri-candidate.yml` 构建和验证 Windows NSIS、Linux DEB/AppImage、macOS x64/arm64 DMG 与 app archive、Android APK/AAB、iOS Simulator，以及四个平台 Full Runtime bundle。
 
