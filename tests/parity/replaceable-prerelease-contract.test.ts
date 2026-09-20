@@ -8,18 +8,18 @@ const read = (relative: string) => readFileSync(path.join(repoRoot, relative), '
 const manifest = JSON.parse(read('release-manifest.json')) as any
 
 describe('release publication classification contract', () => {
-  it('publishes v0.1.6-alpha.1 as a guarded replaceable GitHub prerelease', () => {
+  it('publishes v0.1.6-alpha.2 as a guarded replaceable GitHub prerelease', () => {
     expect(manifest.channel).toBe('alpha')
-    expect(manifest.prerelease).toBe('alpha.1')
+    expect(manifest.prerelease).toBe('alpha.2')
     expect(manifest.publication.tagTemplate).toBe('v{version}-{prerelease}')
     expect(manifest.publication.githubPrerelease).toBe(true)
     expect(manifest.publication.replaceablePrerelease).toBe(true)
   })
 
-  it('keeps the bundled upstream Runtime pinned to dsh alpha.1 independently of client publication channel', () => {
-    expect(manifest.runtime.version).toBe('0.1.6-alpha.1')
-    expect(manifest.runtime.gitTag).toBe('dsh-v0.1.6-alpha.1')
-    expect(manifest.runtime.gitCommit).toBe('0a15e36e7f82b6ed45af6fa9759f29b40dcd965d')
+  it('keeps the bundled upstream Runtime pinned to dsh alpha.2 independently of client publication channel', () => {
+    expect(manifest.runtime.version).toBe('0.1.6-alpha.2')
+    expect(manifest.runtime.gitTag).toBe('dsh-v0.1.6-alpha.2')
+    expect(manifest.runtime.gitCommit).toBe('ddefc45fbc7f8e46dd73185e68295696d1297887')
   })
 
   it('keeps stable releases permanently non-replaceable in the contract validator', () => {

@@ -29,17 +29,17 @@ dsh-v1.0.0-beta.1  -> HarnessDock 1.0.0
 - 精确 `gitTag`；
 - 精确 `gitCommit`。
 
-当前 v0.1.6-alpha.1 发布线：
+当前 v0.1.6-alpha.2 发布线：
 
 ```text
 HarnessDock: 0.1.6
-release tag: v0.1.6-alpha.1
-dshVersion:  0.1.6-alpha.1
-gitTag:      dsh-v0.1.6-alpha.1
-gitCommit:   0a15e36e7f82b6ed45af6fa9759f29b40dcd965d
+release tag: v0.1.6-alpha.2
+dshVersion:  0.1.6-alpha.2
+gitTag:      dsh-v0.1.6-alpha.2
+gitCommit:   ddefc45fbc7f8e46dd73185e68295696d1297887
 ```
 
-正式 `v0.1.5` 已发布并保持不可变；当前新基础版本通过 `v0.1.6-alpha.1` 候选标签交付，不覆盖稳定 tag 或稳定资产。
+正式 `v0.1.5` 已发布并保持不可变；当前新基础版本通过 `v0.1.6-alpha.2` 候选标签交付，不覆盖稳定 tag 或稳定资产。
 
 禁止使用 `latest`、`next` 或未固定 commit 的 Runtime 进入发布候选。
 
@@ -95,6 +95,6 @@ gitCommit:   0a15e36e7f82b6ed45af6fa9759f29b40dcd965d
 
 ## 6. 历史 `v0.2.x` 文件名
 
-仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前活动产品基础版本为 `v0.1.6`；当前活动候选标签为 `v0.1.6-alpha.1`。这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
+仓库历史设计稿曾使用 `v0.2.x` 作为架构阶段标签。当前活动产品基础版本为 `v0.1.6`；当前活动候选标签为 `v0.1.6-alpha.2`。这些历史文件名不再作为产品版本来源，也不得参与发布版本判断。
 
 活动版本的唯一权威来源是根 `package.json`，发布关系由 `release-manifest.json` 与 `packages/docs-sync/origin.json` 补充描述。

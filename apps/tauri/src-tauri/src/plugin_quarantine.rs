@@ -7,10 +7,11 @@ use std::{
 
 const DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
 
-/// Schema v3 binds a quarantine record to both the dsh base version and the
-/// effective Runtime launch scope. This prevents a record learned from one
-/// profile/DSH_HOME tree from disabling plugins in another tree.
-const SCHEMA_VERSION: u8 = 3;
+/// Schema v4 binds a quarantine record to the exact dsh Runtime version,
+/// sealed Runtime image identity, and effective launch scope. A quarantine
+/// learned against alpha.1 must never silently disable rows in alpha.2, even
+/// when the base SemVer is unchanged.
+const SCHEMA_VERSION: u8 = 4;
 
 /// Extract the `MAJOR.MINOR.PATCH` base version from a full SemVer-ish string
 /// such as `0.1.2-rc.1` or `0.1.2`. Falls back to the input when it has no
@@ -27,6 +28,9 @@ pub(crate) struct PluginQuarantineRecord {
     pub dsh_version: String,
     #[serde(default)]
     pub dsh_base_version: String,
+    /// Sealed Runtime source-closure identity. Empty only on legacy records.
+    #[serde(default)]
+    pub runtime_image_identity: String,
     /// Stable identity of the profile plus effective DSH_HOME used when the
     /// failure was attributed. Empty only on legacy schema records.
     #[serde(default)]
@@ -54,13 +58,17 @@ fn valid_reason(reason: &str) -> bool {
 /// Schema v1/v2 records predate profile/DSH_HOME scoping. They are deliberately
 /// invalidated once rather than being guessed into a possibly different plugin
 /// tree. A fresh failure can immediately rebuild a v3 record for that scope.
-fn record_applies(record: &PluginQuarantineRecord, dsh_version: &str, launch_scope: &str) -> bool {
-    if record.schema_version != SCHEMA_VERSION {
-        return false;
-    }
-    let expected_base = base_version(dsh_version);
-    !expected_base.is_empty()
-        && record.dsh_base_version == expected_base
+fn record_applies(
+    record: &PluginQuarantineRecord,
+    dsh_version: &str,
+    runtime_image_identity: &str,
+    launch_scope: &str,
+) -> bool {
+    record.schema_version == SCHEMA_VERSION
+        && !dsh_version.is_empty()
+        && record.dsh_version == dsh_version
+        && !runtime_image_identity.is_empty()
+        && record.runtime_image_identity == runtime_image_identity
         && !launch_scope.is_empty()
         && record.launch_scope == launch_scope
 }
@@ -68,6 +76,7 @@ fn record_applies(record: &PluginQuarantineRecord, dsh_version: &str, launch_sco
 pub(crate) fn read(
     path: &Path,
     dsh_version: &str,
+    runtime_image_identity: &str,
     launch_scope: &str,
 ) -> Option<PluginQuarantineRecord> {
     let record = fs::read_to_string(path)
@@ -77,7 +86,7 @@ pub(crate) fn read(
         let _ = fs::remove_file(path);
         return None;
     };
-    if !record_applies(&record, dsh_version, launch_scope)
+    if !record_applies(&record, dsh_version, runtime_image_identity, launch_scope)
         || record.expires_at <= now_secs()
         || record.isolated_plugins.is_empty()
         || !valid_reason(&record.reason)
@@ -115,11 +124,18 @@ fn commit_replace(tmp: &Path, path: &Path) -> Result<(), String> {
 pub(crate) fn write(
     path: &Path,
     dsh_version: &str,
+    runtime_image_identity: &str,
     launch_scope: &str,
     isolated_plugins: Vec<String>,
     suspected_plugins: Vec<String>,
     reason: &str,
 ) -> Result<PluginQuarantineRecord, String> {
+    if dsh_version.is_empty() {
+        return Err("plugin quarantine requires an exact dsh Runtime version".into());
+    }
+    if runtime_image_identity.is_empty() {
+        return Err("plugin quarantine requires a sealed Runtime image identity".into());
+    }
     if launch_scope.is_empty() {
         return Err("plugin quarantine requires a launch scope".into());
     }
@@ -137,6 +153,7 @@ pub(crate) fn write(
         schema_version: SCHEMA_VERSION,
         dsh_version: dsh_version.to_string(),
         dsh_base_version: base_version(dsh_version),
+        runtime_image_identity: runtime_image_identity.to_string(),
         launch_scope: launch_scope.to_string(),
         created_at,
         expires_at: created_at.saturating_add(DEFAULT_TTL_SECS),
@@ -164,6 +181,8 @@ mod tests {
     use super::*;
 
     const SCOPE: &str = "profile=web\ndsh_home=/tmp/dsh-a";
+    const IMAGE_A: &str = "sha256:image-a";
+    const IMAGE_B: &str = "sha256:image-b";
 
     fn test_root(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -173,90 +192,87 @@ mod tests {
         ))
     }
 
+    fn write_record(file: &Path, version: &str, image: &str, plugin: &str) {
+        write(
+            file,
+            version,
+            image,
+            SCOPE,
+            vec![plugin.into()],
+            vec![plugin.into()],
+            "diagnostic-match",
+        )
+        .unwrap();
+    }
+
     #[test]
-    fn version_mismatch_invalidates_quarantine() {
+    fn exact_prerelease_change_invalidates_quarantine() {
         let root = test_root("version");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let file = root.join("plugin-quarantine.json");
-        write(
-            &file,
-            "old",
-            SCOPE,
-            vec!["legacy-a".into(), "legacy-b".into()],
-            vec!["legacy-a".into()],
-            "diagnostic-match",
-        )
-        .unwrap();
-        assert!(read(&file, "new", SCOPE).is_none());
+        write_record(&file, "0.1.6-alpha.1", IMAGE_A, "bad-a");
+        assert!(read(&file, "0.1.6-alpha.2", IMAGE_A, SCOPE).is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn quarantine_survives_prerelease_upgrade_in_same_launch_scope() {
-        let root = test_root("prerelease-upgrade");
+    fn runtime_image_change_invalidates_quarantine() {
+        let root = test_root("image");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let file = root.join("plugin-quarantine.json");
-        write(
-            &file,
-            "0.1.2-rc.1",
-            SCOPE,
-            vec!["bad-a".into()],
-            vec!["bad-a".into()],
-            "diagnostic-match",
-        )
-        .unwrap();
-        assert_eq!(
-            read(&file, "0.1.2", SCOPE)
-                .expect("rc -> stable keeps quarantine in same scope")
-                .isolated_plugins,
-            vec!["bad-a"]
-        );
-        assert_eq!(
-            read(&file, "0.1.2-rc.2", SCOPE)
-                .expect("rc -> rc keeps quarantine in same scope")
-                .isolated_plugins,
-            vec!["bad-a"]
-        );
-        assert!(read(&file, "0.2.0", SCOPE).is_none());
+        write_record(&file, "0.1.6-alpha.2", IMAGE_A, "bad-a");
+        assert!(read(&file, "0.1.6-alpha.2", IMAGE_B, SCOPE).is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn launch_scope_mismatch_invalidates_quarantine() {
+    fn launch_scope_change_invalidates_quarantine() {
         let root = test_root("scope");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let file = root.join("plugin-quarantine.json");
-        write(
+        write_record(&file, "0.1.6-alpha.2", IMAGE_A, "bad-a");
+        assert!(read(
             &file,
-            "0.1.6-alpha.1",
-            SCOPE,
-            vec!["bad-a".into()],
-            vec!["bad-a".into()],
-            "diagnostic-match",
+            "0.1.6-alpha.2",
+            IMAGE_A,
+            "profile=web\ndsh_home=/tmp/dsh-b"
         )
-        .unwrap();
-        assert!(read(&file, "0.1.6-alpha.1", "profile=web\ndsh_home=/tmp/dsh-b").is_none());
+        .is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn legacy_unscoped_quarantine_is_invalidated_once() {
-        let root = test_root("legacy-scope");
+    fn same_runtime_image_and_scope_reuses_quarantine() {
+        let root = test_root("same");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("plugin-quarantine.json");
+        write_record(&file, "0.1.6-alpha.2", IMAGE_A, "bad-a");
+        let record = read(&file, "0.1.6-alpha.2", IMAGE_A, SCOPE).unwrap();
+        assert_eq!(record.isolated_plugins, vec!["bad-a"]);
+        assert_eq!(record.runtime_image_identity, IMAGE_A);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_records_are_invalidated_once() {
+        let root = test_root("legacy");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let file = root.join("plugin-quarantine.json");
         let now = now_secs();
         let legacy = PluginQuarantineRecord {
-            schema_version: 2,
-            dsh_version: "0.1.5-rc.1".into(),
-            dsh_base_version: "0.1.5".into(),
-            launch_scope: String::new(),
+            schema_version: 3,
+            dsh_version: "0.1.6-alpha.1".into(),
+            dsh_base_version: "0.1.6".into(),
+            runtime_image_identity: String::new(),
+            launch_scope: SCOPE.into(),
             created_at: now,
             expires_at: now.saturating_add(DEFAULT_TTL_SECS),
             isolated_plugins: vec!["bad-a".into()],
@@ -264,7 +280,7 @@ mod tests {
             reason: "diagnostic-match".into(),
         };
         fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        assert!(read(&file, "0.1.6-alpha.1", SCOPE).is_none());
+        assert!(read(&file, "0.1.6-alpha.2", IMAGE_A, SCOPE).is_none());
         assert!(!file.exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -275,28 +291,20 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let file = root.join("plugin-quarantine.json");
-        write(
-            &file,
-            "same",
-            SCOPE,
-            vec!["plugin-a".into()],
-            vec!["plugin-a".into()],
-            "diagnostic-match",
-        )
-        .unwrap();
+        write_record(&file, "0.1.6-alpha.2", IMAGE_A, "plugin-a");
         let second = write(
             &file,
-            "same",
+            "0.1.6-alpha.2",
+            IMAGE_A,
             SCOPE,
             vec!["plugin-b".into()],
             vec!["plugin-b".into()],
             "ambiguous",
         )
         .unwrap();
-        let persisted =
-            read(&file, "same", SCOPE).expect("replacement quarantine should be readable");
+        let persisted = read(&file, "0.1.6-alpha.2", IMAGE_A, SCOPE)
+            .expect("replacement quarantine should be readable");
         assert_eq!(persisted.isolated_plugins, vec!["plugin-b"]);
-        assert_eq!(persisted.reason, "ambiguous");
         assert_eq!(persisted, second);
         let _ = fs::remove_dir_all(root);
     }

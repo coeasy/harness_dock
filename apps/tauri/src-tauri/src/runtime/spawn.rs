@@ -298,9 +298,7 @@ pub fn dump_config(
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if cancelled(token, quitting) {
-            registration.terminate_tree();
-            process_control::stop_child_tree(&mut child);
-            registration.complete();
+            process_control::stop_registered_child(&mut child, &registration);
             return Err("Runtime generation cancelled during config dump".into());
         }
         match child.try_wait() {
@@ -308,7 +306,7 @@ pub fn dump_config(
                 let output = match child.wait_with_output() {
                     Ok(output) => output,
                     Err(error) => {
-                        registration.terminate_tree();
+                        registration.terminate_descendants_after_parent_exit();
                         registration.complete();
                         return Err(error.to_string());
                     }
@@ -337,9 +335,7 @@ pub fn dump_config(
             }
         }
         if deadline <= Instant::now() {
-            registration.terminate_tree();
-            process_control::stop_child_tree(&mut child);
-            registration.complete();
+            process_control::stop_registered_child(&mut child, &registration);
             return Err("等待 dsh config dump 超时。".into());
         }
         thread::sleep(Duration::from_millis(50));

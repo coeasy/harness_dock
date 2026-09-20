@@ -152,9 +152,37 @@ pub(crate) fn starting_processes_empty(registry: &StartingProcessRegistry) -> bo
 
 pub(crate) fn stop_child_tree(child: &mut Child) {
     let pid = child.id();
+
+    // If the direct child has already exited, never target its numeric PID
+    // again: it may already have been reused by an unrelated process. The
+    // resource owner can still terminate the child-owned Job/process group
+    // through StartingProcessGuard after this returns.
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+
     stop_process_tree(pid);
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Stop a registered child in the only safe cross-platform order:
+/// 1) while the direct parent PID is still valid, terminate its rooted tree;
+/// 2) reap the parent;
+/// 3) terminate residual descendants through the owned Job/process group,
+///    without falling back to the now-reusable parent PID;
+/// 4) remove the PID from startup admission tracking.
+///
+/// Windows needs both passes because a descendant can be created in the short
+/// spawn -> AssignProcessToJobObject interval. Unix uses the same ownership
+/// model with a dedicated process group.
+pub(crate) fn stop_registered_child(
+    child: &mut Child,
+    registration: &StartingProcessGuard,
+) {
+    stop_child_tree(child);
+    registration.terminate_descendants_after_parent_exit();
+    registration.complete();
 }
 
 pub(crate) fn stop_process_tree(pid: u32) {

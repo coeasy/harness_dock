@@ -6,7 +6,7 @@
 
 **DeepSeek Harness 的跨平台原生客户端**
 
-[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.6-alpha.1 发布说明](.github/release-notes/v0.1.6-alpha.1.md)
+[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.6-alpha.2 发布说明](.github/release-notes/v0.1.6-alpha.2.md)
 
 </div>
 
@@ -18,14 +18,14 @@
 | --- | --- |
 | HarnessDock | `0.1.6` |
 | 发布通道 | `alpha`（预览版） |
-| 当前发布 tag | `v0.1.6-alpha.1` |
-| DeepSeek Harness Runtime | `dsh-v0.1.6-alpha.1` |
-| Runtime commit | `0a15e36e7f82b6ed45af6fa9759f29b40dcd965d` |
+| 当前发布 tag | `v0.1.6-alpha.2` |
+| DeepSeek Harness Runtime | `dsh-v0.1.6-alpha.2` |
+| Runtime commit | `ddefc45fbc7f8e46dd73185e68295696d1297887` |
 | 桌面宿主 | Tauri 2 |
 | 桌面 Runtime | Full / sealed / 首启零下载 |
 | 移动 Runtime | Remote Gateway only |
 
-正式 `v0.1.5` 保持不可变；当前版本跟随 dsh `0.1.6-alpha.1`，使用 `v0.1.6-alpha.1` 标签发布并验证完整资产。
+正式 `v0.1.5` 保持不可变；当前版本跟随 dsh `0.1.6-alpha.2`，使用 `v0.1.6-alpha.2` 标签发布并验证完整资产。
 
 ## 核心架构
 
@@ -187,7 +187,7 @@ chmod +x HarnessDock-0.1.6-linux-x64.AppImage
 
 ## Release 规则
 
-`v0.1.6-alpha.1` 作为当前发布候选执行完整发布门禁；稳定 `v0.1.5` 不移动、不覆盖：
+`v0.1.6-alpha.2` 作为当前发布候选执行完整发布门禁；稳定 `v0.1.5` 不移动、不覆盖：
 
 1. 从 `release-manifest.json` 的精确上游 tag/commit 构建 official dsh source closure；
 2. 为 Windows / Linux / macOS 分别生成 sealed Runtime；
@@ -198,7 +198,7 @@ chmod +x HarnessDock-0.1.6-linux-x64.AppImage
 7. Windows 对同一 candidate SHA 再执行 packaged normal startup + writer-lock private Rescue 双重安装包门禁；
 8. 只有同一个 main SHA 上所有 required workflows 绿色，`release` 才允许组装资产、重新验证 sealed Runtime identity、校验 SHA-256 并发布 GitHub prerelease。
 
-当前 Runtime 精确固定到上游 `dsh-v0.1.6-alpha.1`。该版本已具备对应 npm tarball 与 integrity provenance，构建同时受不可变 Git tag/commit 约束。
+当前 Runtime 精确固定到上游 `dsh-v0.1.6-alpha.2`。上游已发布对应 `alpha.2` npm 包；HarnessDock 候选构建仍以不可变 Git tag/commit 为 Runtime 权威来源，npm provenance 可由 docs-sync 独立补齐。
 
 ## 开发
 

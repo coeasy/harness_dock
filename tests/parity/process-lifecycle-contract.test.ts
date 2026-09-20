@@ -65,9 +65,14 @@ describe('managed process lifecycle contract', () => {
     expect(platform).toContain('command.process_group(0)')
     expect(process).toContain('stop_process_group_after_parent_exit')
     expect(process).toContain('Err(poisoned) => poisoned.into_inner().is_empty()')
+    expect(process).toContain('matches!(child.try_wait(), Ok(Some(_)))')
+    const orderedStop = process.slice(process.indexOf('pub(crate) fn stop_registered_child'))
+    expect(orderedStop.indexOf('stop_child_tree(child)')).toBeGreaterThanOrEqual(0)
+    expect(orderedStop.indexOf('registration.terminate_descendants_after_parent_exit()')).toBeGreaterThan(
+      orderedStop.indexOf('stop_child_tree(child)'),
+    )
     expect(spawn).toContain('registration.terminate_descendants_after_parent_exit()')
-    expect(runtimeTypes).toContain('self.registration.terminate_tree()')
-    expect(runtimeTypes).toContain('process_control::stop_child_tree(&mut self.child)')
+    expect(runtimeTypes).toContain('process_control::stop_registered_child(&mut self.child, &self.registration)')
   })
 
   it('does not pin blocking-pool threads for watchdogs or Host Kernel replies', () => {
@@ -132,9 +137,11 @@ describe('managed process lifecycle contract', () => {
     const localOneClick = read('.github/workflows/local-one-click-build.yml')
 
     expect(smoke).toContain("$runtimeNodes = @($managedBeforeExit | Where-Object { $_.Name -ieq 'node.exe' })")
+    expect(smoke).toContain('$nodeBaseline = Get-NodePidBaseline')
     expect(smoke).toContain('$hostProcess.CloseMainWindow()')
     expect(smoke).toContain('Wait-InstalledProcessesGone $installDir 10')
-    expect(smoke).toContain('graceful HarnessDock exit left zero installed Runtime/Node/Host processes')
+    expect(smoke).toContain('Wait-NodeDeltaGone $nodeBaseline 10')
+    expect(smoke).toContain('zero post-baseline Node processes')
     expect(packaged).toContain('./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer')
     expect(localOneClick).toContain('./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer')
   })

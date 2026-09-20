@@ -65,3 +65,8 @@ jobs:
         if: steps.current.outputs.run == 'true'
         shell: pwsh
         run: ./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer -TimeoutSeconds 120 -BlockProfileWriter
+
+      - name: Prove packaged automatic quarantine recovers from a broken third-party plugin
+        if: steps.current.outputs.run == 'true'
+        shell: pwsh
+        run: ./scripts/smoke-windows-installer.ps1 -InstallerPath $env:installer -TimeoutSeconds 120 -InjectPluginFailure
