@@ -8,6 +8,7 @@
 
 use crate::{
     harness_window, reconciler,
+    startup_integration::{self, StartupEvent},
     startup_trace::{self, StartupPhase},
     AppState,
 };
@@ -99,6 +100,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
                 .unwrap_or(false);
 
             if claimed {
+                startup_integration::apply_app_event(app, StartupEvent::WebReady)?;
                 // Fail open to native window controls. If the normal page-load
                 // callback subsequently installs Harness Shell successfully it
                 // will switch decorations off again.
@@ -111,6 +113,7 @@ async fn reveal_clean_runtime_fallback(app: &AppHandle) -> Result<(), String> {
                     let _ = control.close();
                 }
                 harness_window::hide_splash(app);
+                startup_integration::apply_app_event(app, StartupEvent::Ready)?;
                 startup_trace::mark(StartupPhase::NativeFallback);
                 startup_trace::mark(StartupPhase::PrimaryVisible);
                 return Ok(());
@@ -128,6 +131,15 @@ pub(crate) fn spawn(app: AppHandle) {
         // the splash is presentation-only and is hidden only after the healthy
         // Harness surface is actually visible or a recovery surface takes over.
         harness_window::show_splash(&app, "正在启动 Harness Runtime…");
+        if let Err(error) = startup_integration::apply_app_event(&app, StartupEvent::SplashVisible)
+            .and_then(|_| {
+                startup_integration::apply_app_event(&app, StartupEvent::RuntimeStarting)
+            })
+        {
+            startup_trace::mark(StartupPhase::Recovery);
+            harness_window::show_startup_recovery(&app, &error);
+            return;
+        }
         let status = match reconciler::ensure_runtime_for_boot(app.clone()).await {
             Ok(status) => status,
             Err(error) => {
@@ -136,6 +148,13 @@ pub(crate) fn spawn(app: AppHandle) {
                 return;
             }
         };
+        if let Err(error) =
+            startup_integration::apply_app_event(&app, StartupEvent::RuntimeReady)
+        {
+            startup_trace::mark(StartupPhase::Recovery);
+            harness_window::show_startup_recovery(&app, &error);
+            return;
+        }
         harness_window::set_splash_status(&app, "Runtime 已就绪，正在准备 Harness Web…");
         let Some(url) = status.app_url else {
             startup_trace::mark(StartupPhase::Recovery);
@@ -145,6 +164,13 @@ pub(crate) fn spawn(app: AppHandle) {
             );
             return;
         };
+        if let Err(error) =
+            startup_integration::apply_app_event(&app, StartupEvent::WebRequested)
+        {
+            startup_trace::mark(StartupPhase::Recovery);
+            harness_window::show_startup_recovery(&app, &error);
+            return;
+        }
         startup_trace::mark(StartupPhase::WebviewRequested);
         harness_window::set_splash_status(&app, "正在打开 Harness Web…");
         if let Err(error) = harness_window::open_for_startup(app.clone(), url).await {

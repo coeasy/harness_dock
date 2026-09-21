@@ -1,45 +1,74 @@
-//! Integration helpers for migrating the existing startup flow to V3.
-//!
-//! The current startup coordinator remains responsible for Tauri/WebView
-//! operations. This module centralizes phase transitions so future migrations
-//! do not duplicate lifecycle bookkeeping.
+//! Typed integration boundary for the first-boot startup state machine.
 
-use crate::startup_orchestrator::{StartupOrchestrator, StartupPhase};
+use tauri::{AppHandle, Manager};
 
-pub(crate) fn mark_runtime_starting(orchestrator: &mut StartupOrchestrator) {
-    orchestrator.transition(StartupPhase::RuntimeStarting);
+use crate::{
+    startup_orchestrator::StartupOrchestrator,
+    AppState,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupEvent {
+    SplashVisible,
+    RuntimeStarting,
+    RuntimeReady,
+    WebRequested,
+    WebReady,
+    ShellAttached,
+    Ready,
+    Recovery,
 }
 
-pub(crate) fn mark_runtime_ready(orchestrator: &mut StartupOrchestrator) {
-    orchestrator.transition(StartupPhase::RuntimeReady);
-    orchestrator.metrics_mut().mark_runtime_ready();
+pub fn apply_event(
+    orchestrator: &mut StartupOrchestrator,
+    event: StartupEvent,
+) -> Result<(), String> {
+    match event {
+        StartupEvent::SplashVisible => orchestrator.mark_splash_visible(),
+        StartupEvent::RuntimeStarting => orchestrator.mark_runtime_starting(),
+        StartupEvent::RuntimeReady => orchestrator.mark_runtime_ready(),
+        StartupEvent::WebRequested => orchestrator.mark_web_requested(),
+        StartupEvent::WebReady => orchestrator.mark_web_ready(),
+        StartupEvent::ShellAttached => orchestrator.mark_shell_attached(),
+        StartupEvent::Ready => orchestrator.mark_ready(),
+        StartupEvent::Recovery => orchestrator.mark_recovery(),
+    }
 }
 
-pub(crate) fn mark_web_ready(orchestrator: &mut StartupOrchestrator) {
-    orchestrator.transition(StartupPhase::WebReady);
-    orchestrator.metrics_mut().mark_web_ready();
-}
-
-pub(crate) fn mark_ready(orchestrator: &mut StartupOrchestrator) {
-    orchestrator.transition(StartupPhase::Ready);
-    orchestrator.metrics_mut().mark_finished();
-}
-
-pub(crate) fn mark_recovery(orchestrator: &mut StartupOrchestrator) {
-    orchestrator.transition(StartupPhase::Recovery);
+pub(crate) fn apply_app_event(app: &AppHandle, event: StartupEvent) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut orchestrator = state
+        .startup_orchestrator
+        .lock()
+        .map_err(|_| "StartupOrchestrator lock poisoned".to_string())?;
+    apply_event(&mut orchestrator, event)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::startup_orchestrator::StartupPhase;
 
     #[test]
-    fn integration_updates_startup_phase() {
+    fn integration_drives_the_ordered_startup_path() {
         let mut state = StartupOrchestrator::default();
-        mark_runtime_starting(&mut state);
-        mark_runtime_ready(&mut state);
-        mark_web_ready(&mut state);
-        mark_ready(&mut state);
+        for event in [
+            StartupEvent::SplashVisible,
+            StartupEvent::RuntimeStarting,
+            StartupEvent::RuntimeReady,
+            StartupEvent::WebRequested,
+            StartupEvent::WebReady,
+            StartupEvent::Ready,
+        ] {
+            apply_event(&mut state, event).unwrap();
+        }
         assert_eq!(state.phase(), StartupPhase::Ready);
+    }
+
+    #[test]
+    fn integration_rejects_skipping_runtime_readiness() {
+        let mut state = StartupOrchestrator::default();
+        apply_event(&mut state, StartupEvent::SplashVisible).unwrap();
+        assert!(apply_event(&mut state, StartupEvent::WebRequested).is_err());
     }
 }
