@@ -14,6 +14,14 @@ fn collect_snapshot(app: &AppHandle) -> DiagnosticSnapshot {
         .runtime_supervisor
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let runtime_update = state
+        .runtime_update
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let plugins = state
+        .plugin_manager
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let startup = state
         .startup_orchestrator
         .lock()
@@ -23,7 +31,13 @@ fn collect_snapshot(app: &AppHandle) -> DiagnosticSnapshot {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    crate::diagnostic_service::snapshot(&runtime, &startup, &shutdown)
+    crate::diagnostic_service::snapshot(
+        &runtime,
+        &runtime_update,
+        &plugins,
+        &startup,
+        &shutdown,
+    )
 }
 
 #[tauri::command]

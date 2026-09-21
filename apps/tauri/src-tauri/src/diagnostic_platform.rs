@@ -8,6 +8,8 @@ pub struct DiagnosticSnapshot {
     pub runtime_healthy: bool,
     pub runtime_generation: Option<u64>,
     pub runtime_consecutive_failures: u32,
+    pub runtime_update: crate::runtime_update_v2::RuntimeUpdateSnapshot,
+    pub plugins: crate::plugin_manager_v2::PluginManagerSnapshot,
 
     pub startup_phase: String,
     pub startup_runtime_ready_ms: Option<u128>,
@@ -28,6 +30,8 @@ impl Default for DiagnosticSnapshot {
             runtime_healthy: false,
             runtime_generation: None,
             runtime_consecutive_failures: 0,
+            runtime_update: crate::runtime_update_v2::RuntimeUpdateSnapshot::default(),
+            plugins: crate::plugin_manager_v2::PluginManagerSnapshot::default(),
             startup_phase: "unknown".into(),
             startup_runtime_ready_ms: None,
             startup_web_ready_ms: None,

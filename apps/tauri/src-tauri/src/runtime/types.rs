@@ -48,6 +48,8 @@ pub struct OriginInfo {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeManifest {
     pub image_identity: Option<String>,
+    #[serde(default)]
+    pub dsh_version: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,8 +134,7 @@ impl RuntimeProcess {
     pub(crate) fn stop(&mut self) {
         if !self.stopped {
             self.stopped = true;
-            self.registration.terminate_tree();
-            process_control::stop_child_tree(&mut self.child);
+            process_control::stop_registered_child(&mut self.child, &self.registration);
         }
         let _ = fs::remove_dir_all(&self.work_dir);
     }

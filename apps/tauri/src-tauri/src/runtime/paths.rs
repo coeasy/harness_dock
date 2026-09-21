@@ -40,7 +40,8 @@ pub fn load_runtime_image(app: &AppHandle) -> Result<RuntimeImage, String> {
     // immutable metadata needed for generation binding, then spawn directly.
     // If an installed image is actually corrupt, Command::spawn/readiness will
     // fail through the normal recovery path instead of presenting a Node check.
-    let root = platform::node_cli_path(&resource_path(app, "dsh-runtime")?);
+    let root =
+        platform::node_cli_path(&crate::runtime_update_v2::resolve_active_runtime_root(app)?);
     let node = node_path(&root);
     let dsh = dsh_path(&root);
     let manifest_path = root.join("manifest.json");
@@ -55,11 +56,19 @@ pub fn load_runtime_image(app: &AppHandle) -> Result<RuntimeImage, String> {
         .image_identity
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "Runtime manifest 缺少 sealed imageIdentity。".to_string())?;
-    let origin: OriginInfo = serde_json::from_str(
-        &fs::read_to_string(&origin_path)
-            .map_err(|error| format!("无法读取 origin.json: {error}"))?,
-    )
-    .map_err(|error| format!("origin.json 无效: {error}"))?;
+    let origin = if let Some(dsh_version) = manifest
+        .dsh_version
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+    {
+        OriginInfo { dsh_version }
+    } else {
+        serde_json::from_str(
+            &fs::read_to_string(&origin_path)
+                .map_err(|error| format!("无法读取 origin.json: {error}"))?,
+        )
+        .map_err(|error| format!("origin.json 无效: {error}"))?
+    };
 
     Ok(RuntimeImage {
         root,

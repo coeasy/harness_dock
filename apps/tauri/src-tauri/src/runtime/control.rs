@@ -220,6 +220,17 @@ async fn start_impl(
         }
     };
     let degraded = process.safe_mode || !process.isolated_plugins.is_empty();
+    if let Ok(mut manager) = state.plugin_manager.lock() {
+        manager.observe_runtime(
+            process.ready.dsh_version.clone(),
+            generation.image_identity.clone(),
+            process.recovery_source.clone(),
+            process.safe_mode,
+            &process.isolated_plugins,
+            &process.suspected_plugins,
+            process.quarantine_expires_at,
+        );
+    }
     {
         let mut actor = state
             .runtime_actor
@@ -332,7 +343,11 @@ async fn restart_managed_mode(app: AppHandle, mode: RuntimeMode) -> Result<Runti
 
 #[tauri::command]
 pub fn runtime_clear_plugin_quarantine(app: AppHandle) -> Result<(), String> {
-    plugin_quarantine::clear(&quarantine_path(&app)?)
+    crate::plugin_manager_v2::clear_quarantine(&quarantine_path(&app)?)?;
+    if let Ok(mut manager) = app.state::<AppState>().plugin_manager.lock() {
+        manager.begin_recovery();
+    }
+    Ok(())
 }
 
 pub(crate) fn stop_managed(runtime: &Mutex<RuntimeActor>) {

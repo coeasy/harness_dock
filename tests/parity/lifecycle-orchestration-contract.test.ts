@@ -51,7 +51,12 @@ describe('production lifecycle orchestration contract', () => {
   it('exports diagnostics from the three real lifecycle state machines', () => {
     const diagnostics = read('apps/tauri/src-tauri/src/diagnostic_service.rs')
     expect(diagnostics).toContain('runtime.health().generation')
-    expect(diagnostics).toContain('startup.metrics()')
+    expect(diagnostics).toContain('.metrics()')
+    expect(diagnostics).toContain('.runtime_ready')
+    expect(diagnostics).toContain('.web_ready')
+    expect(diagnostics).toContain('.finished')
+    expect(diagnostics).toContain('runtime_update.snapshot()')
+    expect(diagnostics).toContain('plugins.snapshot()')
     expect(diagnostics).toContain('shutdown.report()')
     expect(diagnostics).toContain('shutdown_clean')
   })
