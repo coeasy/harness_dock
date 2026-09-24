@@ -66,8 +66,12 @@ describe('managed process lifecycle contract', () => {
     expect(process).toContain('stop_process_group_after_parent_exit')
     expect(process).toContain('Err(poisoned) => poisoned.into_inner().is_empty()')
     expect(spawn).toContain('registration.terminate_descendants_after_parent_exit()')
-    expect(runtimeTypes).toContain('self.registration.terminate_tree()')
-    expect(runtimeTypes).toContain('process_control::stop_child_tree(&mut self.child)')
+    expect(runtimeTypes).toContain(
+      'process_control::stop_registered_child(&mut self.child, &self.registration)',
+    )
+    expect(process).toContain('pub(crate) fn stop_registered_child(')
+    expect(process).toContain('registration.terminate_descendants_after_parent_exit()')
+    expect(process).toContain('registration.complete()')
   })
 
   it('does not pin blocking-pool threads for watchdogs or Host Kernel replies', () => {
