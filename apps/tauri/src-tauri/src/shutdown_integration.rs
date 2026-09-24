@@ -1,31 +1,50 @@
-//! Shutdown integration layer for Architecture V3.
-//!
-//! Keeps existing process ownership in supervisor/process modules while moving
-//! shutdown policy decisions into ShutdownManager.
+//! Typed integration boundary for shutdown state and diagnostics.
 
-use crate::shutdown_manager::{ShutdownManager, ShutdownPhase};
+use tauri::{AppHandle, Manager};
+
+use crate::{
+    shutdown_manager::{ShutdownManager, ShutdownPhase},
+    AppState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownEvent {
     Request,
     Freeze,
-    PluginsStopped,
-    RuntimeStopped,
-    ProcessesCleaned,
-    ResourcesReleased,
-    Completed,
+    StopPlugins,
+    StopRuntime,
+    CleanupProcesses,
+    ReleaseResources,
+    Complete { clean: bool },
+    ForceCleanup,
 }
 
-pub fn apply_event(manager: &mut ShutdownManager, event: ShutdownEvent) {
+pub fn apply_event(
+    manager: &mut ShutdownManager,
+    event: ShutdownEvent,
+) -> Result<(), String> {
     match event {
         ShutdownEvent::Request => manager.request(),
         ShutdownEvent::Freeze => manager.freeze(),
-        ShutdownEvent::PluginsStopped => manager.stop_plugins(),
-        ShutdownEvent::RuntimeStopped => manager.stop_runtime(),
-        ShutdownEvent::ProcessesCleaned => manager.cleanup_processes(),
-        ShutdownEvent::ResourcesReleased => manager.release_resources(),
-        ShutdownEvent::Completed => manager.complete(),
+        ShutdownEvent::StopPlugins => manager.stop_plugins(),
+        ShutdownEvent::StopRuntime => manager.stop_runtime(),
+        ShutdownEvent::CleanupProcesses => manager.cleanup_processes(),
+        ShutdownEvent::ReleaseResources => manager.release_resources(),
+        ShutdownEvent::Complete { clean } => manager.complete(clean),
+        ShutdownEvent::ForceCleanup => {
+            manager.force();
+            Ok(())
+        }
     }
+}
+
+pub(crate) fn apply_app_event(app: &AppHandle, event: ShutdownEvent) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut manager = state
+        .shutdown_manager
+        .lock()
+        .map_err(|_| "ShutdownManager lock poisoned".to_string())?;
+    apply_event(&mut manager, event)
 }
 
 pub fn should_force_exit(manager: &ShutdownManager) -> bool {
@@ -37,11 +56,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shutdown_event_flow_reaches_completion() {
+    fn integration_reaches_clean_completion() {
         let mut manager = ShutdownManager::default();
-        apply_event(&mut manager, ShutdownEvent::Request);
-        apply_event(&mut manager, ShutdownEvent::RuntimeStopped);
-        apply_event(&mut manager, ShutdownEvent::Completed);
+        for event in [
+            ShutdownEvent::Request,
+            ShutdownEvent::Freeze,
+            ShutdownEvent::StopPlugins,
+            ShutdownEvent::StopRuntime,
+            ShutdownEvent::CleanupProcesses,
+            ShutdownEvent::ReleaseResources,
+            ShutdownEvent::Complete { clean: true },
+        ] {
+            apply_event(&mut manager, event).unwrap();
+        }
         assert_eq!(manager.phase(), ShutdownPhase::Completed);
+        assert_eq!(manager.report().clean, Some(true));
     }
 }

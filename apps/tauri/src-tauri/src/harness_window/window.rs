@@ -152,6 +152,13 @@ pub async fn restart_harness_web_impl(
     }
 
     cancel_harness_load(&app);
+    if let Err(error) = crate::startup_integration::apply_app_event(
+        &app,
+        crate::startup_integration::StartupEvent::RuntimeStarting,
+    ) {
+        show_runtime_transition_error(&app, &error);
+        return Err(error);
+    }
     let reopen_epoch = app
         .state::<crate::AppState>()
         .surface_actor
@@ -181,6 +188,13 @@ pub async fn restart_harness_web_impl(
         show_runtime_transition_error(&app, &error);
         error
     })?;
+    if let Err(error) = crate::startup_integration::apply_app_event(
+        &app,
+        crate::startup_integration::StartupEvent::RuntimeReady,
+    ) {
+        show_runtime_transition_error(&app, &error);
+        return Err(error);
+    }
     let current_epoch = app
         .state::<crate::AppState>()
         .surface_actor
@@ -188,6 +202,13 @@ pub async fn restart_harness_web_impl(
         .map(|actor| actor.current_navigation().0)
         .unwrap_or_default();
     if current_epoch != reopen_epoch {
+        if let Err(error) = crate::startup_integration::apply_app_event(
+            &app,
+            crate::startup_integration::StartupEvent::WebRequested,
+        ) {
+            show_runtime_transition_error(&app, &error);
+            return Err(error);
+        }
         hide_primary_lifecycle_overlay(&app);
         hide_splash(&app);
         return Ok(status);
@@ -197,6 +218,13 @@ pub async fn restart_harness_web_impl(
         show_runtime_transition_error(&app, &error);
         return Err(error);
     };
+    if let Err(error) = crate::startup_integration::apply_app_event(
+        &app,
+        crate::startup_integration::StartupEvent::WebRequested,
+    ) {
+        show_runtime_transition_error(&app, &error);
+        return Err(error);
+    }
     set_primary_lifecycle_status(&app, "Runtime 已就绪，正在恢复 Harness Web…");
     harness_open_impl(app.clone(), url, false)
         .await

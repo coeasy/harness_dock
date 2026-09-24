@@ -46,9 +46,7 @@ pub fn launch_attempt(
     ) {
         Ok(ready) => ready,
         Err(error) => {
-            registration.terminate_tree();
-            process_control::stop_child_tree(&mut child);
-            registration.complete();
+            process_control::stop_registered_child(&mut child, &registration);
             return Err(error);
         }
     };
@@ -259,9 +257,10 @@ pub fn start_blocking(
         std::env::var("HARNESSDOCK_PLUGIN_RECOVERY").ok().as_deref() != Some("0");
     let quarantine_scope = launch_quarantine_scope(&launch);
     if recovery_enabled {
-        if let Some(quarantine) = plugin_quarantine::read(
+        if let Some(quarantine) = crate::plugin_manager_v2::load_quarantine(
             &quarantine_state_path,
             &image.origin.dsh_version,
+            &image.image_identity,
             &quarantine_scope,
         ) {
             let quarantine_file = dir.join("plugin-quarantine.patch.yml");
@@ -293,7 +292,7 @@ pub fn start_blocking(
                     return Ok(process);
                 }
                 Err(failure) => {
-                    let _ = plugin_quarantine::clear(&quarantine_state_path);
+                    let _ = crate::plugin_manager_v2::clear_quarantine(&quarantine_state_path);
                     if profile_writer_lock_failure(&failure) {
                         eprintln!(
                             "Quarantine startup hit the profile writer lock; switching directly to private Rescue Web."
@@ -418,9 +417,10 @@ pub fn start_blocking(
                 &quitting,
             ) {
                 Ok(mut process) => {
-                    let quarantine = plugin_quarantine::write(
+                    let quarantine = crate::plugin_manager_v2::persist_quarantine(
                         &quarantine_state_path,
                         &image.origin.dsh_version,
+                        &image.image_identity,
                         &quarantine_scope,
                         isolated.clone(),
                         suspected.clone(),

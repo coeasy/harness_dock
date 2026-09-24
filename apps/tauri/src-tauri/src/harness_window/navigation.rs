@@ -148,17 +148,19 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
         return;
     }
 
-    match window.eval(init_script()) {
+    let shell_attached = match window.eval(init_script()) {
         Ok(()) => {
             let _ = window.set_decorations(false);
             crate::startup_trace::mark(crate::startup_trace::StartupPhase::ShellReady);
+            true
         }
         Err(error) => {
             eprintln!("Unable to install Harness Shell; restoring native controls: {error}");
             let _ = window.set_decorations(true);
             crate::startup_trace::mark(crate::startup_trace::StartupPhase::NativeFallback);
+            false
         }
-    }
+    };
     let accepted = app
         .state::<crate::AppState>()
         .surface_actor
@@ -167,6 +169,24 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
         .unwrap_or(false);
     if !accepted {
         return;
+    }
+    if let Err(error) = crate::startup_integration::apply_app_event(
+        &app,
+        crate::startup_integration::StartupEvent::WebReady,
+    ) {
+        let _ = window.hide();
+        show_startup_recovery(&app, &error);
+        return;
+    }
+    if shell_attached {
+        if let Err(error) = crate::startup_integration::apply_app_event(
+            &app,
+            crate::startup_integration::StartupEvent::ShellAttached,
+        ) {
+            let _ = window.hide();
+            show_startup_recovery(&app, &error);
+            return;
+        }
     }
     if let Err(error) = window.show() {
         show_startup_recovery(&app, &format!("无法显示 Harness Web 窗口: {error}"));
@@ -178,6 +198,14 @@ pub fn finish_harness_load(window: &tauri::WebviewWindow<tauri::Wry>, loaded_url
         let _ = control.close();
     }
     hide_splash(&app);
+    if let Err(error) = crate::startup_integration::apply_app_event(
+        &app,
+        crate::startup_integration::StartupEvent::Ready,
+    ) {
+        let _ = window.hide();
+        show_startup_recovery(&app, &error);
+        return;
+    }
     crate::startup_trace::mark(crate::startup_trace::StartupPhase::PrimaryVisible);
 }
 

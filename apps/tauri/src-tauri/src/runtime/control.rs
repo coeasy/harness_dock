@@ -1,6 +1,15 @@
 //! Tauri commands and actor-facing lifecycle helpers for the Runtime.
 
 use super::*;
+use crate::runtime_supervisor_integration::{self, RuntimeEvent};
+
+fn supervisor_event(state: &AppState, event: RuntimeEvent) -> Result<(), String> {
+    let mut supervisor = state
+        .runtime_supervisor
+        .lock()
+        .map_err(|_| lock_err("RuntimeSupervisor"))?;
+    runtime_supervisor_integration::apply_event(&mut supervisor, event)
+}
 
 pub(crate) fn current_lease(state: &AppState) -> Option<RuntimeLease> {
     state.runtime_actor.lock().recover("RuntimeActor").lease()
@@ -17,14 +26,31 @@ pub fn mark_start_failed(state: &AppState, generation: u64, error: String) -> St
         .lock()
         .recover("RuntimeActor")
         .mark_failed(generation, error.clone());
+    if let Err(supervisor_error) =
+        supervisor_event(state, RuntimeEvent::StartFailed(generation))
+    {
+        eprintln!(
+            "Runtime supervisor rejected startup failure for generation {generation}: {supervisor_error}"
+        );
+    }
     error
 }
 
 pub(crate) fn status_snapshot(state: &AppState) -> RuntimeStatus {
     let mut actor = state.runtime_actor.lock().recover("RuntimeActor");
+    let generation = actor.generation_id();
     let reaped = actor.reap_if_dead();
     if let Some(mut process) = reaped {
         drop(actor);
+        if let Some(generation) = generation {
+            if let Err(error) =
+                supervisor_event(state, RuntimeEvent::ProcessExited(generation))
+            {
+                eprintln!(
+                    "Runtime supervisor rejected process-exit event for generation {generation}: {error}"
+                );
+            }
+        }
         process.stop();
         crate::gateway_host::stop_managed(&state.gateway);
         return phase_status(RuntimePhase::Stopped, None);
@@ -77,6 +103,16 @@ async fn start_impl(
             .map_err(|_| lock_err("RuntimeActor"))?;
         actor.begin_start(mode)?
     };
+    if let Err(error) =
+        supervisor_event(&*state, RuntimeEvent::StartRequested(generation.id))
+    {
+        state
+            .runtime_actor
+            .lock()
+            .recover("RuntimeActor")
+            .mark_failed(generation.id, error.clone());
+        return Err(error);
+    }
     let image = match load_runtime_image(&app) {
         Ok(image) => image,
         Err(error) => return Err(mark_start_failed(&*state, generation.id, error)),
@@ -89,17 +125,17 @@ async fn start_impl(
         let generation = match actor.bind_image(generation.id, image.image_identity.clone()) {
             Ok(generation) => generation,
             Err(error) => {
-                actor.mark_failed(generation.id, error.clone());
-                return Err(error);
+                drop(actor);
+                return Err(mark_start_failed(&*state, generation.id, error));
             }
         };
         if let Err(error) = actor.mark_starting(generation.id) {
-            actor.mark_failed(generation.id, error.clone());
-            return Err(error);
+            drop(actor);
+            return Err(mark_start_failed(&*state, generation.id, error));
         }
         if let Err(error) = actor.mark_probing(generation.id) {
-            actor.mark_failed(generation.id, error.clone());
-            return Err(error);
+            drop(actor);
+            return Err(mark_start_failed(&*state, generation.id, error));
         }
         generation
     };
@@ -173,6 +209,7 @@ async fn start_impl(
                 }
             }
         }
+        let _ = supervisor_event(&*state, RuntimeEvent::Stopped);
         return Err("Runtime generation was cancelled before publication".into());
     }
     let lease = match lease_from_process(generation.clone(), &process) {
@@ -183,6 +220,17 @@ async fn start_impl(
         }
     };
     let degraded = process.safe_mode || !process.isolated_plugins.is_empty();
+    if let Ok(mut manager) = state.plugin_manager.lock() {
+        manager.observe_runtime(
+            process.ready.dsh_version.clone(),
+            generation.image_identity.clone(),
+            process.recovery_source.clone(),
+            process.safe_mode,
+            &process.isolated_plugins,
+            &process.suspected_plugins,
+            process.quarantine_expires_at,
+        );
+    }
     {
         let mut actor = state
             .runtime_actor
@@ -195,6 +243,19 @@ async fn start_impl(
         if let Some(process) = actor.process() {
             process.registration.complete();
         }
+    }
+    if let Err(error) = supervisor_event(
+        &*state,
+        RuntimeEvent::Ready {
+            generation: generation.id,
+            degraded,
+        },
+    ) {
+        let _ = stop_impl(&*state);
+        return Err(format!(
+            "Runtime supervisor rejected ready generation {}: {error}",
+            generation.id
+        ));
     }
     startup_trace::mark(StartupPhase::RuntimeReady);
     let actor = state.runtime_actor.lock().recover("RuntimeActor");
@@ -220,6 +281,7 @@ pub(crate) async fn start_for_boot(app: AppHandle) -> Result<RuntimeStatus, Stri
 }
 
 pub fn stop_impl(state: &AppState) -> Result<RuntimeStatus, String> {
+    supervisor_event(state, RuntimeEvent::StopRequested)?;
     crate::gateway_host::stop_managed(&state.gateway);
     let process = {
         let mut actor = state
@@ -240,6 +302,7 @@ pub fn stop_impl(state: &AppState) -> Result<RuntimeStatus, String> {
         actor.settle_stopped();
     }
     crate::gateway_host::stop_managed(&state.gateway);
+    supervisor_event(state, RuntimeEvent::Stopped)?;
     Ok(phase_status(RuntimePhase::Stopped, None))
 }
 
@@ -280,7 +343,11 @@ async fn restart_managed_mode(app: AppHandle, mode: RuntimeMode) -> Result<Runti
 
 #[tauri::command]
 pub fn runtime_clear_plugin_quarantine(app: AppHandle) -> Result<(), String> {
-    plugin_quarantine::clear(&quarantine_path(&app)?)
+    crate::plugin_manager_v2::clear_quarantine(&quarantine_path(&app)?)?;
+    if let Ok(mut manager) = app.state::<AppState>().plugin_manager.lock() {
+        manager.begin_recovery();
+    }
+    Ok(())
 }
 
 pub(crate) fn stop_managed(runtime: &Mutex<RuntimeActor>) {

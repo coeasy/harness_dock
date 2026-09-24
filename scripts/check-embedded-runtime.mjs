@@ -14,6 +14,9 @@ const candidate = read('.github/workflows/tauri-candidate.yml')
 const tauriPackage = readJson('apps/tauri/package.json')
 const runtime = read('apps/tauri/src-tauri/src/runtime.rs')
 const runtimeActor = read('apps/tauri/src-tauri/src/runtime_actor.rs')
+const runtimeUpdateV2 = read('apps/tauri/src-tauri/src/runtime_update_v2.rs')
+const pluginManagerV2 = read('apps/tauri/src-tauri/src/plugin_manager_v2.rs')
+const pluginQuarantine = read('apps/tauri/src-tauri/src/plugin_quarantine.rs')
 const state = read('apps/tauri/src-tauri/src/state.rs')
 const processControl = read('apps/tauri/src-tauri/src/process.rs')
 const gatewayHost = read('apps/tauri/src-tauri/src/gateway_host.rs')
@@ -112,11 +115,28 @@ if (Object.prototype.hasOwnProperty.call(tauriPackage.scripts || {}, 'bundle:sid
 // binds the current generation to its immutable image identity. Repeating a
 // node.exe/bin.js preflight here would reintroduce the user-visible "checking
 // Node/runtime" startup path that the full offline package is designed to avoid.
-if (!/resource_path\(\s*&?app\s*,\s*"dsh-runtime"\s*\)/.test(runtime)) {
-  fail('native Runtime startup must resolve dsh-runtime from packaged resources')
+requireText(
+  runtime,
+  'runtime_update_v2::resolve_active_runtime_root',
+  'native Runtime startup must resolve its active sealed image through Runtime Update V2',
+)
+for (const marker of [
+  'RuntimeSlot::Bundled',
+  'slot-a',
+  'slot-b',
+  'resolve_active_runtime_root',
+  'image_identity',
+  'first_launch_runtime_download_required',
+]) {
+  requireText(runtimeUpdateV2, marker, `Runtime Update V2 sealed-slot contract missing ${marker}`)
 }
+requireText(
+  runtimeUpdateV2,
+  '"dsh-runtime"',
+  'Runtime Update V2 must retain the packaged dsh-runtime as the immutable bundled fallback root',
+)
 requireText(runtime, 'fn load_runtime_image(', 'native Runtime startup must load the packaged Runtime metadata without a Node preflight')
-requireText(runtime, 'image_identity', 'native Runtime startup must bind generations to the packaged image identity metadata')
+requireText(runtime, 'image_identity', 'native Runtime startup must bind generations to the selected sealed image identity metadata')
 for (const forbidden of [
   'fn verify_runtime_image(',
   '!node.is_file()',
@@ -148,6 +168,29 @@ for (const forbidden of ['resolve_system_node', 'HARNESSDOCK_USE_SYSTEM_NODE', '
   forbidText(runtime, forbidden, 'formal desktop Runtime must not fall back to a system Node installation')
 }
 forbidText(runtime, 'first-run Runtime download', 'native first-launch Runtime startup must not contain a Runtime download path')
+
+for (const marker of [
+  'PluginLifecycleState',
+  'Quarantined',
+  'Recovering',
+  'load_quarantine',
+  'persist_quarantine',
+]) {
+  requireText(pluginManagerV2, marker, `Plugin Manager V2 lifecycle contract missing ${marker}`)
+}
+for (const marker of [
+  'const SCHEMA_VERSION: u8 = 4',
+  'runtime_image_identity',
+  'record.dsh_version == dsh_version',
+  'record.runtime_image_identity == runtime_image_identity',
+]) {
+  requireText(pluginQuarantine, marker, `plugin quarantine exact-Runtime binding missing ${marker}`)
+}
+forbidText(
+  pluginManagerV2,
+  'remove_dir_all',
+  'Plugin Manager V2 must never delete user plugin/profile directories',
+)
 
 // RuntimeActor is the lifecycle source of truth. Transitional booleans may not
 // return as a second state machine.

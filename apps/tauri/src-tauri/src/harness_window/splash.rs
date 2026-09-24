@@ -148,6 +148,12 @@ pub fn show_control_surface(
 
 #[cfg(not(mobile))]
 pub(crate) fn show_startup_recovery(app: &AppHandle, error: &str) {
+    if let Err(state_error) = crate::startup_integration::apply_app_event(
+        app,
+        crate::startup_integration::StartupEvent::Recovery,
+    ) {
+        eprintln!("HarnessDock startup state rejected recovery event: {state_error}");
+    }
     let state = app.state::<crate::AppState>();
     if let Ok(mut recovery) = state.startup_recovery_error.lock() {
         *recovery = Some(error.to_string());

@@ -1,9 +1,9 @@
-//! Startup orchestration foundation.
+//! Strict first-boot startup state machine.
 //!
-//! This module intentionally sits beside the existing startup coordinator during
-//! migration. It separates lifecycle decisions from UI/runtime implementation so
-//! future startup paths (profiles, recovery, diagnostics) can share one state
-//! machine without changing RuntimeLease contracts.
+//! Runtime lifecycle/restarts are owned by RuntimeActor/RuntimeSupervisor.
+//! This orchestrator tracks only the first application boot through the point
+//! where the primary Harness surface becomes usable. Once Ready, later Runtime
+//! restarts/reloads do not rewrite startup metrics.
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -41,16 +41,18 @@ impl Default for StartupMetrics {
 }
 
 impl StartupMetrics {
-    pub fn mark_runtime_ready(&mut self) {
+    fn mark_runtime_ready(&mut self) {
         self.runtime_ready = Some(self.started_at.elapsed());
     }
 
-    pub fn mark_web_ready(&mut self) {
+    fn mark_web_ready(&mut self) {
         self.web_ready = Some(self.started_at.elapsed());
     }
 
-    pub fn mark_finished(&mut self) {
-        self.finished = Some(self.started_at.elapsed());
+    fn mark_finished(&mut self) {
+        if self.finished.is_none() {
+            self.finished = Some(self.started_at.elapsed());
+        }
     }
 }
 
@@ -74,16 +76,84 @@ impl StartupOrchestrator {
         self.phase
     }
 
-    pub fn transition(&mut self, next: StartupPhase) {
-        self.phase = next;
-    }
-
     pub fn metrics(&self) -> &StartupMetrics {
         &self.metrics
     }
 
-    pub fn metrics_mut(&mut self) -> &mut StartupMetrics {
-        &mut self.metrics
+    pub fn is_complete(&self) -> bool {
+        self.phase == StartupPhase::Ready
+    }
+
+    fn transition(&mut self, next: StartupPhase) -> Result<(), String> {
+        if self.phase == next {
+            return Ok(());
+        }
+        if self.is_complete() {
+            // Startup is a first-boot metric/state machine. Runtime restarts,
+            // refreshes and later recovery UI must not rewrite it.
+            return Ok(());
+        }
+
+        let valid = matches!(
+            (self.phase, next),
+            (StartupPhase::Boot, StartupPhase::SplashVisible)
+                | (StartupPhase::SplashVisible, StartupPhase::RuntimeStarting)
+                | (StartupPhase::RuntimeStarting, StartupPhase::RuntimeReady)
+                | (StartupPhase::RuntimeReady, StartupPhase::WebRequested)
+                | (StartupPhase::WebRequested, StartupPhase::WebReady)
+                | (StartupPhase::WebReady, StartupPhase::ShellAttached)
+                | (StartupPhase::WebReady, StartupPhase::Ready)
+                | (StartupPhase::ShellAttached, StartupPhase::Ready)
+                | (StartupPhase::Recovery, StartupPhase::RuntimeStarting)
+        ) || (next == StartupPhase::Recovery && self.phase != StartupPhase::Ready);
+
+        if !valid {
+            return Err(format!(
+                "invalid startup transition: {:?} -> {:?}",
+                self.phase, next
+            ));
+        }
+
+        self.phase = next;
+        match next {
+            StartupPhase::RuntimeReady => self.metrics.mark_runtime_ready(),
+            StartupPhase::WebReady => self.metrics.mark_web_ready(),
+            StartupPhase::Ready => self.metrics.mark_finished(),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn mark_splash_visible(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::SplashVisible)
+    }
+
+    pub fn mark_runtime_starting(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::RuntimeStarting)
+    }
+
+    pub fn mark_runtime_ready(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::RuntimeReady)
+    }
+
+    pub fn mark_web_requested(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::WebRequested)
+    }
+
+    pub fn mark_web_ready(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::WebReady)
+    }
+
+    pub fn mark_shell_attached(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::ShellAttached)
+    }
+
+    pub fn mark_ready(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::Ready)
+    }
+
+    pub fn mark_recovery(&mut self) -> Result<(), String> {
+        self.transition(StartupPhase::Recovery)
     }
 }
 
@@ -92,17 +162,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn startup_starts_from_boot() {
-        let state = StartupOrchestrator::default();
+    fn normal_startup_requires_ordered_transitions() {
+        let mut state = StartupOrchestrator::default();
+        state.mark_splash_visible().unwrap();
+        state.mark_runtime_starting().unwrap();
+        state.mark_runtime_ready().unwrap();
+        state.mark_web_requested().unwrap();
+        state.mark_web_ready().unwrap();
+        state.mark_shell_attached().unwrap();
+        state.mark_ready().unwrap();
+
+        assert_eq!(state.phase(), StartupPhase::Ready);
+        assert!(state.metrics().runtime_ready.is_some());
+        assert!(state.metrics().web_ready.is_some());
+        assert!(state.metrics().finished.is_some());
+    }
+
+    #[test]
+    fn invalid_transition_is_rejected() {
+        let mut state = StartupOrchestrator::default();
+        assert!(state.mark_ready().is_err());
         assert_eq!(state.phase(), StartupPhase::Boot);
     }
 
     #[test]
-    fn metrics_record_progress() {
-        let mut metrics = StartupMetrics::default();
-        metrics.mark_runtime_ready();
-        metrics.mark_finished();
-        assert!(metrics.runtime_ready.is_some());
-        assert!(metrics.finished.is_some());
+    fn recovery_can_retry_but_ready_is_terminal_for_startup_metrics() {
+        let mut state = StartupOrchestrator::default();
+        state.mark_recovery().unwrap();
+        state.mark_runtime_starting().unwrap();
+        state.mark_runtime_ready().unwrap();
+        state.mark_web_requested().unwrap();
+        state.mark_web_ready().unwrap();
+        state.mark_ready().unwrap();
+        let finished = state.metrics().finished;
+
+        state.mark_recovery().unwrap();
+        state.mark_runtime_starting().unwrap();
+        assert_eq!(state.phase(), StartupPhase::Ready);
+        assert_eq!(state.metrics().finished, finished);
     }
 }

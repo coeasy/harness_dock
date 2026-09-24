@@ -48,6 +48,8 @@ mod net;
 mod performance_metrics;
 mod platform;
 #[cfg(not(mobile))]
+mod plugin_manager_v2;
+#[cfg(not(mobile))]
 mod plugin_quarantine;
 #[cfg(not(mobile))]
 mod process;
@@ -63,6 +65,8 @@ mod runtime_recovery_policy;
 mod runtime_supervisor;
 #[cfg(not(mobile))]
 mod runtime_supervisor_integration;
+#[cfg(not(mobile))]
+mod runtime_update_v2;
 #[cfg(not(mobile))]
 mod service;
 #[cfg(not(mobile))]

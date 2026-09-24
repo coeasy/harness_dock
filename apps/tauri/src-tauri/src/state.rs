@@ -2,13 +2,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    gateway_host, host_kernel, performance_metrics, process, runtime_actor, runtime_supervisor,
-    shutdown_manager, startup_orchestrator, surface_actor, update_actor,
+    gateway_host, host_kernel, performance_metrics, plugin_manager_v2, process, runtime_actor,
+    runtime_supervisor, runtime_update_v2, shutdown_manager, startup_orchestrator, surface_actor,
+    update_actor,
 };
 
 pub(crate) struct AppState {
     pub(crate) runtime_actor: Mutex<runtime_actor::RuntimeActor>,
     pub(crate) runtime_supervisor: Mutex<runtime_supervisor::RuntimeSupervisor>,
+    pub(crate) runtime_update: Mutex<runtime_update_v2::RuntimeUpdateState>,
+    pub(crate) plugin_manager: Mutex<plugin_manager_v2::PluginManagerState>,
     pub(crate) startup_orchestrator: Mutex<startup_orchestrator::StartupOrchestrator>,
     pub(crate) shutdown_manager: Mutex<shutdown_manager::ShutdownManager>,
     pub(crate) performance_metrics: Mutex<performance_metrics::PerformanceMetrics>,
@@ -29,6 +32,8 @@ impl Default for AppState {
         Self {
             runtime_actor: Mutex::new(runtime_actor::RuntimeActor::default()),
             runtime_supervisor: Mutex::new(runtime_supervisor::RuntimeSupervisor::default()),
+            runtime_update: Mutex::new(runtime_update_v2::RuntimeUpdateState::default()),
+            plugin_manager: Mutex::new(plugin_manager_v2::PluginManagerState::default()),
             startup_orchestrator: Mutex::new(startup_orchestrator::StartupOrchestrator::default()),
             shutdown_manager: Mutex::new(shutdown_manager::ShutdownManager::default()),
             performance_metrics: Mutex::new(performance_metrics::PerformanceMetrics::default()),

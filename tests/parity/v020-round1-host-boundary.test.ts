@@ -56,7 +56,8 @@ describe('v0.2.0 Round 1 host boundaries', () => {
     const nodePrune = read('packages/client-runtime/src/node-runtime-prune.ts')
     const plan = read('docs/v0.2.0-architecture-five-round-final.md')
 
-    expect(check).toContain('resource_path')
+    expect(check).toContain('runtime_update_v2::resolve_active_runtime_root')
+    expect(check).toContain('RuntimeSlot::Bundled')
     expect(check).toContain('"dsh-runtime"')
     expect(check).toContain("firstLaunchRuntimeDownloadRequired = false")
     expect(finalPrune).toContain('firstLaunchRuntimeDownloadRequired = false')
