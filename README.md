@@ -2,11 +2,11 @@
 
 <img src="apps/tauri/src-tauri/icons/app-icon.png" width="112" alt="HarnessDock icon" />
 
-# HarnessDock v0.1.6
+# HarnessDock v0.1.7
 
 **DeepSeek Harness 的跨平台原生客户端**
 
-[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.6-alpha.1 发布说明](.github/release-notes/v0.1.6-alpha.1.md)
+[DeepSeek Harness 官方项目](https://github.com/deepseek-ai/deepseek-harness) · [下载最新版](https://github.com/coeasy/harness_dock/releases/latest) · [项目文档](docs/README.md) · [v0.1.7-rc.1 发布说明](.github/release-notes/v0.1.7-rc.1.md)
 
 </div>
 
@@ -16,16 +16,16 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| HarnessDock | `0.1.6` |
+| HarnessDock | `0.1.7` |
 | 发布通道 | `alpha`（预览版） |
-| 当前发布 tag | `v0.1.6-alpha.1` |
-| DeepSeek Harness Runtime | `dsh-v0.1.6-alpha.1` |
+| 当前发布 tag | `v0.1.7-rc.1` |
+| DeepSeek Harness Runtime | `dsh-v0.1.7-rc.1` |
 | Runtime commit | `0a15e36e7f82b6ed45af6fa9759f29b40dcd965d` |
 | 桌面宿主 | Tauri 2 |
 | 桌面 Runtime | Full / sealed / 首启零下载 |
 | 移动 Runtime | Remote Gateway only |
 
-正式 `v0.1.5` 保持不可变；当前版本跟随 dsh `0.1.6-alpha.1`，使用 `v0.1.6-alpha.1` 标签发布并验证完整资产。
+正式 `v0.1.5` 保持不可变；当前版本跟随 dsh `0.1.7-rc.1`，使用 `v0.1.7-rc.1` 标签发布并验证完整资产。
 
 ## 核心架构
 
@@ -50,7 +50,7 @@ Android / iOS 不在设备中启动 Node/dsh，只作为 Remote Gateway 客户�
 
 ## dsh Profile 启动
 
-从 `v0.1.6-alpha.1` 候选线开始，HarnessDock 不再把 Runtime profile 固定为不可配置的 `web`。在 **插件诊断 / Diagnostics → dsh 启动配置** 中可以设置：
+从 `v0.1.7-rc.1` 候选线开始，HarnessDock 不再把 Runtime profile 固定为不可配置的 `web`。在 **插件诊断 / Diagnostics → dsh 启动配置** 中可以设置：
 
 | 配置 | 说明 |
 | --- | --- |
@@ -147,7 +147,7 @@ HarnessDock 只在 Harness Web 外提供必要宿主能力：
 
 | 平台 | Release 资产 | Runtime 模式 |
 | --- | --- | --- |
-| Windows x64 | `HarnessDock-0.1.6-windows-x64-setup.exe` | Sealed local |
+| Windows x64 | `HarnessDock-0.1.7-windows-x64-setup.exe` | Sealed local |
 | Linux x64 | `.deb` / `.AppImage` | Sealed local |
 | macOS Apple Silicon | `macos-arm64.dmg` / `.app.tar.gz` | Sealed local |
 | macOS Intel | `macos-x64.dmg` / `.app.tar.gz` | Sealed local |
@@ -156,29 +156,29 @@ HarnessDock 只在 Harness Web 外提供必要宿主能力：
 
 ### Windows
 
-下载 `HarnessDock-0.1.6-windows-x64-setup.exe`，使用 PowerShell 校验：
+下载 `HarnessDock-0.1.7-windows-x64-setup.exe`，使用 PowerShell 校验：
 
 ```powershell
-Get-FileHash .\HarnessDock-0.1.6-windows-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\HarnessDock-0.1.7-windows-x64-setup.exe -Algorithm SHA256
 ```
 
 ### macOS
 
-Apple Silicon 选择 `HarnessDock-0.1.6-macos-arm64.dmg`，Intel 选择 `HarnessDock-0.1.6-macos-x64.dmg`。当前候选发布未 notarize，请只从本仓库 Release 下载并与 `SHA256SUMS` 对照。
+Apple Silicon 选择 `HarnessDock-0.1.7-macos-arm64.dmg`，Intel 选择 `HarnessDock-0.1.7-macos-x64.dmg`。当前候选发布未 notarize，请只从本仓库 Release 下载并与 `SHA256SUMS` 对照。
 
 ### Linux
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./HarnessDock-0.1.6-linux-x64.deb
+sudo apt install ./HarnessDock-0.1.7-linux-x64.deb
 ```
 
 AppImage：
 
 ```bash
-chmod +x HarnessDock-0.1.6-linux-x64.AppImage
-./HarnessDock-0.1.6-linux-x64.AppImage
+chmod +x HarnessDock-0.1.7-linux-x64.AppImage
+./HarnessDock-0.1.7-linux-x64.AppImage
 ```
 
 ### Android / iOS
@@ -187,7 +187,7 @@ chmod +x HarnessDock-0.1.6-linux-x64.AppImage
 
 ## Release 规则
 
-`v0.1.6-alpha.1` 作为当前发布候选执行完整发布门禁；稳定 `v0.1.5` 不移动、不覆盖：
+`v0.1.7-rc.1` 作为当前发布候选执行完整发布门禁；稳定 `v0.1.5` 不移动、不覆盖：
 
 1. 从 `release-manifest.json` 的精确上游 tag/commit 构建 official dsh source closure；
 2. 为 Windows / Linux / macOS 分别生成 sealed Runtime；
@@ -198,7 +198,7 @@ chmod +x HarnessDock-0.1.6-linux-x64.AppImage
 7. Windows 对同一 candidate SHA 再执行 packaged normal startup + writer-lock private Rescue 双重安装包门禁；
 8. 只有同一个 main SHA 上所有 required workflows 绿色，`release` 才允许组装资产、重新验证 sealed Runtime identity、校验 SHA-256 并发布 GitHub prerelease。
 
-当前 Runtime 精确固定到上游 `dsh-v0.1.6-alpha.1`。该版本已具备对应 npm tarball 与 integrity provenance，构建同时受不可变 Git tag/commit 约束。
+当前 Runtime 精确固定到上游 `dsh-v0.1.7-rc.1`。该版本已具备对应 npm tarball 与 integrity provenance，构建同时受不可变 Git tag/commit 约束。
 
 ## 开发
 
