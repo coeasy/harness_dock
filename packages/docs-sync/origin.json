@@ -1,11 +1,11 @@
 {
-  "dshVersion": "0.1.6-alpha.1",
-  "gitTag": "dsh-v0.1.6-alpha.1",
-  "gitCommit": "0a15e36e7f82b6ed45af6fa9759f29b40dcd965d",
+  "dshVersion": "0.2.2-rc.3",
+  "gitTag": "dsh-v0.2.2-rc.3",
+  "gitCommit": "38a6a5c965aa99ab525161efb7cc5cf1fe62fced",
   "npmPackage": "@deepseek-ai/dsh",
-  "npmIntegrity": "sha512-i6rIfIF2FEAINJY9TnihdFFuE1CfD/Htjcb7sqpYWujLrfkxwsFp8shyvAUz+Aj2yU28N0zd/HSxMaOnbRhoBw==",
-  "npmTarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.6-alpha.1.tgz",
-  "docsHash": "6e65435e65af939c98f89421d3c0907434b7b08be11517a49f4ea4f4b62a34a3",
-  "syncedAt": "2026-09-15T14:32:58.226Z",
+  "npmIntegrity": "sha512-S+4oUYVKWuc1SCMMp1mpUa2llxVy0o9gIgp7TDg/Ea7PuvXVkAfnykqSH1/oDXVB+y5VzEm0QIJulo1LIB3qRg==",
+  "npmTarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.2-rc.3.tgz",
+  "docsHash": "096fb05783311c2ac52e96c4241a9a5baffe45a57b34a5e283b7b9507f8f5cc8",
+  "syncedAt": "2026-11-14T09:40:45.111Z",
   "clientVersion": "0.1.6"
 }
